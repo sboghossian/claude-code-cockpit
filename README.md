@@ -4,7 +4,7 @@ A VSCode extension that surfaces Claude Code's hidden state directly in the edit
 
 > Sibling to [`claude-overlay`](https://github.com/sboghossian/claude-overlay) (macOS menubar, cross-surface). Cockpit is VSCode-native and focused on the Code surface.
 
-Landing page: [cockpit.dashable.dev](https://cockpit.dashable.dev)
+Landing page: [cockpit.dashable.dev](https://cockpit.dashable.dev) (or [claude-cockpit.pages.dev](https://claude-cockpit.pages.dev) while the custom domain CNAME propagates)
 
 ## What it does (Phase 1)
 
