@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CockpitSnapshot, snapshot, formatTokens } from './claudeData';
+import { CockpitSnapshot, snapshot, formatTokens, formatUsd } from './claudeData';
 import { logger } from './logger';
 
 interface InboundMessage {
@@ -13,11 +13,13 @@ interface InboundMessage {
     | 'openFile'
     | 'openSessionFile'
     | 'openProject'
-    | 'openProjectSession';
+    | 'openProjectSession'
+    | 'copySkill';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
   projectDir?: string;
+  skillName?: string;
 }
 
 export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
@@ -64,6 +66,18 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         outputTokensFormatted: formatTokens(snap.stats.outputTokens),
         cacheReadTokensFormatted: formatTokens(snap.stats.cacheReadTokens),
         cacheCreationTokensFormatted: formatTokens(snap.stats.cacheCreationTokens),
+        cost: {
+          ...snap.stats.cost,
+          totalUsdFormatted: formatUsd(snap.stats.cost.totalUsd),
+          inputUsdFormatted: formatUsd(snap.stats.cost.inputUsd),
+          outputUsdFormatted: formatUsd(snap.stats.cost.outputUsd),
+          cacheReadUsdFormatted: formatUsd(snap.stats.cost.cacheReadUsd),
+          cacheCreationUsdFormatted: formatUsd(snap.stats.cost.cacheCreationUsd),
+        },
+        subAgents: snap.stats.subAgents.map((a) => ({
+          ...a,
+          totalTokensFormatted: formatTokens(a.totalTokens),
+        })),
       },
       projects: snap.projects.map((p) => ({
         ...p,
@@ -127,6 +141,14 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       case 'openProjectSession':
         if (msg.projectDir) {
           this.openLatestJsonlInDir(msg.projectDir);
+        }
+        return;
+      case 'copySkill':
+        if (msg.skillName) {
+          const text = `/${msg.skillName}`;
+          void vscode.env.clipboard.writeText(text).then(() => {
+            void vscode.window.setStatusBarMessage(`Copied ${text}`, 1500);
+          });
         }
         return;
     }
