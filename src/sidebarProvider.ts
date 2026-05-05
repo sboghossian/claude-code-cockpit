@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CockpitSnapshot, snapshot, formatTokens, formatUsd } from './claudeData';
+import { CockpitSnapshot, snapshot, formatTokens, formatUsd, formatBytes } from './claudeData';
 import { logger } from './logger';
 
 interface InboundMessage {
@@ -66,6 +66,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         outputTokensFormatted: formatTokens(snap.stats.outputTokens),
         cacheReadTokensFormatted: formatTokens(snap.stats.cacheReadTokens),
         cacheCreationTokensFormatted: formatTokens(snap.stats.cacheCreationTokens),
+        costPerHourFormatted: formatUsd(snap.stats.costPerHourUsd),
         cost: {
           ...snap.stats.cost,
           totalUsdFormatted: formatUsd(snap.stats.cost.totalUsd),
@@ -83,6 +84,17 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         ...p,
         totalTokensFormatted: formatTokens(p.totalTokens),
       })),
+      today: {
+        ...snap.today,
+        totalTokensFormatted: formatTokens(snap.today.totalTokens),
+        totalUsdFormatted: formatUsd(snap.today.totalUsd),
+        perProject: snap.today.perProject.map((p) => ({
+          ...p,
+          tokensFormatted: formatTokens(p.tokens),
+          usdFormatted: formatUsd(p.usd),
+        })),
+      },
+      diskUsageBytesFormatted: formatBytes(snap.diskUsageBytes),
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
   }

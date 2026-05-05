@@ -1,6 +1,7 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
+  let lastSnapshot = null;
 
   function basename(p) {
     if (!p) return '';
@@ -142,15 +143,90 @@
   }
 
   function costSection(s) {
-    const c = s.cost || {};
+    const rate = s.costPerHourFormatted ? `<span class="cost-rate">${escapeHtml(s.costPerHourFormatted)}/hr</span>` : '';
     return `
-      <h2>Cost <span class="model-tag">${escapeHtml(s.modelFamily || 'unknown')}</span></h2>
+      <h2>Cost <span class="model-tag">${escapeHtml(s.modelFamily || 'unknown')}</span> ${rate}</h2>
       <div class="kv">
         <span class="k">Total</span><span class="v cost-total">${escapeHtml(s.cost.totalUsdFormatted)}</span>
         <span class="k">Input</span><span class="v">${escapeHtml(s.cost.inputUsdFormatted)}</span>
         <span class="k">Output</span><span class="v">${escapeHtml(s.cost.outputUsdFormatted)}</span>
         <span class="k">Cache read</span><span class="v">${escapeHtml(s.cost.cacheReadUsdFormatted)}</span>
         <span class="k">Cache write</span><span class="v">${escapeHtml(s.cost.cacheCreationUsdFormatted)}</span>
+      </div>
+    `;
+  }
+
+  function toolHistogramSection(s) {
+    const list = s.toolHistogram || [];
+    if (!list.length) return '';
+    const max = Math.max(...list.map((t) => t.count), 1);
+    const items = list
+      .slice(0, 12)
+      .map(
+        (t) => `
+        <li>
+          <div class="row">
+            <span class="left">${escapeHtml(t.tool)}</span>
+            <span class="right">${t.count}</span>
+          </div>
+          <div class="bar"><div class="bar-fill" style="width: ${((t.count / max) * 100).toFixed(1)}%"></div></div>
+        </li>`,
+      )
+      .join('');
+    return `<h2>Tool usage</h2><ul class="list bars">${items}</ul>`;
+  }
+
+  function activityFeedSection(s) {
+    const list = s.activityFeed || [];
+    if (!list.length) return '';
+    const items = list
+      .slice(0, 20)
+      .map((a) => {
+        const t = a.timestamp ? new Date(a.timestamp) : null;
+        const time = t && !isNaN(t.getTime())
+          ? t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          : '—';
+        return `<li>
+          <div class="row">
+            <span class="left activity-summary" title="${escapeHtml(a.summary)}">${escapeHtml(a.summary)}</span>
+            <span class="right activity-time">${escapeHtml(time)}</span>
+          </div>
+        </li>`;
+      })
+      .join('');
+    return `<h2>Recent activity</h2><ul class="list">${items}</ul>`;
+  }
+
+  function todaySection(snap) {
+    const t = snap.today;
+    if (!t || t.sessions === 0) return '';
+    const perProj = (t.perProject || [])
+      .slice(0, 8)
+      .map(
+        (p) => `<li>
+          <div class="row">
+            <span class="left">${escapeHtml(p.name)}</span>
+            <span class="right">${escapeHtml(p.tokensFormatted)} · ${escapeHtml(p.usdFormatted)}</span>
+          </div>
+        </li>`,
+      )
+      .join('');
+    return `
+      <h2>Today across all projects</h2>
+      <div class="today-pill">
+        <span><strong>${t.sessions}</strong> session${t.sessions === 1 ? '' : 's'}</span>
+        <span><strong>${escapeHtml(t.totalTokensFormatted)}</strong> tokens</span>
+        <span><strong>${escapeHtml(t.totalUsdFormatted)}</strong></span>
+      </div>
+      ${perProj ? `<ul class="list">${perProj}</ul>` : ''}
+    `;
+  }
+
+  function diskUsageSection(snap) {
+    return `
+      <h2>Disk usage</h2>
+      <div class="kv">
+        <span class="k">~/.claude/projects/</span><span class="v">${escapeHtml(snap.diskUsageBytesFormatted)}</span>
       </div>
     `;
   }
@@ -226,14 +302,32 @@
       return;
     }
     if (!snap.cwd) {
-      root.innerHTML = `
-        <div class="actions">
-          <button data-action="refresh">Refresh</button>
-        </div>
-        <p class="empty">No Claude Code sessions on this machine yet. Run <code>claude</code> anywhere to get started.</p>
-        ${skillsSection(snap)}
-        ${settingsSection(snap)}
+      const tabs = [
+        { id: 'now', label: 'Now' },
+        { id: 'skills', label: `Skills (${snap.skills.length})` },
+        { id: 'projects', label: `Projects (${snap.projects.length})` },
+        { id: 'config', label: 'Config' },
+      ];
+      const activeTab = getActiveTab();
+      const tabBar = `
+        <nav class="tabs" role="tablist">
+          ${tabs
+            .map(
+              (t) => `<button class="tab ${t.id === activeTab ? 'tab-active' : ''}" data-tab="${t.id}" role="tab">${escapeHtml(t.label)}</button>`,
+            )
+            .join('')}
+        </nav>
       `;
+      let body = '';
+      if (activeTab === 'skills') body = skillsSection(snap);
+      else if (activeTab === 'projects') body = projectsSection(snap);
+      else if (activeTab === 'config') body = `${settingsSection(snap)}${diskUsageSection(snap)}`;
+      else body = `
+        <div class="actions"><button data-action="refresh">Refresh</button></div>
+        <p class="empty">No Claude Code sessions on this machine yet. Run <code>claude</code> anywhere to get started.</p>
+        ${snap.today.sessions ? todaySection(snap) : ''}
+      `;
+      root.innerHTML = `${tabBar}<div class="tab-panel">${body}</div>`;
       bindEvents();
       return;
     }
@@ -280,32 +374,87 @@
           .join('')
       : '<li><span class="empty">No file edits yet.</span></li>';
 
-    root.innerHTML = `
-      ${pilotSection(snap)}
-      <div class="actions">
-        <button data-action="refresh">Refresh</button>
-        <button data-action="memory">Open MEMORY.md</button>
-        <button data-action="session">Open session</button>
-      </div>
-      <h2>Active session ${liveDot}</h2>
-      <div class="kv">
-        <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
-      </div>
-      ${tokens}
-      ${costSection(s)}
-      ${session}
-      ${subAgentsSection(s)}
+    const filesTouchedHtml = `
       <h2>Files touched (${s.filesTouched.length})</h2>
       <ul class="list">${fileItems}</ul>
-      ${memorySection(snap)}
-      ${skillsSection(snap)}
-      ${projectsSection(snap)}
-      ${settingsSection(snap)}
     `;
+
+    const tabs = [
+      { id: 'now', label: 'Now' },
+      { id: 'memory', label: `Memory (${snap.memory.length})` },
+      { id: 'skills', label: `Skills (${snap.skills.length})` },
+      { id: 'projects', label: `Projects (${snap.projects.length})` },
+      { id: 'config', label: 'Config' },
+    ];
+    const activeTab = getActiveTab();
+    const tabBar = `
+      <nav class="tabs" role="tablist">
+        ${tabs
+          .map(
+            (t) => `<button class="tab ${t.id === activeTab ? 'tab-active' : ''}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}">${escapeHtml(t.label)}</button>`,
+          )
+          .join('')}
+      </nav>
+    `;
+
+    let body = '';
+    if (activeTab === 'now') {
+      body = `
+        ${pilotSection(snap)}
+        <div class="actions">
+          <button data-action="refresh">Refresh</button>
+          <button data-action="memory">Open MEMORY.md</button>
+          <button data-action="session">Open session</button>
+        </div>
+        <h2>Active session ${liveDot}</h2>
+        <div class="kv">
+          <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
+        </div>
+        ${tokens}
+        ${costSection(s)}
+        ${session}
+        ${toolHistogramSection(s)}
+        ${subAgentsSection(s)}
+        ${activityFeedSection(s)}
+        ${filesTouchedHtml}
+        ${todaySection(snap)}
+      `;
+    } else if (activeTab === 'memory') {
+      body = memorySection(snap);
+    } else if (activeTab === 'skills') {
+      body = skillsSection(snap);
+    } else if (activeTab === 'projects') {
+      body = projectsSection(snap);
+    } else if (activeTab === 'config') {
+      body = `
+        ${settingsSection(snap)}
+        ${diskUsageSection(snap)}
+      `;
+    }
+
+    root.innerHTML = `${tabBar}<div class="tab-panel">${body}</div>`;
     bindEvents();
   }
 
+  function getActiveTab() {
+    const state = vscode.getState() || {};
+    return state.activeTab || 'now';
+  }
+
+  function setActiveTab(id) {
+    vscode.setState({ ...(vscode.getState() || {}), activeTab: id });
+  }
+
   function bindEvents() {
+    root.querySelectorAll('button[data-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-tab');
+        if (!id) return;
+        setActiveTab(id);
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
     root.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-action');
@@ -375,10 +524,15 @@
     });
   }
 
+  function onSnapshot(snap) {
+    lastSnapshot = snap;
+    render(snap);
+  }
+
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if (msg && msg.type === 'snapshot') {
-      render(msg.snapshot);
+      onSnapshot(msg.snapshot);
     }
   });
 

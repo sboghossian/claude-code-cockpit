@@ -29,6 +29,17 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 - [x] Enabled plugins panel
 - [x] Sessions are first-class, not workspace folders (v0.2.0 refactor)
 
+## v0.4.0 — DONE, shipped
+
+User asked for tabs + more features:
+
+- [x] **Tab system** — Now / Memory / Skills / Projects / Config. State persisted via `vscode.setState`/`getState`. Sticky tab bar at top.
+- [x] **Cost rate ($/hour)** — derived from cost / (lastActivity - startedAt). Shown as a small badge next to the model tag.
+- [x] **Tool histogram** — per-tool counts tracked in `readSession`, rendered as horizontal bar chart in the Now tab.
+- [x] **Today summary** — `computeToday()` walks `~/.claude/projects/<*>/*.jsonl` filtering by `mtimeMs >= today00:00`. Per-project breakdown.
+- [x] **Activity feed** — last 25 events (tool_use + messages) collected during readSession, displayed as monospace tail-style list.
+- [x] **Disk usage** — recursive walk of `~/.claude/projects/`, shown in Config tab.
+
 ## v0.3.0 — DONE, shipped
 
 All seven features built in one batch:

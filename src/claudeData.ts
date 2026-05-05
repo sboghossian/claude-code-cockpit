@@ -22,6 +22,27 @@ export interface SessionStats {
   cost: CostBreakdown;
   sparkline: SparklinePoint[];
   subAgents: SubAgentSummary[];
+  toolHistogram: ToolHistogramEntry[];
+  costPerHourUsd: number;
+  activityFeed: ActivityEntry[];
+}
+
+export interface ToolHistogramEntry {
+  tool: string;
+  count: number;
+}
+
+export interface ActivityEntry {
+  timestamp: string;
+  kind: 'message' | 'tool_use';
+  summary: string;
+}
+
+export interface TodaySummary {
+  sessions: number;
+  totalTokens: number;
+  totalUsd: number;
+  perProject: { name: string; sessions: number; tokens: number; usd: number }[];
 }
 
 export type ModelFamily = 'opus' | 'sonnet' | 'haiku' | 'unknown';
@@ -118,6 +139,8 @@ export interface CockpitSnapshot {
   settings: SettingsSummary;
   skills: SkillEntry[];
   pilot: PilotProfile | undefined;
+  today: TodaySummary;
+  diskUsageBytes: number;
 }
 
 const claudeHome = path.join(os.homedir(), '.claude', 'projects');
@@ -219,6 +242,9 @@ function emptyStatsFor(file: string | undefined): SessionStats {
     cost: { ...EMPTY_COST },
     sparkline: [],
     subAgents: [],
+    toolHistogram: [],
+    costPerHourUsd: 0,
+    activityFeed: [],
   };
 }
 
@@ -236,6 +262,8 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
   }
   const stats = { ...empty };
   const touches = new Map<string, FileTouch>();
+  const toolCounts = new Map<string, number>();
+  const activity: ActivityEntry[] = [];
   for (const line of raw.split('\n')) {
     const parsed = parseLine(line);
     if (!parsed) {
@@ -271,6 +299,15 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
           continue;
         }
         stats.toolCallCount += 1;
+        toolCounts.set(block.name, (toolCounts.get(block.name) ?? 0) + 1);
+        if (parsed.timestamp) {
+          const filePath = block.input?.file_path ?? block.input?.path;
+          activity.push({
+            timestamp: parsed.timestamp,
+            kind: 'tool_use',
+            summary: filePath ? `${block.name}: ${filePath}` : block.name,
+          });
+        }
         if (!FILE_TOOLS.has(block.name)) {
           continue;
         }
@@ -292,6 +329,12 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
           });
         }
       }
+    } else if ((parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
+      activity.push({
+        timestamp: parsed.timestamp,
+        kind: 'message',
+        summary: parsed.type === 'user' ? 'user message' : 'assistant message',
+      });
     }
   }
   stats.filesTouched = Array.from(touches.values()).sort(
@@ -311,8 +354,23 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
   if (stats.sessionId) {
     stats.subAgents = listSubAgents(file, stats.sessionId);
   }
+  stats.toolHistogram = Array.from(toolCounts.entries())
+    .map(([tool, count]) => ({ tool, count }))
+    .sort((a, b) => b.count - a.count);
+  stats.activityFeed = activity.slice(-25).reverse();
+  stats.costPerHourUsd = computeCostPerHour(stats);
   void cwd;
   return stats;
+}
+
+function computeCostPerHour(stats: SessionStats): number {
+  if (!stats.startedAt || !stats.lastActivityAt) return 0;
+  const start = new Date(stats.startedAt).getTime();
+  const end = new Date(stats.lastActivityAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+  const hours = (end - start) / 3_600_000;
+  if (hours < 1 / 60) return 0; // under one minute, rate is unstable
+  return stats.cost.totalUsd / hours;
 }
 
 export function readMemoryIndex(cwd: string): MemoryEntry[] {
@@ -814,6 +872,167 @@ function readAlwaysLiveSubdomains(memDir: string): string[] {
   return [];
 }
 
+// Today summary — sessions/tokens/cost touched today, across all projects.
+export function computeToday(): TodaySummary {
+  const empty: TodaySummary = {
+    sessions: 0,
+    totalTokens: 0,
+    totalUsd: 0,
+    perProject: [],
+  };
+  if (!fs.existsSync(claudeHome)) return empty;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const cutoff = todayStart.getTime();
+
+  let projects: string[];
+  try {
+    projects = fs.readdirSync(claudeHome);
+  } catch {
+    return empty;
+  }
+
+  const out: TodaySummary = { ...empty, perProject: [] };
+  for (const proj of projects) {
+    const dir = path.join(claudeHome, proj);
+    let stat;
+    try {
+      stat = fs.statSync(dir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      continue;
+    }
+    let projectSessions = 0;
+    let projectTokens = 0;
+    let projectUsd = 0;
+    for (const f of files) {
+      const full = path.join(dir, f);
+      let fStat;
+      try {
+        fStat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (fStat.mtimeMs < cutoff) continue;
+      const decoded = decodeProjectName(proj);
+      const s = readSessionLight(full);
+      if (s.totalTokens === 0 && s.messageCount === 0) continue;
+      projectSessions += 1;
+      projectTokens += s.totalTokens;
+      projectUsd += computeCost({
+        inputTokens: s.inputTokens,
+        outputTokens: s.outputTokens,
+        cacheReadTokens: s.cacheReadTokens,
+        cacheCreationTokens: s.cacheCreationTokens,
+        modelFamily: modelFamilyOf(s.lastModel),
+      }).totalUsd;
+      void decoded;
+    }
+    if (projectSessions > 0) {
+      out.sessions += projectSessions;
+      out.totalTokens += projectTokens;
+      out.totalUsd += projectUsd;
+      out.perProject.push({
+        name: path.basename(decodeProjectName(proj)) || proj,
+        sessions: projectSessions,
+        tokens: projectTokens,
+        usd: projectUsd,
+      });
+    }
+  }
+  out.perProject.sort((a, b) => b.usd - a.usd);
+  return out;
+}
+
+// Cheaper readSession variant for cross-project scans — skips activity feed,
+// sparkline, subagents, file-touch tracking.
+interface LightSession {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+  messageCount: number;
+  lastModel: string | undefined;
+}
+function readSessionLight(file: string): LightSession {
+  const out: LightSession = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    messageCount: 0,
+    lastModel: undefined,
+  };
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return out;
+  }
+  for (const line of raw.split('\n')) {
+    const parsed = parseLine(line);
+    if (!parsed) continue;
+    if (parsed.type === 'user' || parsed.type === 'assistant') out.messageCount += 1;
+    const usage = parsed.message?.usage;
+    if (usage) {
+      out.inputTokens += usage.input_tokens ?? 0;
+      out.outputTokens += usage.output_tokens ?? 0;
+      out.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+      out.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+    }
+    const m = parsed.message?.model;
+    if (typeof m === 'string') out.lastModel = m;
+  }
+  out.totalTokens =
+    out.inputTokens + out.outputTokens + out.cacheReadTokens + out.cacheCreationTokens;
+  return out;
+}
+
+// Disk usage — sum of all .jsonl files under ~/.claude/projects/.
+export function computeDiskUsage(): number {
+  if (!fs.existsSync(claudeHome)) return 0;
+  let total = 0;
+  function walk(dir: string): void {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e);
+      let stat;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(full);
+      } else if (stat.isFile()) {
+        total += stat.size;
+      }
+    }
+  }
+  walk(claudeHome);
+  return total;
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 // Memory search — fuzzy across MEMORY.md hooks plus memory file bodies.
 export function searchMemory(cwd: string, query: string, limit = 30): MemorySearchHit[] {
   const q = query.trim().toLowerCase();
@@ -950,6 +1169,8 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
   }
 
   const skills = listSkills();
+  const today = computeToday();
+  const diskUsageBytes = computeDiskUsage();
 
   if (!active) {
     return {
@@ -961,6 +1182,8 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
       settings,
       skills,
       pilot: undefined,
+      today,
+      diskUsageBytes,
     };
   }
 
@@ -976,6 +1199,8 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
     settings,
     skills,
     pilot,
+    today,
+    diskUsageBytes,
   };
 }
 
