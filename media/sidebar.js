@@ -97,20 +97,7 @@
         <div class="actions">
           <button data-action="refresh">Refresh</button>
         </div>
-        <p class="empty">No workspace folder open. Pick a project below or use <strong>File → Open Folder</strong>.</p>
-        ${projectsSection(snap)}
-        ${settingsSection(snap)}
-      `;
-      bindEvents();
-      return;
-    }
-    if (!snap.projectDir) {
-      root.innerHTML = `
-        <div class="actions">
-          <button data-action="refresh">Refresh</button>
-        </div>
-        <p class="empty">No Claude Code history for <code>${escapeHtml(snap.cwd)}</code> yet. Run <code>claude</code> here to get started.</p>
-        ${projectsSection(snap)}
+        <p class="empty">No Claude Code sessions on this machine yet. Run <code>claude</code> anywhere to get started.</p>
         ${settingsSection(snap)}
       `;
       bindEvents();
@@ -175,9 +162,9 @@
         <button data-action="memory">Open MEMORY.md</button>
         <button data-action="session">Open session</button>
       </div>
-      <h2>Workspace</h2>
+      <h2>Active session</h2>
       <div class="kv">
-        <span class="k">cwd</span><span class="v">${escapeHtml(snap.cwd)}</span>
+        <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
       </div>
       ${tokens}
       ${session}

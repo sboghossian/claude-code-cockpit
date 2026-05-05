@@ -415,10 +415,102 @@ const emptyStats: SessionStats = {
   lastActivityAt: undefined,
 };
 
+interface ActiveLocation {
+  sessionFile: string;
+  projectDir: string;
+  decodedPath: string;
+  mtime: number;
+}
+
+export function findGlobalActiveSession(): ActiveLocation | undefined {
+  if (!fs.existsSync(claudeHome)) {
+    return undefined;
+  }
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(claudeHome);
+  } catch {
+    return undefined;
+  }
+  let best: ActiveLocation | undefined;
+  for (const entry of entries) {
+    const dir = path.join(claudeHome, entry);
+    let stat;
+    try {
+      stat = fs.statSync(dir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) {
+      continue;
+    }
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      if (!f.endsWith('.jsonl')) {
+        continue;
+      }
+      const full = path.join(dir, f);
+      try {
+        const fStat = fs.statSync(full);
+        if (!fStat.isFile()) {
+          continue;
+        }
+        if (!best || fStat.mtimeMs > best.mtime) {
+          best = {
+            sessionFile: full,
+            projectDir: dir,
+            decodedPath: decodeProjectName(entry),
+            mtime: fStat.mtimeMs,
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return best;
+}
+
+function locationForCwd(cwd: string): ActiveLocation | undefined {
+  const dir = projectDirFor(cwd);
+  if (!fs.existsSync(dir)) {
+    return undefined;
+  }
+  const sessionFile = findActiveSession(cwd);
+  if (!sessionFile) {
+    return undefined;
+  }
+  let mtime = 0;
+  try {
+    mtime = fs.statSync(sessionFile).mtimeMs;
+  } catch {
+    /* fall through with mtime 0 */
+  }
+  return { sessionFile, projectDir: dir, decodedPath: cwd, mtime };
+}
+
 export function snapshot(cwd: string | undefined): CockpitSnapshot {
   const projects = listProjects();
   const settings = readGlobalSettings();
-  if (!cwd) {
+  const local = cwd ? locationForCwd(cwd) : undefined;
+  const global = findGlobalActiveSession();
+
+  // Pick whichever session has the more recent mtime — sessions are first
+  // class, not workspace folders. If a sub-agent in a different project just
+  // wrote, that's the active session even when a folder is open.
+  let active: ActiveLocation | undefined;
+  if (local && global) {
+    active = local.mtime >= global.mtime ? local : global;
+  } else {
+    active = local ?? global;
+  }
+
+  if (!active) {
     return {
       cwd: undefined,
       projectDir: undefined,
@@ -428,12 +520,17 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
       settings,
     };
   }
-  const dir = projectDirFor(cwd);
-  const projectDir = fs.existsSync(dir) ? dir : undefined;
-  const sessionFile = findActiveSession(cwd);
-  const stats = readSession(sessionFile, cwd);
-  const memory = readMemoryIndex(cwd);
-  return { cwd, projectDir, stats, memory, projects, settings };
+
+  const stats = readSession(active.sessionFile, active.decodedPath);
+  const memory = readMemoryIndex(active.decodedPath);
+  return {
+    cwd: active.decodedPath,
+    projectDir: active.projectDir,
+    stats,
+    memory,
+    projects,
+    settings,
+  };
 }
 
 export function formatTokens(n: number): string {
