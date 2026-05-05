@@ -52,9 +52,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // Initial paint of status bar.
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  status.update(cwd ? snapshot(cwd) : undefined);
+  status.update(snapshot(cwd));
 
   context.subscriptions.push({ dispose: () => status.dispose() });
   context.subscriptions.push({ dispose: () => logger.dispose() });

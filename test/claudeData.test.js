@@ -219,13 +219,27 @@ test('snapshot composes projectDir, stats and memory in one call', () => {
   assert.equal(snap.memory.length, 3);
 });
 
-test('snapshot returns undefined projectDir when nothing has been written for the cwd', () => {
+test('snapshot falls back to the globally active session when the cwd has none', () => {
+  // Sessions are first-class. With no JSONL for the requested cwd, snapshot
+  // should hand back whichever session was most recently touched globally.
   const ws = makeWorkspace('snapshot-empty');
   const snap = snapshot(ws.cwd);
-  assert.equal(snap.projectDir, undefined);
-  assert.equal(snap.stats.sessionFile, undefined);
-  assert.equal(snap.stats.totalTokens, 0);
-  assert.deepEqual(snap.memory, []);
+  assert.notEqual(snap.cwd, ws.cwd);
+  assert.notEqual(snap.stats.sessionFile, undefined);
+  assert.ok(snap.stats.totalTokens > 0);
+});
+
+test('snapshot prefers cwd session when its mtime is newer than the global one', () => {
+  const ws = makeWorkspace('snapshot-fresh');
+  const session = path.join(ws.projectDir, 'session.jsonl');
+  copyFixture('valid.jsonl', session);
+  // Bump the mtime forward so it beats whatever previous tests wrote.
+  const future = new Date(Date.now() + 60_000);
+  fs.utimesSync(session, future, future);
+  const snap = snapshot(ws.cwd);
+  assert.equal(snap.cwd, ws.cwd);
+  assert.equal(snap.projectDir, ws.projectDir);
+  assert.equal(snap.stats.sessionFile, session);
 });
 
 test('formatTokens formats raw, k, and M ranges', () => {

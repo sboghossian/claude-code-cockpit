@@ -1,13 +1,23 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { CockpitSnapshot, snapshot, formatTokens } from './claudeData';
 import { logger } from './logger';
 
 interface InboundMessage {
-  type: 'refresh' | 'openMemory' | 'openMemoryFile' | 'openFile' | 'openSessionFile';
+  type:
+    | 'refresh'
+    | 'openMemory'
+    | 'openMemoryFile'
+    | 'openFile'
+    | 'openSessionFile'
+    | 'openProject'
+    | 'openProjectSession';
   filename?: string;
   filePath?: string;
+  decodedPath?: string;
+  projectDir?: string;
 }
 
 export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
@@ -43,10 +53,6 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!cwd) {
-      this.view.webview.postMessage({ type: 'snapshot', snapshot: null });
-      return;
-    }
     const snap = snapshot(cwd);
     this.onSnapshot(snap);
     const payload = {
@@ -59,6 +65,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         cacheReadTokensFormatted: formatTokens(snap.stats.cacheReadTokens),
         cacheCreationTokensFormatted: formatTokens(snap.stats.cacheCreationTokens),
       },
+      projects: snap.projects.map((p) => ({
+        ...p,
+        totalTokensFormatted: formatTokens(p.totalTokens),
+      })),
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
   }
@@ -66,22 +76,20 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private watchActive(): void {
     this.watcher?.close();
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!cwd) {
-      return;
-    }
     const snap = snapshot(cwd);
-    if (!snap.projectDir) {
+    const target = snap.projectDir ?? path.join(os.homedir(), '.claude', 'projects');
+    if (!fs.existsSync(target)) {
       return;
     }
     try {
-      this.watcher = fs.watch(snap.projectDir, { recursive: true }, () => {
+      this.watcher = fs.watch(target, { recursive: true }, () => {
         if (this.debounce) {
           clearTimeout(this.debounce);
         }
         this.debounce = setTimeout(() => this.refresh(), 400);
       });
     } catch (err) {
-      logger.warn(`watch failed for ${snap.projectDir}: ${String(err)}`);
+      logger.warn(`watch failed for ${target}: ${String(err)}`);
     }
   }
 
@@ -107,6 +115,45 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           void vscode.window.showTextDocument(vscode.Uri.file(msg.filePath));
         }
         return;
+      case 'openProject':
+        if (msg.decodedPath) {
+          void vscode.commands.executeCommand(
+            'vscode.openFolder',
+            vscode.Uri.file(msg.decodedPath),
+            { forceNewWindow: true },
+          );
+        }
+        return;
+      case 'openProjectSession':
+        if (msg.projectDir) {
+          this.openLatestJsonlInDir(msg.projectDir);
+        }
+        return;
+    }
+  }
+
+  private openLatestJsonlInDir(dir: string): void {
+    if (!fs.existsSync(dir)) {
+      return;
+    }
+    let best: { file: string; mtime: number } | undefined;
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        if (!entry.endsWith('.jsonl')) {
+          continue;
+        }
+        const full = path.join(dir, entry);
+        const stat = fs.statSync(full);
+        if (!best || stat.mtimeMs > best.mtime) {
+          best = { file: full, mtime: stat.mtimeMs };
+        }
+      }
+    } catch (err) {
+      logger.warn(`openLatestJsonlInDir failed for ${dir}: ${String(err)}`);
+      return;
+    }
+    if (best) {
+      void vscode.window.showTextDocument(vscode.Uri.file(best.file));
     }
   }
 

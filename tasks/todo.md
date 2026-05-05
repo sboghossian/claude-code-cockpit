@@ -23,12 +23,13 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 
 ## Phase 2 — quick actions
 
-- [ ] Mode toggle (plan / auto / bypass / default)
-- [ ] Model swap dropdown
-- [ ] Session search across all projects
-- [ ] "Documents created this session" with click-to-open
-- [ ] MCP server health
-- [ ] Hooks inspector (last fire, last error)
+- [x] Cross-project sessions browser (also fixes empty-state when no folder open)
+- [x] MCP server names panel (read `~/.claude/settings.json` only — no `~/.claude.json` to avoid credential exposure)
+- [x] Hooks inspector — event types + count + command bin names
+- [x] Enabled plugins panel
+- [ ] Mode toggle (plan / auto / bypass / default) — needs human-gate per LeCun memory
+- [ ] Model swap dropdown — same gate
+- [ ] "Documents created this session" — capture Bash heredoc writes too
 - [ ] **Office panel** — embed paulrobello/claude-office pixel visualizer in a webview tab. Detect if backend is running on :8000 and frontend on :3000; show iframe or one-click launcher (`make dev-tmux` in `~/Documents/Code/claude-office`). The "boss + employees" theater is a great way to watch sub-agents live.
 
 ## Phase 3 — multi-session
