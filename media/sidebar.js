@@ -17,14 +17,103 @@
       .replace(/'/g, '&#39;');
   }
 
+  function fmtRelative(iso) {
+    if (!iso) return '—';
+    const t = new Date(iso).getTime();
+    if (isNaN(t)) return '—';
+    const diff = Date.now() - t;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  }
+
+  function projectsSection(snap) {
+    if (!snap.projects || snap.projects.length === 0) {
+      return '<h2>Recent projects</h2><p class="empty">No Claude Code history yet on this machine.</p>';
+    }
+    const items = snap.projects
+      .slice(0, 12)
+      .map((p) => {
+        const isActive = snap.cwd && p.decodedPath === snap.cwd;
+        return `
+        <li>
+          <div class="row">
+            <a class="left link" data-project-session="${escapeHtml(p.projectDir)}" data-project-path="${escapeHtml(p.decodedPath)}" title="${escapeHtml(p.decodedPath)}">
+              ${isActive ? '★ ' : ''}${escapeHtml(p.name)}
+            </a>
+            <span class="right">${escapeHtml(p.totalTokensFormatted)} · ${escapeHtml(fmtRelative(p.lastActivityAt))}</span>
+          </div>
+          <div style="color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 2px;">${p.sessionCount} session${p.sessionCount === 1 ? '' : 's'} · <a class="link" data-project-folder="${escapeHtml(p.decodedPath)}">open folder</a></div>
+        </li>`;
+      })
+      .join('');
+    return `<h2>Recent projects (${snap.projects.length})</h2><ul class="list">${items}</ul>`;
+  }
+
+  function settingsSection(snap) {
+    const s = snap.settings || {};
+    if (!s.settingsExists) {
+      return '';
+    }
+    const mcpItems = (s.mcpServerNames || []).length
+      ? s.mcpServerNames.map((n) => `<li>${escapeHtml(n)}</li>`).join('')
+      : '<li><span class="empty">No MCP servers configured.</span></li>';
+    const hookItems = (s.hooks || []).length
+      ? s.hooks
+          .map(
+            (h) => `<li>
+              <div class="row">
+                <span class="left">${escapeHtml(h.event)}</span>
+                <span class="right">${h.count}×</span>
+              </div>
+              <div style="color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 2px;">${(h.commands || []).map((c) => escapeHtml(c)).join(', ')}</div>
+            </li>`,
+          )
+          .join('')
+      : '<li><span class="empty">No hooks configured.</span></li>';
+    const pluginItems = (s.enabledPlugins || []).length
+      ? `<h2>Enabled plugins (${s.enabledPlugins.length})</h2><ul class="list">${s.enabledPlugins.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ul>`
+      : '';
+    return `
+      <h2>MCP servers (${(s.mcpServerNames || []).length})</h2>
+      <ul class="list">${mcpItems}</ul>
+      <h2>Hooks (${(s.hooks || []).length})</h2>
+      <ul class="list">${hookItems}</ul>
+      ${pluginItems}
+    `;
+  }
+
   function render(snap) {
     if (!snap) {
-      root.innerHTML = '<p class="empty">Open a folder to see Claude session data.</p>';
+      root.innerHTML = '<p class="empty">Loading…</p>';
+      return;
+    }
+    if (!snap.cwd) {
+      root.innerHTML = `
+        <div class="actions">
+          <button data-action="refresh">Refresh</button>
+        </div>
+        <p class="empty">No workspace folder open. Pick a project below or use <strong>File → Open Folder</strong>.</p>
+        ${projectsSection(snap)}
+        ${settingsSection(snap)}
+      `;
+      bindEvents();
       return;
     }
     if (!snap.projectDir) {
-      root.innerHTML =
-        '<p class="empty">No Claude Code history for this workspace yet. Run <code>claude</code> here to get started.</p>';
+      root.innerHTML = `
+        <div class="actions">
+          <button data-action="refresh">Refresh</button>
+        </div>
+        <p class="empty">No Claude Code history for <code>${escapeHtml(snap.cwd)}</code> yet. Run <code>claude</code> here to get started.</p>
+        ${projectsSection(snap)}
+        ${settingsSection(snap)}
+      `;
+      bindEvents();
       return;
     }
     const s = snap.stats;
@@ -96,8 +185,13 @@
       <ul class="list">${fileItems}</ul>
       <h2>Memory (${snap.memory.length})</h2>
       <ul class="list">${memoryItems}</ul>
+      ${projectsSection(snap)}
+      ${settingsSection(snap)}
     `;
+    bindEvents();
+  }
 
+  function bindEvents() {
     root.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-action');
@@ -116,6 +210,25 @@
     root.querySelectorAll('a[data-memory]').forEach((a) => {
       a.addEventListener('click', () => {
         vscode.postMessage({ type: 'openMemoryFile', filename: a.getAttribute('data-memory') });
+      });
+    });
+
+    root.querySelectorAll('a[data-project-session]').forEach((a) => {
+      a.addEventListener('click', () => {
+        vscode.postMessage({
+          type: 'openProjectSession',
+          projectDir: a.getAttribute('data-project-session'),
+        });
+      });
+    });
+
+    root.querySelectorAll('a[data-project-folder]').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        e.stopPropagation();
+        vscode.postMessage({
+          type: 'openProject',
+          decodedPath: a.getAttribute('data-project-folder'),
+        });
       });
     });
   }

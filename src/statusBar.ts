@@ -22,8 +22,13 @@ export function createStatusBar(): StatusBar {
 
   return {
     update(snap) {
-      if (!snap) {
-        cwdItem.hide();
+      if (!snap || !snap.cwd) {
+        if (snap && snap.projects.length > 0) {
+          cwdItem.text = `$(folder) ${snap.projects.length} projects`;
+          cwdItem.show();
+        } else {
+          cwdItem.hide();
+        }
         tokenItem.hide();
         filesItem.hide();
         return;
