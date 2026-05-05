@@ -16,6 +16,60 @@ export interface SessionStats {
   messageCount: number;
   startedAt: string | undefined;
   lastActivityAt: string | undefined;
+  lastModel: string | undefined;
+  modelFamily: ModelFamily;
+  isActive: boolean;
+  cost: CostBreakdown;
+  sparkline: SparklinePoint[];
+  subAgents: SubAgentSummary[];
+}
+
+export type ModelFamily = 'opus' | 'sonnet' | 'haiku' | 'unknown';
+
+export interface CostBreakdown {
+  inputUsd: number;
+  outputUsd: number;
+  cacheReadUsd: number;
+  cacheCreationUsd: number;
+  totalUsd: number;
+}
+
+export interface SparklinePoint {
+  minute: number;
+  tokens: number;
+}
+
+export interface SubAgentSummary {
+  agentId: string;
+  jsonlFile: string;
+  totalTokens: number;
+  toolCallCount: number;
+  messageCount: number;
+  lastActivityAt: string | undefined;
+  lastActivityMs: number;
+}
+
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: 'user' | 'plugin';
+  pluginName: string | undefined;
+}
+
+export interface PilotProfile {
+  name: string;
+  role: string | undefined;
+  principles: string[];
+  oneLiner: string | undefined;
+  alwaysLive: string[];
+  sourceFile: string;
+}
+
+export interface MemorySearchHit {
+  filename: string;
+  title: string;
+  hook: string;
+  matchSnippet: string | undefined;
 }
 
 export interface FileTouch {
@@ -62,6 +116,8 @@ export interface CockpitSnapshot {
   memory: MemoryEntry[];
   projects: ProjectSummary[];
   settings: SettingsSummary;
+  skills: SkillEntry[];
+  pilot: PilotProfile | undefined;
 }
 
 const claudeHome = path.join(os.homedir(), '.claude', 'projects');
@@ -116,6 +172,7 @@ interface SessionLine {
   timestamp?: string;
   sessionId?: string;
   message?: {
+    model?: string;
     usage?: UsageBlock;
     content?: ContentBlock[] | string;
   };
@@ -134,8 +191,16 @@ function parseLine(raw: string): SessionLine | undefined {
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
-export function readSession(file: string | undefined, cwd: string): SessionStats {
-  const empty: SessionStats = {
+const EMPTY_COST: CostBreakdown = {
+  inputUsd: 0,
+  outputUsd: 0,
+  cacheReadUsd: 0,
+  cacheCreationUsd: 0,
+  totalUsd: 0,
+};
+
+function emptyStatsFor(file: string | undefined): SessionStats {
+  return {
     sessionFile: file,
     sessionId: undefined,
     inputTokens: 0,
@@ -148,7 +213,17 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
     messageCount: 0,
     startedAt: undefined,
     lastActivityAt: undefined,
+    lastModel: undefined,
+    modelFamily: 'unknown',
+    isActive: false,
+    cost: { ...EMPTY_COST },
+    sparkline: [],
+    subAgents: [],
   };
+}
+
+export function readSession(file: string | undefined, cwd: string): SessionStats {
+  const empty = emptyStatsFor(file);
   if (!file || !fs.existsSync(file)) {
     return empty;
   }
@@ -185,6 +260,10 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
       stats.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
       stats.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
     }
+    const model = parsed.message?.model;
+    if (typeof model === 'string') {
+      stats.lastModel = model;
+    }
     const content = parsed.message?.content;
     if (Array.isArray(content)) {
       for (const block of content) {
@@ -220,6 +299,18 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
   );
   stats.totalTokens =
     stats.inputTokens + stats.outputTokens + stats.cacheReadTokens + stats.cacheCreationTokens;
+  stats.modelFamily = modelFamilyOf(stats.lastModel);
+  stats.cost = computeCost(stats);
+  try {
+    const fStat = fs.statSync(file);
+    stats.isActive = Date.now() - fStat.mtimeMs < 10_000;
+  } catch {
+    stats.isActive = false;
+  }
+  stats.sparkline = computeSparkline(file);
+  if (stats.sessionId) {
+    stats.subAgents = listSubAgents(file, stats.sessionId);
+  }
   void cwd;
   return stats;
 }
@@ -400,20 +491,368 @@ export function readGlobalSettings(): SettingsSummary {
   };
 }
 
-const emptyStats: SessionStats = {
-  sessionFile: undefined,
-  sessionId: undefined,
-  inputTokens: 0,
-  outputTokens: 0,
-  cacheReadTokens: 0,
-  cacheCreationTokens: 0,
-  totalTokens: 0,
-  filesTouched: [],
-  toolCallCount: 0,
-  messageCount: 0,
-  startedAt: undefined,
-  lastActivityAt: undefined,
+// === v0.3.0 additions =====================================================
+
+// Cost tracker. Prices in USD per million tokens, current as of 2026-05.
+// Refresh against https://www.anthropic.com/pricing if these go stale.
+const PRICING: Record<ModelFamily, {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}> = {
+  opus: { input: 15, output: 75, cacheRead: 1.5, cacheCreation: 18.75 },
+  sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheCreation: 3.75 },
+  haiku: { input: 0.8, output: 4, cacheRead: 0.08, cacheCreation: 1 },
+  unknown: { input: 15, output: 75, cacheRead: 1.5, cacheCreation: 18.75 },
 };
+
+export function modelFamilyOf(model: string | undefined): ModelFamily {
+  if (!model) return 'unknown';
+  const m = model.toLowerCase();
+  if (m.includes('opus')) return 'opus';
+  if (m.includes('sonnet')) return 'sonnet';
+  if (m.includes('haiku')) return 'haiku';
+  return 'unknown';
+}
+
+export function computeCost(
+  stats: Pick<
+    SessionStats,
+    'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'modelFamily'
+  >,
+): CostBreakdown {
+  const rate = PRICING[stats.modelFamily];
+  const inputUsd = (stats.inputTokens / 1_000_000) * rate.input;
+  const outputUsd = (stats.outputTokens / 1_000_000) * rate.output;
+  const cacheReadUsd = (stats.cacheReadTokens / 1_000_000) * rate.cacheRead;
+  const cacheCreationUsd = (stats.cacheCreationTokens / 1_000_000) * rate.cacheCreation;
+  return {
+    inputUsd,
+    outputUsd,
+    cacheReadUsd,
+    cacheCreationUsd,
+    totalUsd: inputUsd + outputUsd + cacheReadUsd + cacheCreationUsd,
+  };
+}
+
+export function formatUsd(n: number): string {
+  if (n < 0.01) return '<$0.01';
+  if (n < 1) return `$${n.toFixed(2)}`;
+  if (n < 100) return `$${n.toFixed(2)}`;
+  return `$${Math.round(n)}`;
+}
+
+// Sparkline. Bucket the last 60 minutes by minute, count tokens per bucket.
+export function computeSparkline(file: string): SparklinePoint[] {
+  if (!fs.existsSync(file)) return [];
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const buckets = new Map<number, number>();
+  for (const line of raw.split('\n')) {
+    const parsed = parseLine(line);
+    if (!parsed?.timestamp) continue;
+    const ts = new Date(parsed.timestamp).getTime();
+    if (Number.isNaN(ts)) continue;
+    const ageMin = Math.floor((now - ts) / 60_000);
+    if (ageMin < 0 || ageMin > 59) continue;
+    const usage = parsed.message?.usage;
+    if (!usage) continue;
+    const t =
+      (usage.input_tokens ?? 0) +
+      (usage.output_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0);
+    if (t === 0) continue;
+    buckets.set(ageMin, (buckets.get(ageMin) ?? 0) + t);
+  }
+  const points: SparklinePoint[] = [];
+  for (let m = 59; m >= 0; m--) {
+    points.push({ minute: m, tokens: buckets.get(m) ?? 0 });
+  }
+  return points;
+}
+
+// Sub-agents live at <projectDir>/<sessionId>/subagents/*.jsonl
+export function listSubAgents(sessionFile: string, sessionId: string): SubAgentSummary[] {
+  const dir = path.join(path.dirname(sessionFile), sessionId, 'subagents');
+  if (!fs.existsSync(dir)) return [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: SubAgentSummary[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.jsonl')) continue;
+    const full = path.join(dir, entry);
+    let stat;
+    try {
+      stat = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    let raw: string;
+    try {
+      raw = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    let totalTokens = 0;
+    let toolCallCount = 0;
+    let messageCount = 0;
+    let lastActivityAt: string | undefined;
+    for (const line of raw.split('\n')) {
+      const parsed = parseLine(line);
+      if (!parsed) continue;
+      if (parsed.type === 'user' || parsed.type === 'assistant') messageCount += 1;
+      if (parsed.timestamp) lastActivityAt = parsed.timestamp;
+      const usage = parsed.message?.usage;
+      if (usage) {
+        totalTokens +=
+          (usage.input_tokens ?? 0) +
+          (usage.output_tokens ?? 0) +
+          (usage.cache_read_input_tokens ?? 0) +
+          (usage.cache_creation_input_tokens ?? 0);
+      }
+      const content = parsed.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_use') toolCallCount += 1;
+        }
+      }
+    }
+    out.push({
+      agentId: entry.replace(/\.jsonl$/, ''),
+      jsonlFile: full,
+      totalTokens,
+      toolCallCount,
+      messageCount,
+      lastActivityAt,
+      lastActivityMs: stat.mtimeMs,
+    });
+  }
+  out.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  return out;
+}
+
+// Skill palette. Reads ~/.claude/skills/<name>/SKILL.md plus plugin caches.
+const skillsDir = path.join(os.homedir(), '.claude', 'skills');
+const pluginsCacheDir = path.join(os.homedir(), '.claude', 'plugins', 'cache');
+
+function parseFrontmatter(raw: string): Record<string, string> {
+  const m = /^---\s*\n([\s\S]*?)\n---/m.exec(raw);
+  if (!m) return {};
+  const out: Record<string, string> = {};
+  const lines = m[1].split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const idx = line.indexOf(':');
+    if (idx < 0) {
+      i += 1;
+      continue;
+    }
+    const key = line.slice(0, idx).trim();
+    let val = line.slice(idx + 1).trim();
+    if (!key) {
+      i += 1;
+      continue;
+    }
+    // YAML block scalar (| or >) — gather indented continuation lines.
+    if (val === '|' || val === '>' || val === '|-' || val === '>-') {
+      const folded = val.startsWith('>');
+      const collected: string[] = [];
+      i += 1;
+      while (i < lines.length && /^\s+/.test(lines[i])) {
+        collected.push(lines[i].replace(/^\s+/, ''));
+        i += 1;
+      }
+      out[key] = folded ? collected.join(' ').trim() : collected.join('\n').trim();
+      continue;
+    }
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    out[key] = val;
+    i += 1;
+  }
+  return out;
+}
+
+function collectSkillsFrom(
+  dir: string,
+  source: 'user' | 'plugin',
+  pluginName: string | undefined,
+  out: SkillEntry[],
+): void {
+  if (!fs.existsSync(dir)) return;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const skillFile = path.join(dir, entry, 'SKILL.md');
+    if (!fs.existsSync(skillFile)) continue;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(skillFile, 'utf8');
+    } catch {
+      continue;
+    }
+    const fm = parseFrontmatter(raw);
+    const name = fm.name || entry;
+    const description = fm.description || '';
+    out.push({ name, description, source, pluginName });
+  }
+}
+
+export function listSkills(): SkillEntry[] {
+  const out: SkillEntry[] = [];
+  collectSkillsFrom(skillsDir, 'user', undefined, out);
+  if (fs.existsSync(pluginsCacheDir)) {
+    let plugins: string[];
+    try {
+      plugins = fs.readdirSync(pluginsCacheDir);
+    } catch {
+      plugins = [];
+    }
+    for (const plugin of plugins) {
+      collectSkillsFrom(
+        path.join(pluginsCacheDir, plugin, 'skills'),
+        'plugin',
+        plugin,
+        out,
+      );
+    }
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+// Pilot profile. Auto-detect <user>_claude.md in active session memory dir,
+// extract identity + principles + always-live subdomains.
+export function readPilotProfile(cwd: string): PilotProfile | undefined {
+  const memDir = path.join(projectDirFor(cwd), 'memory');
+  if (!fs.existsSync(memDir)) return undefined;
+
+  let memFiles: string[];
+  try {
+    memFiles = fs.readdirSync(memDir);
+  } catch {
+    return undefined;
+  }
+  const claudeFile = memFiles.find((f) => /_claude\.md$/.test(f));
+  if (!claudeFile) return undefined;
+
+  const claudePath = path.join(memDir, claudeFile);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(claudePath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  const fm = parseFrontmatter(raw);
+  const username = claudeFile.replace(/_claude\.md$/, '');
+  const name = (fm.name || username).split(/['']s\s+/i)[0].trim();
+
+  const principles: string[] = [];
+  const principleRegex = /^\s*\d+\.\s+\*\*([^*]+?)\*\*\.?\s*(.*)$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = principleRegex.exec(raw)) !== null) {
+    const headline = match[1].trim();
+    if (headline) principles.push(headline);
+  }
+
+  let oneLiner: string | undefined;
+  const quoteMatch = /^"([^"]{4,200})"\s*$/m.exec(raw);
+  if (quoteMatch) oneLiner = quoteMatch[1];
+
+  const alwaysLive = readAlwaysLiveSubdomains(memDir);
+
+  return {
+    name: capitalize(name) || capitalize(username),
+    role: fm.description || undefined,
+    principles,
+    oneLiner,
+    alwaysLive,
+    sourceFile: claudePath,
+  };
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function readAlwaysLiveSubdomains(memDir: string): string[] {
+  const candidates = ['project_always_live_subdomains.md', 'always_live_subdomains.md'];
+  for (const c of candidates) {
+    const full = path.join(memDir, c);
+    if (!fs.existsSync(full)) continue;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    const found: string[] = [];
+    for (const line of raw.split('\n')) {
+      const m = /^\s*-\s+([a-z0-9-]+(?:\.[a-z0-9-]+)+)\s*$/i.exec(line);
+      if (m) found.push(m[1]);
+    }
+    if (found.length) return found;
+  }
+  return [];
+}
+
+// Memory search — fuzzy across MEMORY.md hooks plus memory file bodies.
+export function searchMemory(cwd: string, query: string, limit = 30): MemorySearchHit[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const memDir = path.join(projectDirFor(cwd), 'memory');
+  const index = readMemoryIndex(cwd);
+  const hits: MemorySearchHit[] = [];
+  for (const entry of index) {
+    const inIndex = entry.title.toLowerCase().includes(q) || entry.hook.toLowerCase().includes(q);
+    let snippet: string | undefined;
+    let inBody = false;
+    const filePath = path.join(memDir, entry.filename);
+    if (fs.existsSync(filePath)) {
+      try {
+        const body = fs.readFileSync(filePath, 'utf8');
+        const idx = body.toLowerCase().indexOf(q);
+        if (idx >= 0) {
+          inBody = true;
+          const start = Math.max(0, idx - 40);
+          const end = Math.min(body.length, idx + q.length + 80);
+          snippet = body.slice(start, end).replace(/\s+/g, ' ').trim();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (inIndex || inBody) {
+      hits.push({
+        filename: entry.filename,
+        title: entry.title,
+        hook: entry.hook,
+        matchSnippet: snippet,
+      });
+    }
+    if (hits.length >= limit) break;
+  }
+  return hits;
+}
+
 
 interface ActiveLocation {
   sessionFile: string;
@@ -510,19 +949,24 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
     active = local ?? global;
   }
 
+  const skills = listSkills();
+
   if (!active) {
     return {
       cwd: undefined,
       projectDir: undefined,
-      stats: { ...emptyStats },
+      stats: emptyStatsFor(undefined),
       memory: [],
       projects,
       settings,
+      skills,
+      pilot: undefined,
     };
   }
 
   const stats = readSession(active.sessionFile, active.decodedPath);
   const memory = readMemoryIndex(active.decodedPath);
+  const pilot = readPilotProfile(active.decodedPath);
   return {
     cwd: active.decodedPath,
     projectDir: active.projectDir,
@@ -530,6 +974,8 @@ export function snapshot(cwd: string | undefined): CockpitSnapshot {
     memory,
     projects,
     settings,
+    skills,
+    pilot,
   };
 }
 

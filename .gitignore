@@ -3,3 +3,5 @@ out/
 *.vsix
 .DS_Store
 .vscode-test/
+.gstack/
+preview-render.js

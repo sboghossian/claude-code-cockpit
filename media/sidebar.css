@@ -147,3 +147,189 @@ ul.list li:last-child {
 .actions button:hover {
   background: var(--vscode-button-secondaryHoverBackground);
 }
+
+/* === Pilot panel === */
+.pilot {
+  position: relative;
+  padding: 14px 14px 12px;
+  margin: -12px -12px 16px;
+  background: linear-gradient(
+    180deg,
+    var(--vscode-editorWidget-background) 0%,
+    var(--vscode-editor-background, transparent) 100%
+  );
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+.pilot-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pilot-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--vscode-textLink-foreground);
+  color: var(--vscode-editor-background, #000);
+}
+
+.pilot-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pilot-role {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.4;
+}
+
+.pilot-quote {
+  margin: 8px 0 10px;
+  padding-left: 8px;
+  border-left: 2px solid var(--vscode-textLink-foreground);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--vscode-foreground);
+  line-height: 1.4;
+}
+
+.pilot-principles-label,
+.pilot-dots-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+  margin: 8px 0 4px;
+}
+
+.pilot-principles {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: principle;
+}
+
+.pilot-principles .principle {
+  position: relative;
+  padding: 3px 0 3px 18px;
+  font-size: 11px;
+  line-height: 1.35;
+  counter-increment: principle;
+  color: var(--vscode-foreground);
+}
+
+.pilot-principles .principle::before {
+  content: counter(principle, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 3px;
+  font-size: 9px;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+
+.pilot-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 2px;
+}
+
+.subdomain-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6ad48f;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.subdomain-name {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  vertical-align: middle;
+}
+
+/* === Live indicator === */
+.live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #6ad48f;
+  vertical-align: middle;
+  animation: cockpit-pulse 1.6s infinite;
+}
+
+@keyframes cockpit-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+/* === Sparkline === */
+.tokens-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tokens-header h2 {
+  margin: 16px 0 6px;
+}
+
+.sparkline {
+  flex-shrink: 0;
+  margin: 8px 0 -6px;
+  opacity: 0.85;
+}
+
+/* === Cost === */
+.model-tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.cost-total {
+  font-weight: 600;
+  color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+}
+
+/* === Search input === */
+input.search {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+input.search:focus {
+  outline: 1px solid var(--vscode-focusBorder, var(--vscode-textLink-foreground));
+  outline-offset: -1px;
+}
