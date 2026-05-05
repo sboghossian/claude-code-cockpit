@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/sboghossian/claude-cockpit.git"
   },
-  "homepage": "https://cockpit.dashable.dev",
+  "homepage": "https://claude-cockpit.pages.dev",
   "engines": {
     "vscode": "^1.85.0"
   },
