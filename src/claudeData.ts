@@ -139,7 +139,9 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
     if (!parsed) {
       continue;
     }
-    stats.messageCount += 1;
+    if (parsed.type === 'user' || parsed.type === 'assistant') {
+      stats.messageCount += 1;
+    }
     if (!stats.startedAt && parsed.timestamp) {
       stats.startedAt = parsed.timestamp;
     }
@@ -191,7 +193,6 @@ export function readSession(file: string | undefined, cwd: string): SessionStats
   );
   stats.totalTokens =
     stats.inputTokens + stats.outputTokens + stats.cacheReadTokens + stats.cacheCreationTokens;
-  // cwd is reserved for future per-workspace filtering of multi-project sessions.
   void cwd;
   return stats;
 }
