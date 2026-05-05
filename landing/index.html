@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claude Cockpit — VSCode HUD for Claude Code</title>
+  <meta name="description" content="VSCode extension that surfaces Claude Code's hidden state — token burn, files touched, persistent memory — directly in your editor." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E%E2%9C%88%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/" class="logo">Claude Cockpit</a>
+      <a href="https://github.com/sboghossian/claude-cockpit" class="ghost">GitHub →</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Building in public · v0.0.1</p>
+      <h1>Stop tailing Claude's session log.</h1>
+      <p class="lede">A VSCode extension that surfaces what Claude Code is doing — token burn, files touched, persistent memory — without leaving your editor.</p>
+      <div class="cta">
+        <a href="https://github.com/sboghossian/claude-cockpit" class="primary">View on GitHub</a>
+        <a href="#what" class="secondary">What it does</a>
+      </div>
+      <p class="status">Phase 1 ships read-only sidebar + status bar. Phase 2 adds mode toggles, MCP health, and an embedded <a href="https://github.com/paulrobello/claude-office">claude-office</a> panel.</p>
+    </section>
+
+    <section id="what" class="grid">
+      <article>
+        <h3>Live token burn</h3>
+        <p>Input, output, cache read, cache write — broken out and updated as Claude works. No more guessing the bill.</p>
+      </article>
+      <article>
+        <h3>Files touched</h3>
+        <p>Every Edit / Write / MultiEdit Claude has run this session, with click-to-open. Audit the diff at a glance.</p>
+      </article>
+      <article>
+        <h3>Memory at hand</h3>
+        <p>Your <code>MEMORY.md</code> entries listed inline. Click any line to open the underlying memory file.</p>
+      </article>
+      <article>
+        <h3>Status bar HUD</h3>
+        <p>Workspace, token total, file count — always visible. The cockpit you didn't know you needed.</p>
+      </article>
+    </section>
+
+    <section class="why">
+      <h2>Why</h2>
+      <p>Claude Code stores rich state on disk: session JSONL, persistent memory, hooks, MCP config. The CLI surfaces almost none of it. Cockpit reads what's already there and gives you a passive HUD instead of <code>tail -f</code>.</p>
+      <p>It's read-only by design in v1 — Claude Code is the source of truth. Cockpit just makes the truth visible.</p>
+    </section>
+
+    <section class="install">
+      <h2>Install (dev)</h2>
+      <pre><code>git clone https://github.com/sboghossian/claude-cockpit.git
+cd claude-cockpit
+npm install
+npm run compile</code></pre>
+      <p>Then open in VSCode and press <kbd>F5</kbd>.</p>
+    </section>
+
+    <section class="roadmap">
+      <h2>Roadmap</h2>
+      <ul>
+        <li><strong>Phase 1</strong> — Read-only sidebar, status bar, memory index <span class="tag done">shipping</span></li>
+        <li><strong>Phase 2</strong> — Mode toggle, model swap, MCP health, embedded claude-office <span class="tag wip">next</span></li>
+        <li><strong>Phase 3</strong> — Cross-project session search, multi-session dashboard, skill palette</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Built by <a href="https://dashable.dev">Stephane Boghossian</a>. Sibling to <a href="https://github.com/sboghossian/claude-overlay">claude-overlay</a> (macOS menubar).</p>
+  </footer>
+</body>
+</html>

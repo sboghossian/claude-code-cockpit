@@ -1,0 +1,149 @@
+:root {
+  color-scheme: dark light;
+}
+
+body {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: transparent;
+}
+
+h2 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground);
+  margin: 16px 0 6px;
+}
+
+h2:first-child {
+  margin-top: 0;
+}
+
+.empty {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+}
+
+.kv .k {
+  color: var(--vscode-descriptionForeground);
+}
+
+.kv .v {
+  font-variant-numeric: tabular-nums;
+}
+
+.tokens {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.token-card {
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.token-card .label {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.token-card .value {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+ul.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+ul.list li:last-child {
+  border-bottom: none;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.row .left {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row .right {
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  margin-right: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 12px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: none;
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.actions button:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}

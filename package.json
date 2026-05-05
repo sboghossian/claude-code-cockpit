@@ -1,0 +1,85 @@
+{
+  "name": "claude-cockpit",
+  "displayName": "Claude Cockpit",
+  "description": "Surface Claude Code's hidden state — token burn, files touched, memory, modes — directly in VSCode.",
+  "version": "0.0.1",
+  "publisher": "dashable",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sboghossian/claude-cockpit.git"
+  },
+  "homepage": "https://cockpit.dashable.dev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "ai",
+    "cockpit"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeCockpit",
+          "title": "Claude Cockpit",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeCockpit": [
+        {
+          "id": "claudeCockpit.sidebar",
+          "name": "Cockpit",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeCockpit.refresh",
+        "title": "Claude Cockpit: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeCockpit.openMemory",
+        "title": "Claude Cockpit: Open MEMORY.md"
+      },
+      {
+        "command": "claudeCockpit.openSessionFile",
+        "title": "Claude Cockpit: Open Active Session JSONL"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeCockpit.refresh",
+          "when": "view == claudeCockpit.sidebar",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
