@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-05-05T12:00:00.000Z","sessionId":"sess-nu","message":{"content":[{"type":"text","text":"no usage here"}]}}
+{"type":"assistant","timestamp":"2026-05-05T12:00:01.000Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo hi"}},{"type":"tool_use","name":"Read","input":{"file_path":"/repo/skip.ts"}}]}}

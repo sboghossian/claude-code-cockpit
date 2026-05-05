@@ -19,6 +19,7 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 - [x] README with screenshots placeholder + dev instructions
 - [x] Public GitHub repo
 - [x] Landing page → cockpit.dashable.dev
+- [x] Unit tests for `claudeData.ts` parser (`npm test`, 18 tests, edge cases covered)
 
 ## Phase 2 — quick actions
 

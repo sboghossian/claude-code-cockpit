@@ -1,0 +1,6 @@
+{"type":"user","timestamp":"2026-05-05T11:00:00.000Z","sessionId":"sess-mal","message":{"content":"valid"}}
+{not valid json at all
+{"type":"assistant","timestamp":"2026-05-05T11:00:01.000Z","message":{"usage":{"input_tokens":42,"output_tokens":7},"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/repo/ok.ts"}}]}}
+
+{"truncated":
+{"type":"user","timestamp":"2026-05-05T11:00:02.000Z","message":{"content":"another valid"}}
