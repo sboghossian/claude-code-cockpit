@@ -47,6 +47,20 @@
       </article>
     </section>
 
+    <section class="privacy">
+      <h2>Privacy — 100% local</h2>
+      <p>Claude Code already touches everything sensitive on your machine. A tool that surfaces its state has no business phoning home.</p>
+      <ul class="privacy-list">
+        <li><strong>No network calls.</strong> Zero <code>fetch</code>, <code>http</code>, or <code>XMLHttpRequest</code> in the source. Grep it yourself.</li>
+        <li><strong>No telemetry, no analytics, no crash reporting.</strong> Ever.</li>
+        <li><strong>Read-only.</strong> Phase 1 never writes to <code>~/.claude/</code>. Only <code>readFileSync</code>, <code>readdirSync</code>, <code>statSync</code>, <code>watch</code>.</li>
+        <li><strong>Bounded reads.</strong> Only <code>~/.claude/projects/&lt;encoded-cwd&gt;/</code> and its <code>memory/MEMORY.md</code>.</li>
+        <li><strong>Sandboxed webview.</strong> Strict CSP: <code>default-src 'none'; connect-src 'none'; form-action 'none'</code>.</li>
+        <li><strong>Zero runtime dependencies.</strong> No supply chain to audit at runtime.</li>
+      </ul>
+      <p class="privacy-note">Open source. <a href="https://github.com/sboghossian/claude-cockpit/blob/main/PRIVACY.md">Read the full privacy policy</a> or <a href="https://github.com/sboghossian/claude-cockpit">audit the source</a>.</p>
+    </section>
+
     <section class="why">
       <h2>Why</h2>
       <p>Claude Code stores rich state on disk: session JSONL, persistent memory, hooks, MCP config. The CLI surfaces almost none of it. Cockpit reads what's already there and gives you a passive HUD instead of <code>tail -f</code>.</p>

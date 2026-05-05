@@ -19,6 +19,10 @@ Read-only. Watches `~/.claude/projects/<your-cwd>/` and renders:
 
 Updates live as Claude works (filesystem watcher + 400ms debounce).
 
+## Privacy
+
+100% local. No network calls, no telemetry, no analytics. Read-only against `~/.claude/projects/<encoded-cwd>/`. Zero runtime dependencies. Webview runs under a strict CSP that blocks `connect-src` and `form-action`. See [`PRIVACY.md`](./PRIVACY.md).
+
 ## Why
 
 Claude Code stores rich session state on disk. The CLI doesn't surface most of it. Cockpit reads the JSONL session log + memory directory and gives you a passive HUD instead of `tail -f`-ing files yourself.
