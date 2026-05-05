@@ -2,13 +2,6 @@
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
 
-  function fmt(n) {
-    if (typeof window.__formatTokens === 'function') {
-      return window.__formatTokens(n);
-    }
-    return String(n);
-  }
-
   function basename(p) {
     if (!p) return '';
     const idx = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
@@ -40,10 +33,10 @@
     const tokens = `
       <h2>Tokens</h2>
       <div class="tokens">
-        <div class="token-card"><div class="label">Total</div><div class="value">${fmt(s.totalTokens)}</div></div>
-        <div class="token-card"><div class="label">Output</div><div class="value">${fmt(s.outputTokens)}</div></div>
-        <div class="token-card"><div class="label">Cache read</div><div class="value">${fmt(s.cacheReadTokens)}</div></div>
-        <div class="token-card"><div class="label">Cache write</div><div class="value">${fmt(s.cacheCreationTokens)}</div></div>
+        <div class="token-card"><div class="label">Total</div><div class="value">${escapeHtml(s.totalTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Output</div><div class="value">${escapeHtml(s.outputTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Cache read</div><div class="value">${escapeHtml(s.cacheReadTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Cache write</div><div class="value">${escapeHtml(s.cacheCreationTokensFormatted)}</div></div>
       </div>
     `;
 

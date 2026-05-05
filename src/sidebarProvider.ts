@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { CockpitSnapshot, snapshot, formatTokens } from './claudeData';
 import { logger } from './logger';
@@ -48,7 +49,18 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     }
     const snap = snapshot(cwd);
     this.onSnapshot(snap);
-    this.view.webview.postMessage({ type: 'snapshot', snapshot: snap });
+    const payload = {
+      ...snap,
+      stats: {
+        ...snap.stats,
+        totalTokensFormatted: formatTokens(snap.stats.totalTokens),
+        inputTokensFormatted: formatTokens(snap.stats.inputTokens),
+        outputTokensFormatted: formatTokens(snap.stats.outputTokens),
+        cacheReadTokensFormatted: formatTokens(snap.stats.cacheReadTokens),
+        cacheCreationTokensFormatted: formatTokens(snap.stats.cacheCreationTokens),
+      },
+    };
+    this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
   }
 
   private watchActive(): void {
@@ -87,11 +99,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         return;
       case 'openMemoryFile':
         if (cwd && msg.filename) {
-          const snap = snapshot(cwd);
-          if (snap.projectDir) {
-            const target = vscode.Uri.file(`${snap.projectDir}/memory/${msg.filename}`);
-            void vscode.window.showTextDocument(target);
-          }
+          this.openMemoryFileSafely(cwd, msg.filename);
         }
         return;
       case 'openFile':
@@ -100,6 +108,24 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         }
         return;
     }
+  }
+
+  private openMemoryFileSafely(cwd: string, filename: string): void {
+    if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      logger.warn(`openMemoryFile rejected suspicious filename: ${filename}`);
+      return;
+    }
+    const snap = snapshot(cwd);
+    if (!snap.projectDir) {
+      return;
+    }
+    const memoryDir = path.resolve(snap.projectDir, 'memory');
+    const target = path.resolve(memoryDir, filename);
+    if (target !== memoryDir && !target.startsWith(memoryDir + path.sep)) {
+      logger.warn(`openMemoryFile rejected escape attempt: ${filename}`);
+      return;
+    }
+    void vscode.window.showTextDocument(vscode.Uri.file(target));
   }
 
   private html(webview: vscode.Webview): string {
@@ -123,7 +149,6 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     <p class="empty">Loading…</p>
   </main>
   <script nonce="${nonce}" src="${jsUri}"></script>
-  <script nonce="${nonce}">window.__formatTokens = ${formatTokens.toString()};</script>
 </body>
 </html>`;
   }
