@@ -2092,27 +2092,38 @@
   }
 
   // ===========================================================================
-  // Talk tab — particle viz + mic level + send-to-claude. Self-contained
-  // module that owns its canvas, AudioContext, and SpeechRecognition state.
+  // Talk tab — Jarvis-grade audio-reactive viz. Multi-layer renderer:
+  //   1. Background nebula (depth gradient + drifting dust)
+  //   2. HUD ring (segmented arcs that pulse on activity)
+  //   3. Core particle sphere (Fibonacci distribution, audio-reactive expand)
+  //   4. Energy streams (during 'speaking' mode — particles fly outward like
+  //      Jarvis emitting light beams when responding)
+  //   5. Lens flare core glow
+  // States: 'idle' | 'listening' | 'thinking' | 'speaking'
   // ===========================================================================
   const Talk = (() => {
     let audioCtx = null;
     let analyser = null;
     let micStream = null;
-    let level = 0;          // smoothed RMS, 0..1
+    let level = 0;          // smoothed amplitude, 0..1
     let levelTarget = 0;
-    let listening = false;
+    let mode = 'idle';      // idle | listening | thinking | speaking
+    let micBlocked = false; // true once getUserMedia has failed once
     let recognition = null;
     let canvas = null;
     let ctx2d = null;
     let rafHandle = null;
-    let particles = null;
-    let rotation = 0;
-    let interimText = '';
+    let coreParticles = null;
+    let dustParticles = null;
+    let streams = [];        // active speaking-mode emissions
+    let coreRotX = 0;
+    let coreRotY = 0;
+    let hudRotation = 0;
+    let speakingEnvelope = null; // { until, baseline, fn } for synth speaking
+    let utterance = null;        // current SpeechSynthesisUtterance
 
-    // Fibonacci sphere — produces N evenly-distributed unit vectors. Used
-    // once on first paint; particles are rotated each frame, not regenerated.
-    function buildParticles(n) {
+    // Fibonacci sphere — N evenly-distributed unit vectors. Generated once.
+    function buildCoreParticles(n) {
       const out = new Array(n);
       const phi = Math.PI * (3 - Math.sqrt(5));
       for (let i = 0; i < n; i++) {
@@ -2123,8 +2134,25 @@
           x: Math.cos(theta) * radius,
           y,
           z: Math.sin(theta) * radius,
-          // Per-particle jitter so motion isn't uniform.
-          jitter: Math.random() * 0.15,
+          jitter: Math.random() * 0.18,
+          twinkle: Math.random() * Math.PI * 2,
+        };
+      }
+      return out;
+    }
+
+    // Outer ambient dust — slow-drifting points that give the viz "atmosphere".
+    function buildDust(n, w, h) {
+      const out = new Array(n);
+      for (let i = 0; i < n; i++) {
+        out[i] = {
+          x: Math.random() * w,
+          y: Math.random() * h,
+          z: Math.random(), // depth 0..1 (parallax)
+          vx: (Math.random() - 0.5) * 0.15,
+          vy: (Math.random() - 0.5) * 0.1,
+          baseSize: 0.4 + Math.random() * 0.9,
+          phase: Math.random() * Math.PI * 2,
         };
       }
       return out;
@@ -2135,7 +2163,6 @@
       if (c && c !== canvas) {
         canvas = c;
         ctx2d = c.getContext('2d');
-        // Track size in case sidebar resizes.
         const resize = () => {
           if (!canvas) return;
           const dpr = window.devicePixelRatio || 1;
@@ -2144,22 +2171,27 @@
           canvas.width = Math.floor(w * dpr);
           canvas.height = Math.floor(h * dpr);
           ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+          // Re-seed dust whenever canvas size changes meaningfully.
+          dustParticles = buildDust(120, w, h);
         };
         resize();
-        // Re-resize when the panel is resized.
         new ResizeObserver(resize).observe(canvas);
       }
-      if (!particles) particles = buildParticles(420);
+      if (!coreParticles) coreParticles = buildCoreParticles(520);
     }
 
     function startAnimation() {
       if (rafHandle) return;
-      const tick = () => {
+      let last = performance.now();
+      const tick = (now) => {
         rafHandle = requestAnimationFrame(tick);
-        sampleMic();
-        draw();
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        sampleAudio(now);
+        updateStreams(dt);
+        draw(dt);
       };
-      tick();
+      rafHandle = requestAnimationFrame(tick);
     }
 
     function stopAnimation() {
@@ -2167,77 +2199,261 @@
       rafHandle = null;
     }
 
-    function sampleMic() {
-      // Smooth toward levelTarget. Without active mic, decay to 0.
-      level += (levelTarget - level) * 0.18;
-      if (!analyser) {
+    function sampleAudio(now) {
+      // Synthetic envelope (speaking-preview) overrides real mic.
+      if (speakingEnvelope) {
+        if (now > speakingEnvelope.until) {
+          speakingEnvelope = null;
+          if (mode === 'speaking') setMode('idle');
+        } else {
+          levelTarget = speakingEnvelope.fn(now);
+        }
+      } else if (analyser) {
+        const buf = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        levelTarget = Math.min(1, rms * 4.5);
+      } else {
+        // Decay when nothing's driving level.
         levelTarget *= 0.92;
-        return;
+        // In idle, breathe a tiny baseline so viz isn't dead-still.
+        if (mode === 'idle') {
+          levelTarget = Math.max(levelTarget, 0.04 + 0.02 * Math.sin(now / 1400));
+        }
       }
-      const buf = new Uint8Array(analyser.fftSize);
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i++) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / buf.length);
-      // Boost so quiet speech still moves the viz.
-      levelTarget = Math.min(1, rms * 4);
+      level += (levelTarget - level) * 0.18;
     }
 
-    function draw() {
+    function updateStreams(dt) {
+      // Speaking mode emits particle streams outward continuously.
+      if (mode === 'speaking' && level > 0.05) {
+        const emissions = Math.min(8, Math.floor(level * 12));
+        for (let i = 0; i < emissions; i++) emitStream();
+      }
+      for (let i = streams.length - 1; i >= 0; i--) {
+        const s = streams[i];
+        s.life -= dt;
+        if (s.life <= 0) { streams.splice(i, 1); continue; }
+        s.r += s.speed * dt;
+        s.alpha = Math.max(0, s.life / s.maxLife);
+      }
+    }
+
+    function emitStream() {
+      // Emit from a random point on the core sphere outward.
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const dirX = Math.sin(phi) * Math.cos(theta);
+      const dirY = Math.cos(phi);
+      const dirZ = Math.sin(phi) * Math.sin(theta);
+      streams.push({
+        x: dirX, y: dirY, z: dirZ,    // unit-vector direction
+        r: 1.0,                        // start at sphere surface
+        speed: 1.6 + Math.random() * 1.4,
+        life: 0.7 + Math.random() * 0.6,
+        maxLife: 1.3,
+        alpha: 1,
+        hue: 195 + Math.random() * 50, // cyan→teal
+        size: 0.8 + Math.random() * 1.2,
+      });
+    }
+
+    function draw(dt) {
       if (!ctx2d || !canvas) return;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      // Trail effect — fade prior frame instead of clearing.
-      ctx2d.fillStyle = 'rgba(8, 12, 24, 0.18)';
-      ctx2d.fillRect(0, 0, w, h);
-
       const cx = w / 2;
       const cy = h / 2;
-      const baseR = Math.min(w, h) * 0.32;
-      const expand = baseR * (1 + level * 0.6);
-      rotation += 0.0035 + level * 0.012;
 
-      const cosR = Math.cos(rotation);
-      const sinR = Math.sin(rotation);
-      const cosT = Math.cos(rotation * 0.6);
-      const sinT = Math.sin(rotation * 0.6);
+      // === Layer 1: background — radial gradient + slow trail
+      const bg = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h));
+      bg.addColorStop(0, 'rgba(8, 14, 32, 0.22)');
+      bg.addColorStop(0.6, 'rgba(4, 7, 18, 0.32)');
+      bg.addColorStop(1, 'rgba(0, 0, 4, 0.55)');
+      ctx2d.fillStyle = bg;
+      ctx2d.fillRect(0, 0, w, h);
 
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        // Rotate around Y then X.
+      // === Layer 2: drifting dust (parallax)
+      if (dustParticles) {
+        for (const d of dustParticles) {
+          d.x += d.vx * (0.5 + d.z);
+          d.y += d.vy * (0.5 + d.z);
+          d.phase += dt * 1.8;
+          if (d.x < -10) d.x = w + 10; else if (d.x > w + 10) d.x = -10;
+          if (d.y < -10) d.y = h + 10; else if (d.y > h + 10) d.y = -10;
+          const a = (0.18 + 0.22 * Math.sin(d.phase)) * (0.4 + 0.6 * d.z);
+          ctx2d.fillStyle = `rgba(150, 200, 255, ${a.toFixed(3)})`;
+          ctx2d.beginPath();
+          ctx2d.arc(d.x, d.y, d.baseSize * (0.5 + 0.5 * d.z), 0, Math.PI * 2);
+          ctx2d.fill();
+        }
+      }
+
+      const baseR = Math.min(w, h) * 0.30;
+      const expand = baseR * (1 + level * 0.55);
+
+      // === Layer 3: HUD ring (segmented arcs)
+      hudRotation += 0.003 + level * 0.01;
+      drawHudRing(cx, cy, baseR * 1.42, hudRotation, level);
+      drawHudRing(cx, cy, baseR * 1.62, -hudRotation * 0.7, level * 0.8);
+
+      // === Layer 4: speaking streams (drawn behind core)
+      drawStreams(cx, cy, expand);
+
+      // === Layer 5: core particle sphere
+      coreRotX += 0.0028 + level * 0.014;
+      coreRotY += 0.0019 + level * 0.008;
+      const cosR = Math.cos(coreRotX);
+      const sinR = Math.sin(coreRotX);
+      const cosT = Math.cos(coreRotY);
+      const sinT = Math.sin(coreRotY);
+
+      // Color tinting per mode.
+      const palette = paletteFor(mode, level);
+
+      for (let i = 0; i < coreParticles.length; i++) {
+        const p = coreParticles[i];
         const x1 = p.x * cosR + p.z * sinR;
         const z1 = -p.x * sinR + p.z * cosR;
         const y1 = p.y * cosT - z1 * sinT;
         const z2 = p.y * sinT + z1 * cosT;
-        // Project (perspective).
-        const persp = 1 / (1.4 - z2 * 0.4);
-        const r = expand * (1 + p.jitter * level);
+        const persp = 1 / (1.45 - z2 * 0.45);
+        const breathe = 1 + p.jitter * level + 0.04 * Math.sin(p.twinkle + hudRotation * 4 + level * 6);
+        const r = expand * breathe;
         const px = cx + x1 * r * persp;
         const py = cy + y1 * r * persp;
-        // Particles further away dim + shrink.
-        const depth = (z2 + 1) / 2; // 0..1
-        const size = (0.6 + depth * 1.6) * (1 + level * 0.5);
-        const alpha = 0.25 + depth * 0.7;
-        // Hot core when audio level is high; cool blue when quiet.
-        const hue = 200 + level * 60;
-        ctx2d.fillStyle = `hsla(${hue}, 80%, ${50 + depth * 30}%, ${alpha})`;
+        const depth = (z2 + 1) / 2;
+        const size = (0.6 + depth * 1.7) * (1 + level * 0.65);
+        const alpha = (0.25 + depth * 0.7) * palette.coreAlpha;
+        ctx2d.fillStyle = `hsla(${palette.hue + level * 30}, 85%, ${50 + depth * 30}%, ${alpha.toFixed(3)})`;
         ctx2d.beginPath();
         ctx2d.arc(px, py, size, 0, Math.PI * 2);
         ctx2d.fill();
       }
-      // Soft center glow.
-      const grad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, expand);
-      grad.addColorStop(0, `rgba(140, 180, 255, ${0.05 + level * 0.15})`);
-      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx2d.fillStyle = grad;
+
+      // === Layer 6: core glow + lens flare
+      const glow = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, expand * 1.4);
+      glow.addColorStop(0, `hsla(${palette.hue}, 90%, 70%, ${(0.06 + level * 0.22) * palette.coreAlpha})`);
+      glow.addColorStop(0.5, `hsla(${palette.hue}, 85%, 55%, ${(0.02 + level * 0.08) * palette.coreAlpha})`);
+      glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx2d.fillStyle = glow;
       ctx2d.fillRect(0, 0, w, h);
+
+      // Subtle scanline highlight that crosses the sphere.
+      const scanY = cy + Math.sin(hudRotation * 1.2) * baseR * 0.6;
+      const scanGrad = ctx2d.createLinearGradient(0, scanY - 1, 0, scanY + 1);
+      scanGrad.addColorStop(0, 'rgba(180, 230, 255, 0)');
+      scanGrad.addColorStop(0.5, `rgba(180, 230, 255, ${0.12 + level * 0.18})`);
+      scanGrad.addColorStop(1, 'rgba(180, 230, 255, 0)');
+      ctx2d.fillStyle = scanGrad;
+      ctx2d.fillRect(cx - expand, scanY - 1, expand * 2, 2);
     }
 
+    function drawHudRing(cx, cy, radius, rot, intensity) {
+      const segments = 24;
+      const gap = 0.06;
+      for (let i = 0; i < segments; i++) {
+        // Skip random segments to feel mechanical.
+        if ((i + Math.floor(rot * 3)) % 5 === 0) continue;
+        const seg = (Math.PI * 2) / segments;
+        const a0 = i * seg + rot + gap;
+        const a1 = (i + 1) * seg + rot - gap;
+        const alpha = (0.18 + intensity * 0.45) * (0.5 + 0.5 * Math.sin(rot * 5 + i));
+        ctx2d.strokeStyle = `hsla(195, 90%, ${60 + intensity * 25}%, ${alpha.toFixed(3)})`;
+        ctx2d.lineWidth = 1 + intensity * 1.5;
+        ctx2d.beginPath();
+        ctx2d.arc(cx, cy, radius, a0, a1);
+        ctx2d.stroke();
+      }
+      // Tick marks every 8 segments.
+      for (let i = 0; i < 8; i++) {
+        const a = i * (Math.PI * 2 / 8) + rot * 0.5;
+        const tx = cx + Math.cos(a) * radius;
+        const ty = cy + Math.sin(a) * radius;
+        ctx2d.fillStyle = `hsla(195, 90%, 75%, ${(0.4 + intensity * 0.5).toFixed(3)})`;
+        ctx2d.beginPath();
+        ctx2d.arc(tx, ty, 1.4, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+    }
+
+    function drawStreams(cx, cy, sphereR) {
+      if (!streams.length) return;
+      // Use the same rotation as the core so streams appear to come FROM
+      // the sphere surface into camera space.
+      const cosR = Math.cos(coreRotX);
+      const sinR = Math.sin(coreRotX);
+      const cosT = Math.cos(coreRotY);
+      const sinT = Math.sin(coreRotY);
+      for (const s of streams) {
+        const x1 = s.x * cosR + s.z * sinR;
+        const z1 = -s.x * sinR + s.z * cosR;
+        const y1 = s.y * cosT - z1 * sinT;
+        const z2 = s.y * sinT + z1 * cosT;
+        const persp = 1 / (1.4 - z2 * 0.4);
+        const px = cx + x1 * sphereR * s.r * persp;
+        const py = cy + y1 * sphereR * s.r * persp;
+        // Trail: line from (s.r - 0.15) → (s.r) along same direction
+        const r0 = Math.max(1.0, s.r - 0.18);
+        const px0 = cx + x1 * sphereR * r0 * persp;
+        const py0 = cy + y1 * sphereR * r0 * persp;
+        const grad = ctx2d.createLinearGradient(px0, py0, px, py);
+        grad.addColorStop(0, `hsla(${s.hue}, 95%, 70%, 0)`);
+        grad.addColorStop(1, `hsla(${s.hue}, 95%, 75%, ${(s.alpha * 0.9).toFixed(3)})`);
+        ctx2d.strokeStyle = grad;
+        ctx2d.lineWidth = s.size * (0.5 + s.alpha);
+        ctx2d.beginPath();
+        ctx2d.moveTo(px0, py0);
+        ctx2d.lineTo(px, py);
+        ctx2d.stroke();
+        // Bright head.
+        ctx2d.fillStyle = `hsla(${s.hue}, 100%, 88%, ${s.alpha.toFixed(3)})`;
+        ctx2d.beginPath();
+        ctx2d.arc(px, py, s.size * 1.4, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+    }
+
+    function paletteFor(m, lvl) {
+      if (m === 'listening') return { hue: 195, coreAlpha: 1.0 };           // cyan
+      if (m === 'thinking')  return { hue: 270 - lvl * 20, coreAlpha: 0.9 }; // violet
+      if (m === 'speaking')  return { hue: 30 + lvl * 20, coreAlpha: 1.05 }; // amber/gold (Jarvis)
+      return { hue: 210, coreAlpha: 0.85 }; // idle: muted blue
+    }
+
+    function setMode(next) {
+      mode = next;
+      const indicator = document.querySelector('[data-talk-mode]');
+      if (indicator) {
+        indicator.textContent = MODE_LABELS[next] || next;
+        indicator.dataset.mode = next;
+      }
+      updateButtons();
+    }
+
+    const MODE_LABELS = {
+      idle: 'IDLE',
+      listening: 'LISTENING',
+      thinking: 'THINKING',
+      speaking: 'SPEAKING',
+    };
+
     async function startListening() {
-      if (listening) return;
+      if (mode === 'listening') return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showBanner(
+          'Microphone API not exposed in this VSCode webview build. ' +
+          'Use <strong>Wispr Flow</strong> or system dictation (fn-fn) and click in the textarea.',
+          'warn'
+        );
+        micBlocked = true;
+        return;
+      }
       try {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -2246,36 +2462,34 @@
         analyser = audioCtx.createAnalyser();
         analyser.fftSize = 1024;
         source.connect(analyser);
-        listening = true;
-        // Try to start speech recognition (Chromium-based VSCode supports it).
+        setMode('listening');
+        clearBanner();
         startRecognition();
-        updateButtons();
       } catch (err) {
-        const out = document.querySelector('[data-talk-status]');
-        if (out) out.textContent = 'Mic access denied or unavailable: ' + (err && err.message ? err.message : String(err));
+        micBlocked = true;
+        const reason = err && err.message ? err.message : String(err);
+        showBanner(
+          `Mic blocked: ${escapeHtml(reason)}. VSCode webviews deny mic by default — use <strong>Wispr Flow</strong> or system dictation, then click <strong>▶ Speak preview</strong> below to see the AI-speaking visualization.`,
+          'error'
+        );
       }
     }
 
     function stopListening() {
-      if (!listening) return;
+      if (mode !== 'listening') return;
       if (micStream) {
         for (const t of micStream.getTracks()) t.stop();
         micStream = null;
       }
       analyser = null;
       stopRecognition();
-      listening = false;
+      setMode('idle');
       levelTarget = 0;
-      updateButtons();
     }
 
     function startRecognition() {
       const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) {
-        const out = document.querySelector('[data-talk-status]');
-        if (out) out.textContent = 'Listening (no transcription — Speech API unavailable in this VSCode build)';
-        return;
-      }
+      if (!SR) return;
       try {
         recognition = new SR();
         recognition.continuous = true;
@@ -2293,24 +2507,15 @@
           if (finalText && ta) {
             ta.value = (ta.value ? ta.value + ' ' : '') + finalText.trim();
           }
-          interimText = interim;
-          const out = document.querySelector('[data-talk-status]');
-          if (out) out.textContent = interim ? 'hearing: "' + interim + '"' : 'listening…';
         };
-        recognition.onerror = (e) => {
-          const out = document.querySelector('[data-talk-status]');
-          if (out) out.textContent = 'Recognition error: ' + (e.error || 'unknown');
-        };
+        recognition.onerror = () => { /* silent — banner already shown if blocked */ };
         recognition.onend = () => {
-          // Auto-restart while still listening (continuous mode drops out periodically).
-          if (listening && recognition) {
+          if (mode === 'listening' && recognition) {
             try { recognition.start(); } catch (_) { /* ignore */ }
           }
         };
         recognition.start();
-        const out = document.querySelector('[data-talk-status]');
-        if (out) out.textContent = 'listening…';
-      } catch (err) {
+      } catch (_) {
         recognition = null;
       }
     }
@@ -2320,64 +2525,137 @@
         try { recognition.stop(); } catch (_) { /* ignore */ }
         recognition = null;
       }
-      const out = document.querySelector('[data-talk-status]');
-      if (out) out.textContent = '';
-      interimText = '';
+    }
+
+    // === Speaking preview — drives the speaking-mode viz from a synthetic
+    //     envelope so the user can SEE the effect without live AI audio.
+    //     Also routes the text through speechSynthesis so they hear it.
+    function speakPreview(text) {
+      const sample = (text && text.trim()) ||
+        'Cockpit online. All systems nominal. Awaiting your direction.';
+      // Cancel any in-flight utterance.
+      try { window.speechSynthesis.cancel(); } catch (_) { /* ignore */ }
+      setMode('speaking');
+      const startedAt = performance.now();
+      const wordCount = sample.split(/\s+/).filter(Boolean).length;
+      // ~150wpm average speech — give the envelope ~that long.
+      const durationMs = Math.max(1500, (wordCount / 150) * 60_000);
+      speakingEnvelope = {
+        until: startedAt + durationMs,
+        baseline: 0.35,
+        fn: (now) => {
+          const t = (now - startedAt) / 1000;
+          // Combine multiple sines for a speech-like envelope.
+          const e1 = 0.45 + 0.35 * Math.sin(t * 6.2);
+          const e2 = 0.2 * Math.sin(t * 13.7 + 1.1);
+          const e3 = 0.15 * Math.sin(t * 2.1 + 0.4);
+          const env = Math.max(0.05, e1 + e2 + e3);
+          return Math.min(1, env * 0.85);
+        },
+      };
+      // Best-effort actual speech (works in webview even when mic doesn't).
+      try {
+        if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+          utterance = new SpeechSynthesisUtterance(sample);
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
+          utterance.onend = () => {
+            if (mode === 'speaking') setMode('idle');
+            speakingEnvelope = null;
+          };
+          window.speechSynthesis.speak(utterance);
+        }
+      } catch (_) { /* ignore */ }
+    }
+
+    function stopSpeaking() {
+      try { window.speechSynthesis.cancel(); } catch (_) { /* ignore */ }
+      speakingEnvelope = null;
+      if (mode === 'speaking') setMode('idle');
+    }
+
+    function showBanner(html, kind) {
+      const b = document.querySelector('[data-talk-banner]');
+      if (!b) return;
+      b.innerHTML = html;
+      b.className = `talk-banner talk-banner-${kind || 'info'}`;
+      b.style.display = '';
+    }
+
+    function clearBanner() {
+      const b = document.querySelector('[data-talk-banner]');
+      if (!b) return;
+      b.style.display = 'none';
     }
 
     function updateButtons() {
       const startBtn = document.querySelector('button[data-talk-start]');
       const stopBtn = document.querySelector('button[data-talk-stop]');
-      if (startBtn) startBtn.style.display = listening ? 'none' : '';
-      if (stopBtn) stopBtn.style.display = listening ? '' : 'none';
+      const speakBtn = document.querySelector('button[data-talk-speak]');
+      const speakStopBtn = document.querySelector('button[data-talk-speak-stop]');
+      if (startBtn) startBtn.style.display = mode === 'listening' ? 'none' : '';
+      if (stopBtn) stopBtn.style.display = mode === 'listening' ? '' : 'none';
+      if (speakBtn) speakBtn.style.display = mode === 'speaking' ? 'none' : '';
+      if (speakStopBtn) speakStopBtn.style.display = mode === 'speaking' ? '' : 'none';
     }
 
-    function send(mode) {
+    function send(sendMode) {
       const ta = document.querySelector('textarea[data-talk-text]');
       if (!ta) return;
       const text = ta.value.trim();
       if (!text) return;
-      vscode.postMessage({ type: 'talkToClaude', talkText: text, talkMode: mode });
+      vscode.postMessage({ type: 'talkToClaude', talkText: text, talkMode: sendMode });
       ta.value = '';
-      const out = document.querySelector('[data-talk-status]');
-      if (out) out.textContent = 'Sent → terminal opened. Review & press Enter.';
+      // Brief "thinking" pulse while terminal is opening.
+      setMode('thinking');
+      setTimeout(() => { if (mode === 'thinking') setMode('idle'); }, 1800);
     }
 
     function init() {
       ensureCanvas();
       startAnimation();
+      setMode(mode);
+      // Surface the known-blocked state proactively so user isn't confused.
+      if (micBlocked) {
+        showBanner(
+          'Microphone unavailable in this VSCode webview build. Use <strong>Wispr Flow</strong> / system dictation to fill the textarea, or click <strong>▶ Speak preview</strong> to demo the AI-speaking visualization.',
+          'warn'
+        );
+      }
     }
 
     function teardown() {
       stopListening();
+      stopSpeaking();
       stopAnimation();
-      // Don't close audioCtx — re-opening one is expensive and the user
-      // may flip back to the tab.
     }
 
-    return { init, teardown, startListening, stopListening, send };
+    return { init, teardown, startListening, stopListening, send, speakPreview, stopSpeaking };
   })();
 
   function talkSection(snap) {
     return `
       <div class="talk-shell">
+        <div class="talk-banner" data-talk-banner style="display: none;"></div>
         <div class="talk-canvas-wrap">
           <canvas data-talk-canvas></canvas>
-          <div class="talk-status" data-talk-status></div>
+          <div class="talk-mode-indicator"><span class="talk-mode-dot"></span><span data-talk-mode>IDLE</span></div>
         </div>
         <div class="talk-controls">
-          <button class="office-btn" data-talk-start>🎙 Start listening</button>
+          <button class="office-btn" data-talk-start>🎙 Listen</button>
           <button class="office-btn" data-talk-stop style="display: none;">■ Stop</button>
+          <button class="office-btn talk-btn-speak" data-talk-speak title="Synthesize speech and drive the speaking-mode viz">▶ Speak preview</button>
+          <button class="office-btn" data-talk-speak-stop style="display: none;">■ Stop speaking</button>
           <button class="watch-action" data-talk-wispr title="Trigger Wispr Flow shortcut (configure in settings)">Wispr</button>
         </div>
-        <textarea class="talk-text" data-talk-text rows="4" placeholder="Type or dictate. Speech recognition fills this in as you talk."></textarea>
+        <textarea class="talk-text" data-talk-text rows="4" placeholder="Type or dictate. Click ▶ Speak preview to hear it back and watch the viz erupt."></textarea>
         <div class="talk-send-row">
           <button class="office-btn" data-talk-send="new-session">Send → new session</button>
           <button class="watch-action" data-talk-send="resume">Resume last</button>
           <button class="watch-action" data-talk-send="background">Background (--print)</button>
         </div>
         <p class="empty" style="font-size: 11px;">
-          The particle sphere reacts to your voice in real time. Speech is transcribed via your browser's Web Speech API (works in Chromium/VSCode). When you hit Send, Cockpit pipes the message into a fresh <code>claude</code> session in a terminal — review and press Enter to confirm. Voice never leaves your machine.
+          Cyan = idle/listening · Violet = thinking · <strong>Amber = speaking</strong> (Jarvis core). Energy streams emit when speaking. Mic uses the browser Web Speech API; if VSCode blocks it (common), use Wispr/system dictation. Voice never leaves your machine.
         </p>
       </div>
     `;
@@ -2615,6 +2893,7 @@
     const view = state.libraryView === 'memory' ? 'memory' : 'prompts';
     const memCount = (snap.memory || []).length;
     const promptCount = (snap.prompts || []).length;
+    if (view === 'prompts') maybeAutoMinePrompts(promptCount);
     const subBar = `
       <div class="sub-tab-bar">
         <button class="sub-tab ${view === 'prompts' ? 'sub-tab-active' : ''}" data-library-view="prompts">Prompts <span class="chip-count">${promptCount}</span></button>
@@ -2623,6 +2902,21 @@
     `;
     const body = view === 'memory' ? memorySection(snap) : promptsSection(snap);
     return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  let autoMineAttempted = false;
+
+  // First time the user lands on the Prompts view with an empty library,
+  // kick off mining automatically. Avoids the "always 0" footgun where the
+  // user has to discover the Mine button.
+  function maybeAutoMinePrompts(promptCount) {
+    if (autoMineAttempted) return;
+    if (promptCount > 0) return;
+    if (minedPromptsState) return;
+    autoMineAttempted = true;
+    // Defer slightly so the empty-state UI paints first; user sees the
+    // "mining…" feedback rather than a flash of empty.
+    setTimeout(() => vscode.postMessage({ type: 'minePrompts' }), 100);
   }
 
   function memorySection(snap) {
@@ -4248,12 +4542,19 @@
       });
     });
 
-    // Talk tab — wire mic / send / wispr buttons. Lifecycle is managed
-    // separately in the post-render hook below so the canvas keeps painting.
+    // Talk tab — wire mic / send / wispr / speak buttons. Lifecycle is
+    // managed separately in the post-render hook so the canvas keeps painting.
     const startBtn = root.querySelector('button[data-talk-start]');
     if (startBtn) startBtn.addEventListener('click', () => Talk.startListening());
     const stopBtn = root.querySelector('button[data-talk-stop]');
     if (stopBtn) stopBtn.addEventListener('click', () => Talk.stopListening());
+    const speakBtn = root.querySelector('button[data-talk-speak]');
+    if (speakBtn) speakBtn.addEventListener('click', () => {
+      const ta = root.querySelector('textarea[data-talk-text]');
+      Talk.speakPreview(ta && ta.value);
+    });
+    const speakStopBtn = root.querySelector('button[data-talk-speak-stop]');
+    if (speakStopBtn) speakStopBtn.addEventListener('click', () => Talk.stopSpeaking());
     root.querySelectorAll('button[data-talk-send]').forEach((btn) => {
       btn.addEventListener('click', () => Talk.send(btn.getAttribute('data-talk-send')));
     });

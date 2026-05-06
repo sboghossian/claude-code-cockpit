@@ -2,6 +2,23 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] — 2026-05-06
+
+### Added
+
+- **Talk tab — Jarvis-grade visualization rewrite.** Multi-layer renderer: drifting parallax dust, two segmented HUD rings, 520-particle Fibonacci sphere, particle streams that emit outward when speaking, soft core glow, scanline highlight. Four modes with distinct color palettes — IDLE (muted blue), LISTENING (cyan), THINKING (violet), SPEAKING (Jarvis amber/gold). Mode indicator overlaid on canvas with monospace label.
+- **Speak preview.** New "▶ Speak preview" button drives the speaking-mode viz from a synthetic speech envelope and routes the textarea through `speechSynthesis` so you both *see* the AI-speaking effect and *hear* the text. Works even when the mic API is blocked.
+- **Mic-blocked banner.** When VSCode webviews block `getUserMedia` (the default), the Talk tab now shows a clear amber banner telling the user to use Wispr Flow / system dictation, instead of silently failing.
+
+### Fixed
+
+- **RSS folder discovery.** `readRssFromObsidian()` was looking at `rss/`, `Inbox/RSS/`, `50-Inbox/rss/` only. Added the actual path Stephane's vault uses (`30-Knowledge/rss-feeds/`) plus several common variants, and a depth-3 fallback scan that matches any folder named `rss`, `rss-feed`, or `rss-feeds`. Scanner perf hardened for 10k+ file folders: name-sorted DESC slice top-200 then stat, instead of stat-every-file.
+- **Prompts auto-mine.** First time you land on the Prompts sub-view of the Library tab with an empty library, mining now kicks off automatically (deferred 100ms so the empty-state UI paints first). Eliminates the "always 0, no idea what to do" footgun.
+
+### Notes
+
+- Local security scan across `~/Documents/Code/` (run once to seed Security tab improvements) found no real leaks. Three repos track non-`.example` `.env` files (`agip-spark`, `haqq-ai`, `haqq-case-theory-sim`) but they contain only `VITE_*` Supabase publishable keys, which are public by design. No private SSH keys, no API tokens, no credentialed URLs.
+
 ## [0.17.0] — 2026-05-06
 
 ### Added
