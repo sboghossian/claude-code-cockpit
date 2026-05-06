@@ -6,7 +6,7 @@
 
 Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **Customizable**: a header strip with logo + actions sits above a tab bar you control — pick which tabs are visible, build a **Custom** tab from any of 30+ widgets, and switch between auto / dark / light theme.
 
-**Available tabs**: Custom · Now · Mac · Watchtower · Agents · Routines · Discover · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help. The Custom, Now, and Help tabs are pinned; the rest can be hidden via the Customize panel.
+**Available tabs**: Custom · Now · Mac · Watchtower · Agents · Routines · Discover · Changelog · Manage · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help. The Custom, Now, and Help tabs are pinned; the rest can be hidden via the Customize panel.
 
 **Global search** (in the header): type any string to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings — with type-filter chips to narrow results. Click any hit to jump to the right tab.
 
@@ -26,6 +26,8 @@ Read-only. Watches `~/.claude/projects/<your-cwd>/` and renders:
   - **Agents**: your specialist council — agent definitions from `~/.claude/agents/` (global) and `.claude/agents/` (workspace) with description, model, tools
   - **Routines**: scheduled Claude Code runs. Local section reads `~/.claude/scheduled-tasks/<name>/SKILL.md` (name, description, cadence hint inferred from description, last edit, size, click to open or reveal). Each routine gets a **▶ Run now** button that opens a terminal piping the SKILL.md into a fresh `claude` session for on-demand execution. The header **+ New routine** button prompts for a name + description and writes a starter `SKILL.md`. Cloud section is opt-in (`claudeCockpit.cloudRoutines.enabled`) and surfaces a deep-link to manage scheduled remote agents on claude.ai — Cockpit doesn't read cloud-routine state because Anthropic doesn't expose a routines API to extensions yet.
   - **Discover** (opt-in): top trending GitHub projects (filterable by today / this week / this month) and recent RSS notes pulled from your Obsidian vault's `rss/` folder. GitHub fetches `api.github.com` only when you click Refresh; RSS is purely local. Disabled by default — toggle `claudeCockpit.discover.enabled` or click "Enable Discover (opt-in)" inside the tab.
+  - **Changelog**: renders `CHANGELOG.md` bundled with the extension (per-version dates, notes, deep-link to the matching GitHub release) plus an in-tab update banner if a newer release exists. The header also shows a green **Update available** pill when one is detected.
+  - **Manage**: surfaces every key in `~/.claude/settings.json` and `~/.claude/settings.local.json` — hooks, MCP servers, plugins, and any other top-level keys — with **edit** buttons that open the JSON file directly in VSCode. Cockpit never writes settings programmatically; every change goes through the editor so you can review before saving.
   - **Chat**: conversations + memory from claude.ai (parsed from `claude-data-export/`)
   - **Search**: global grep across every session JSONL
   - **Obsidian**: auto-detects vaults, lists recent notes, save-session-as-markdown
@@ -84,6 +86,7 @@ No runtime dependencies. Just `@types/vscode` and `typescript`.
 - `claudeCockpit.cloudRoutines.enabled` — show a deep-link to manage cloud routines on claude.ai (off by default; doesn't make network calls)
 - `claudeCockpit.theme` — initial theme: `auto` (default; follows VSCode), `dark`, or `light`. Can also be changed at runtime in the Customize panel.
 - `claudeCockpit.discover.enabled` — enable the Discover tab (off by default; allows opt-in `api.github.com` fetches when you click Refresh).
+- `claudeCockpit.updateCheck.enabled` — periodically check `api.github.com` for new Cockpit releases (on by default). Set to `false` for fully local operation.
 
 User preferences (which widgets appear in the Custom tab, which tabs are visible, runtime theme override) are stored per-machine in VSCode `globalState` (key `claudeCockpit.userPrefs`). They never leave the machine.
 

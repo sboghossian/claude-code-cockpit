@@ -441,6 +441,227 @@
     return `${mo}mo ago`;
   }
 
+  function manageSection(snap) {
+    const m = snap.manage || { globalSettings: { exists: false }, localSettings: { exists: false }, hookEvents: [], mcpServers: [], enabledPlugins: [], topLevelKeys: [], agentsDir: '', scheduledTasksDir: '', skillsDir: '' };
+    const g = m.globalSettings || {};
+    const l = m.localSettings || {};
+
+    const fileCard = (label, view, openButtonLabel) => {
+      const path = view.filePath || '';
+      const status = !view.exists
+        ? '<span class="tag">missing</span>'
+        : view.parseError
+        ? '<span class="tag tag-needs-cwd">parse error</span>'
+        : '<span class="tag tag-used">ok</span>';
+      const error = view.parseError ? `<div class="note-excerpt" style="color: var(--vscode-errorForeground);">${escapeHtml(view.parseError)}</div>` : '';
+      return `<div class="manage-group">
+        <div class="manage-group-head">
+          <span>${escapeHtml(label)} ${status}</span>
+          <span>
+            <button class="rec-action" data-open-file="${escapeHtml(path)}">${escapeHtml(openButtonLabel)}</button>
+          </span>
+        </div>
+        <div class="manage-row"><div class="left-col"><div class="v">${escapeHtml(path)}</div></div></div>
+        ${error}
+      </div>`;
+    };
+
+    const groupRow = (title, count, action) => `<div class="manage-row">
+      <div class="left-col"><strong>${escapeHtml(title)}</strong> <span class="cost-rate">${count}</span></div>
+      <span>${action}</span>
+    </div>`;
+
+    const hookList = m.hookEvents.length
+      ? m.hookEvents.map((ev) => `<div class="manage-row">
+          <div class="left-col">${escapeHtml(ev)}</div>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath)}">edit</button>
+        </div>`).join('')
+      : '<div class="manage-row"><div class="left-col"><span class="empty">No hooks configured.</span></div></div>';
+
+    const mcpList = m.mcpServers.length
+      ? m.mcpServers.map((s) => `<div class="manage-row">
+          <div class="left-col">${escapeHtml(s)}</div>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath)}">edit</button>
+        </div>`).join('')
+      : '<div class="manage-row"><div class="left-col"><span class="empty">No MCP servers configured.</span></div></div>';
+
+    const pluginList = m.enabledPlugins.length
+      ? m.enabledPlugins.map((p) => `<div class="manage-row">
+          <div class="left-col">${escapeHtml(p)}</div>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath)}">edit</button>
+        </div>`).join('')
+      : '<div class="manage-row"><div class="left-col"><span class="empty">No plugins enabled.</span></div></div>';
+
+    const topKeyRows = (m.topLevelKeys || [])
+      .filter((k) => !['hooks', 'mcpServers', 'enabledPlugins'].includes(k))
+      .map((k) => {
+        const v = (g.data && g.data[k] !== undefined) ? g.data[k] : (l.data ? l.data[k] : undefined);
+        const display = typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v);
+        return `<div class="manage-row">
+          <div class="left-col">
+            <div><strong>${escapeHtml(k)}</strong></div>
+            <div class="v">${escapeHtml(display || '—')}</div>
+          </div>
+          <button class="rec-action" data-open-file="${escapeHtml((g.exists ? g.filePath : l.filePath) || '')}">edit</button>
+        </div>`;
+      })
+      .join('');
+
+    return `
+      <h2>Manage Claude</h2>
+      <p class="empty" style="font-size: 11px;">Surfaces every key in <code>~/.claude/settings.json</code> and <code>~/.claude/settings.local.json</code>. Click <strong>edit</strong> on any row to open the JSON file in the VSCode editor — Cockpit doesn't write settings programmatically (any change goes through the editor so you can review).</p>
+
+      ${fileCard('Global settings', g, 'Open settings.json')}
+      ${fileCard('Local overrides', l, 'Open settings.local.json')}
+
+      <div class="manage-group">
+        <div class="manage-group-head">
+          <span>Hooks <span class="cost-rate">${m.hookEvents.length}</span></span>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath || '')}">+ Add</button>
+        </div>
+        ${hookList}
+      </div>
+
+      <div class="manage-group">
+        <div class="manage-group-head">
+          <span>MCP servers <span class="cost-rate">${m.mcpServers.length}</span></span>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath || '')}">+ Add</button>
+        </div>
+        ${mcpList}
+      </div>
+
+      <div class="manage-group">
+        <div class="manage-group-head">
+          <span>Enabled plugins <span class="cost-rate">${m.enabledPlugins.length}</span></span>
+          <button class="rec-action" data-open-file="${escapeHtml(g.filePath || '')}">+ Add</button>
+        </div>
+        ${pluginList}
+      </div>
+
+      ${topKeyRows ? `<div class="manage-group">
+        <div class="manage-group-head"><span>Other settings</span></div>
+        ${topKeyRows}
+      </div>` : ''}
+
+      <div class="manage-group">
+        <div class="manage-group-head"><span>Locations</span></div>
+        <div class="manage-row">
+          <div class="left-col"><strong>Agents</strong> <span class="v">${escapeHtml(m.agentsDir)}</span></div>
+          <button class="rec-action" data-reveal="${escapeHtml(m.agentsDir)}">reveal</button>
+        </div>
+        <div class="manage-row">
+          <div class="left-col"><strong>Scheduled tasks</strong> <span class="v">${escapeHtml(m.scheduledTasksDir)}</span></div>
+          <button class="rec-action" data-reveal="${escapeHtml(m.scheduledTasksDir)}">reveal</button>
+        </div>
+        <div class="manage-row">
+          <div class="left-col"><strong>Skills</strong> <span class="v">${escapeHtml(m.skillsDir)}</span></div>
+          <button class="rec-action" data-reveal="${escapeHtml(m.skillsDir)}">reveal</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function changelogSection(snap) {
+    const cl = snap.changelog || { exists: false, fullText: '', versions: [], currentVersion: '' };
+    const upd = snap.updateStatus || { enabled: false, currentVersion: cl.currentVersion, hasUpdate: false };
+
+    const updateBlock = !upd.enabled
+      ? `<p class="empty" style="font-size: 11px;">Update checks are disabled. Enable <code>claudeCockpit.updateCheck.enabled</code> in settings to be notified about new releases.</p>`
+      : upd.error
+      ? `<p class="empty" style="font-size: 11px;">Last update check failed: ${escapeHtml(upd.error)}. <button class="rec-action" data-action="check-update">Retry</button></p>`
+      : !upd.latestVersion
+      ? `<p class="empty" style="font-size: 11px;">Checking for updates… <button class="rec-action" data-action="check-update">Check now</button></p>`
+      : upd.hasUpdate
+      ? `<div class="watch-card update-banner" style="display: block;">
+          <div class="row">
+            <span class="left"><strong>Update available — v${escapeHtml(upd.latestVersion)}</strong></span>
+            <span class="right">
+              <button class="office-btn" data-action="open-release">Get update ↗</button>
+              <button class="rec-action" data-action="check-update">Re-check</button>
+            </span>
+          </div>
+          ${upd.releaseTitle ? `<div class="note-excerpt">${escapeHtml(upd.releaseTitle)}</div>` : ''}
+          <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">You're running v${escapeHtml(upd.currentVersion)}${upd.publishedAt ? ' · published ' + escapeHtml(fmtAge(upd.publishedAt)) : ''}.</div>
+        </div>`
+      : `<p class="empty" style="font-size: 11px;">You're on the latest version (v${escapeHtml(upd.currentVersion)}). <button class="rec-action" data-action="check-update">Check again</button></p>`;
+
+    if (!cl.exists) {
+      return `
+        <h2>Changelog</h2>
+        ${updateBlock}
+        <p class="empty">No <code>CHANGELOG.md</code> bundled with this build.</p>
+      `;
+    }
+
+    const versions = cl.versions || [];
+    const versionsHtml = !versions.length
+      ? `<pre class="changelog-pre">${escapeHtml(cl.fullText.slice(0, 4000))}</pre>`
+      : versions
+          .map(
+            (v) => `<div class="changelog-version ${v.isCurrent ? 'is-current' : ''}">
+              <div class="row">
+                <span class="left"><strong>v${escapeHtml(v.version)}</strong>${v.date ? ` <span class="cost-rate">${escapeHtml(v.date)}</span>` : ''}</span>
+                <span class="right">
+                  ${v.isCurrent ? '<span class="tag tag-used">installed</span>' : ''}
+                  <a class="link" data-open-url="https://github.com/sboghossian/claude-cockpit/releases/tag/v${escapeHtml(v.version)}">release ↗</a>
+                </span>
+              </div>
+              <div class="changelog-body">${renderMarkdown(v.body)}</div>
+            </div>`,
+          )
+          .join('');
+
+    return `
+      <h2>Changelog <span class="cost-rate">v${escapeHtml(cl.currentVersion)}</span></h2>
+      ${updateBlock}
+      <p class="empty" style="font-size: 11px;">What shipped, when. Tap any version's release ↗ link to see the GitHub release page.</p>
+      ${versionsHtml}
+    `;
+  }
+
+  // Minimal markdown → HTML for changelog bodies. Handles headings (### / ##),
+  // lists (- ), inline code (`x`), bold (**x**), and paragraph breaks.
+  function renderMarkdown(md) {
+    if (!md) return '';
+    const lines = md.split(/\r?\n/);
+    const out = [];
+    let inList = false;
+    const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/, '');
+      if (!line.trim()) {
+        closeList();
+        continue;
+      }
+      if (/^###\s+/.test(line)) {
+        closeList();
+        out.push(`<h4 class="changelog-h4">${inlineMd(line.replace(/^###\s+/, ''))}</h4>`);
+        continue;
+      }
+      if (/^##\s+/.test(line)) {
+        closeList();
+        out.push(`<h3 class="sub-h">${inlineMd(line.replace(/^##\s+/, ''))}</h3>`);
+        continue;
+      }
+      if (/^-\s+/.test(line)) {
+        if (!inList) { out.push('<ul class="changelog-list">'); inList = true; }
+        out.push(`<li>${inlineMd(line.replace(/^-\s+/, ''))}</li>`);
+        continue;
+      }
+      closeList();
+      out.push(`<p class="changelog-p">${inlineMd(line)}</p>`);
+    }
+    closeList();
+    return out.join('');
+  }
+
+  function inlineMd(s) {
+    let out = escapeHtml(s);
+    out = out.replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
+    out = out.replace(/\*\*([^*]+)\*\*/g, (_, b) => `<strong>${b}</strong>`);
+    return out;
+  }
+
   function discoverSection(snap) {
     const d = snap.discover || { enabled: false, github: undefined, rss: { entries: [] } };
     if (!d.enabled) {
@@ -1507,6 +1728,8 @@
     agents:          { label: 'Agents',             category: 'Cross',    requiresCwd: false, render: (s) => agentsSection(s) },
     routines:        { label: 'Routines',           category: 'Cross',    requiresCwd: false, render: (s) => routinesSection(s) },
     discover:        { label: 'Discover (GH+RSS)',  category: 'Cross',    requiresCwd: false, render: (s) => discoverSection(s) },
+    changelog:       { label: 'Changelog',           category: 'Cross',    requiresCwd: false, render: (s) => changelogSection(s) },
+    manage:          { label: 'Manage Claude',       category: 'Config',   requiresCwd: false, render: (s) => manageSection(s) },
     chatExport:      { label: 'Chat export',        category: 'Cross',    requiresCwd: false, render: (s) => chatExportSection(s) },
     obsidian:        { label: 'Obsidian',           category: 'Cross',    requiresCwd: false, render: (s) => obsidianSection(s) },
     memory:          { label: 'Memory',             category: 'Memory',   requiresCwd: true,  render: (s) => memorySection(s) },
@@ -1600,6 +1823,8 @@
       { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
       { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
+      { id: 'changelog',  label: 'Changelog',                                                         pinned: false, requiresCwd: false, hint: 'What shipped, when, plus update check' },
+      { id: 'manage',     label: 'Manage',                                                            pinned: false, requiresCwd: false, hint: 'All Claude settings — open in editor to modify' },
       { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
       { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
@@ -2021,6 +2246,12 @@
   function headerStrip(snap) {
     const themePref = ((snap.userPrefs || {}).theme) || 'auto';
     const { query } = getSearchState();
+    const upd = snap.updateStatus || {};
+    const updatePill = upd.hasUpdate
+      ? `<button class="update-pill" data-action="goto-changelog" title="v${escapeHtml(upd.latestVersion || '')} available — open Changelog">
+          <span class="update-dot"></span>Update v${escapeHtml(upd.latestVersion || '')}
+        </button>`
+      : '';
     return `
       <header class="cockpit-header" data-theme-pref="${escapeHtml(themePref)}">
         <div class="brand">
@@ -2035,6 +2266,7 @@
           ${query ? '<button class="header-btn header-btn-x" data-action="clear-search" title="Clear search">✕</button>' : ''}
         </div>
         <div class="header-actions">
+          ${updatePill}
           <button class="header-btn" data-action="open-customize" title="Customize widgets, tabs, theme">⚙</button>
           <button class="header-btn" data-action="goto-help" title="Help">?</button>
         </div>
@@ -2106,6 +2338,8 @@
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'routines') body = routinesSection(snap);
       else if (activeTab === 'discover') body = discoverSection(snap);
+      else if (activeTab === 'changelog') body = changelogSection(snap);
+      else if (activeTab === 'manage') body = manageSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
@@ -2237,6 +2471,10 @@
       body = routinesSection(snap);
     } else if (activeTab === 'discover') {
       body = discoverSection(snap);
+    } else if (activeTab === 'changelog') {
+      body = changelogSection(snap);
+    } else if (activeTab === 'manage') {
+      body = manageSection(snap);
     } else if (activeTab === 'mac') {
       body = macHealthSection(snap);
     } else if (activeTab === 'help') {
@@ -2313,6 +2551,16 @@
         if (action === 'goto-help') {
           setActiveTab('help');
           if (lastSnapshot) render(lastSnapshot);
+        }
+        if (action === 'goto-changelog') {
+          setActiveTab('changelog');
+          if (lastSnapshot) render(lastSnapshot);
+        }
+        if (action === 'check-update') {
+          vscode.postMessage({ type: 'checkForUpdate' });
+        }
+        if (action === 'open-release') {
+          vscode.postMessage({ type: 'openReleasePage' });
         }
       });
     });
@@ -2616,13 +2864,13 @@
       });
     });
 
-    root.querySelectorAll('a[data-reveal]').forEach((a) => {
+    root.querySelectorAll('a[data-reveal], button[data-reveal]').forEach((a) => {
       a.addEventListener('click', () => {
         vscode.postMessage({ type: 'revealInOS', path: a.getAttribute('data-reveal') });
       });
     });
 
-    root.querySelectorAll('a[data-open-file]').forEach((a) => {
+    root.querySelectorAll('a[data-open-file], button[data-open-file]').forEach((a) => {
       a.addEventListener('click', () => {
         vscode.postMessage({ type: 'openFile', filePath: a.getAttribute('data-open-file') });
       });
