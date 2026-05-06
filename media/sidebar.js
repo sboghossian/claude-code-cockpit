@@ -662,6 +662,128 @@
     return out;
   }
 
+  function roadmapSection(snap) {
+    const r = snap.roadmap;
+    const stateNow = vscode.getState() || {};
+    const filterCat = stateNow.roadmapCat || 'all';
+    const filterStage = stateNow.roadmapStage || 'all';
+    const search = (stateNow.roadmapSearch || '').toLowerCase();
+
+    const head = `
+      <div class="row">
+        <h2 class="left">Roadmap</h2>
+        <span class="right">
+          <button class="office-btn" data-action="roadmap-refresh">Refresh</button>
+          <button class="office-btn" data-action="roadmap-open-live" title="Open roadmap.dashable.dev">Live</button>
+        </span>
+      </div>
+    `;
+
+    if (!r || (!r.categories || r.categories.length === 0)) {
+      const err = r && r.error ? `<p class="empty" style="font-size:11px;color:var(--vscode-errorForeground);">${escapeHtml(r.error)}</p>` : '';
+      return `${head}
+        ${err}
+        <p class="empty" style="font-size:11px;">Loading roadmap from <code>roadmap.dashable.dev</code> (or <code>localhost:3000</code> if running locally)…</p>
+      `;
+    }
+
+    const cats = r.categories;
+    const allProjects = cats.flatMap((c) => c.projects);
+    const stages = Array.from(new Set(allProjects.map((p) => p.stage).filter(Boolean))).sort();
+
+    const matchesFilter = (p) => {
+      if (filterCat !== 'all' && p.category !== filterCat) return false;
+      if (filterStage !== 'all' && p.stage !== filterStage) return false;
+      if (search) {
+        const hay = `${p.name} ${p.desc || ''} ${p.longDesc || ''} ${(p.techStack || []).join(' ')}`.toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      return true;
+    };
+
+    const visibleCats = cats
+      .map((c) => ({ ...c, projects: c.projects.filter(matchesFilter) }))
+      .filter((c) => c.projects.length > 0);
+
+    const visibleCount = visibleCats.reduce((s, c) => s + c.projects.length, 0);
+
+    const ageHint = r.fetchedAt ? `<span class="cost-rate">${fmtAge(r.fetchedAt)}</span>` : '';
+    const sourceHint = r.source ? `<span class="cost-rate" title="${escapeHtml(r.source)}">${r.source.includes('localhost') ? 'local' : 'live'}</span>` : '';
+    const errorHint = r.error ? `<p class="empty" style="font-size:11px;color:var(--vscode-errorForeground);">${escapeHtml(r.error)}</p>` : '';
+
+    const summary = `
+      <div class="row" style="font-size:11px;">
+        <span class="left">${visibleCount} / ${r.totalProjects} projects ${sourceHint} ${ageHint}</span>
+      </div>
+      ${errorHint}
+    `;
+
+    const catChip = (id, label, count) =>
+      `<button class="filter-chip ${filterCat === id ? 'on' : ''}" data-roadmap-cat="${escapeHtml(id)}">${escapeHtml(label)}${count != null ? ` <span class="cost-rate">${count}</span>` : ''}</button>`;
+
+    const catChips = `
+      <div class="filter-chips">
+        ${catChip('all', 'All', allProjects.length)}
+        ${cats.map((c) => catChip(c.key, c.label, c.projects.length)).join('')}
+      </div>
+    `;
+
+    const stageChip = (id, label) =>
+      `<button class="filter-chip ${filterStage === id ? 'on' : ''}" data-roadmap-stage="${escapeHtml(id)}">${escapeHtml(label)}</button>`;
+
+    const stageChips = stages.length
+      ? `<div class="filter-chips">${stageChip('all', 'Any stage')}${stages.map((s) => stageChip(s, s)).join('')}</div>`
+      : '';
+
+    const searchBox = `
+      <div class="row" style="margin: 6px 0;">
+        <input
+          type="text"
+          class="search-input"
+          data-roadmap-search
+          placeholder="Search projects, descriptions, tech stack…"
+          value="${escapeHtml(stateNow.roadmapSearch || '')}"
+          style="width:100%;padding:4px 6px;font-size:11px;"
+        />
+      </div>
+    `;
+
+    const projectCard = (p) => {
+      const sessionCount = (r.sessionStats && r.sessionStats.byProject && r.sessionStats.byProject[p.name]) || p.obsidianSessions || 0;
+      const stageBadge = p.label
+        ? `<span class="filter-chip on" style="background:${escapeHtml(p.color || 'var(--vscode-badge-background)')};color:#fff;border:0;cursor:default;">${escapeHtml(p.label)}</span>`
+        : '';
+      const links = [
+        p.url ? `<button class="office-btn" data-roadmap-open-url="${escapeHtml(p.url)}">Open</button>` : '',
+        p.git ? `<button class="office-btn" data-roadmap-open-url="${escapeHtml(p.git)}">GitHub</button>` : '',
+        sessionCount > 0 ? `<span class="cost-rate" title="Claude Code sessions">${sessionCount} sessions</span>` : '',
+      ].filter(Boolean).join(' ');
+      const tech = (p.techStack || []).slice(0, 6).map((t) => `<span class="cost-rate">${escapeHtml(t)}</span>`).join(' ');
+      const next = (p.nextSteps || []).slice(0, 2).map((s) => `<li>${escapeHtml(s)}</li>`).join('');
+      return `
+        <div class="row" style="display:block;margin:6px 0;padding:8px;border:1px solid var(--vscode-panel-border);border-radius:4px;">
+          <div class="row">
+            <strong class="left">${p.emoji ? p.emoji + ' ' : ''}${escapeHtml(p.name)}</strong>
+            <span class="right">${stageBadge}</span>
+          </div>
+          ${p.desc ? `<div class="note-excerpt">${escapeHtml(p.desc)}</div>` : ''}
+          ${tech ? `<div style="margin:4px 0;">${tech}</div>` : ''}
+          ${next ? `<details><summary style="font-size:10px;color:var(--vscode-descriptionForeground);cursor:pointer;">Next steps</summary><ul style="font-size:11px;margin:4px 0 0 14px;">${next}</ul></details>` : ''}
+          <div class="row" style="margin-top:4px;">${links}</div>
+        </div>
+      `;
+    };
+
+    const catBlocks = visibleCats.map((c) => `
+      <h3 class="sub-h">${escapeHtml(c.label)} <span class="cost-rate">${c.projects.length}</span></h3>
+      ${c.projects.map(projectCard).join('')}
+    `).join('');
+
+    const empty = !visibleCount ? `<p class="empty" style="font-size:11px;">No projects match the current filters.</p>` : '';
+
+    return `${head}${summary}${catChips}${stageChips}${searchBox}${empty}${catBlocks}`;
+  }
+
   function discoverSection(snap) {
     const d = snap.discover || { enabled: false, github: undefined, rss: { entries: [] } };
     if (!d.enabled) {
@@ -1728,6 +1850,7 @@
     agents:          { label: 'Agents',             category: 'Cross',    requiresCwd: false, render: (s) => agentsSection(s) },
     routines:        { label: 'Routines',           category: 'Cross',    requiresCwd: false, render: (s) => routinesSection(s) },
     discover:        { label: 'Discover (GH+RSS)',  category: 'Cross',    requiresCwd: false, render: (s) => discoverSection(s) },
+    roadmap:         { label: 'Roadmap',             category: 'Cross',    requiresCwd: false, render: (s) => roadmapSection(s) },
     changelog:       { label: 'Changelog',           category: 'Cross',    requiresCwd: false, render: (s) => changelogSection(s) },
     manage:          { label: 'Manage Claude',       category: 'Config',   requiresCwd: false, render: (s) => manageSection(s) },
     chatExport:      { label: 'Chat export',        category: 'Cross',    requiresCwd: false, render: (s) => chatExportSection(s) },
@@ -1823,6 +1946,7 @@
       { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
       { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
+      { id: 'roadmap',    label: `Roadmap${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Mirror of roadmap.dashable.dev — every project, filters, links' },
       { id: 'changelog',  label: 'Changelog',                                                         pinned: false, requiresCwd: false, hint: 'What shipped, when, plus update check' },
       { id: 'manage',     label: 'Manage',                                                            pinned: false, requiresCwd: false, hint: 'All Claude settings — open in editor to modify' },
       { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
@@ -2338,6 +2462,7 @@
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'routines') body = routinesSection(snap);
       else if (activeTab === 'discover') body = discoverSection(snap);
+      else if (activeTab === 'roadmap') { body = roadmapSection(snap); maybeAutoFetchRoadmap(); }
       else if (activeTab === 'changelog') body = changelogSection(snap);
       else if (activeTab === 'manage') body = manageSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
@@ -2471,6 +2596,9 @@
       body = routinesSection(snap);
     } else if (activeTab === 'discover') {
       body = discoverSection(snap);
+    } else if (activeTab === 'roadmap') {
+      body = roadmapSection(snap);
+      maybeAutoFetchRoadmap();
     } else if (activeTab === 'changelog') {
       body = changelogSection(snap);
     } else if (activeTab === 'manage') {
@@ -2511,6 +2639,13 @@
     vscode.setState(next);
   }
 
+  // Fetch roadmap on first view, or refresh if cache is older than 10 min.
+  function maybeAutoFetchRoadmap() {
+    const r = lastSnapshot && lastSnapshot.roadmap;
+    const stale = !r || !r.fetchedAt || (Date.now() - r.fetchedAt > 10 * 60 * 1000);
+    if (stale) vscode.postMessage({ type: 'fetchRoadmap' });
+  }
+
   function openCustomize() {
     vscode.setState({ ...(vscode.getState() || {}), customizeOpen: true });
   }
@@ -2530,6 +2665,7 @@
         const id = btn.getAttribute('data-tab');
         if (!id) return;
         setActiveTab(id);
+        if (id === 'roadmap') maybeAutoFetchRoadmap();
         if (lastSnapshot) render(lastSnapshot);
       });
     });
@@ -2726,6 +2862,51 @@
     root.querySelectorAll('button[data-action="enable-discover"]').forEach((btn) => {
       btn.addEventListener('click', () => {
         persistUserPrefs({ discoverEnabled: true });
+      });
+    });
+
+    root.querySelectorAll('button[data-action="roadmap-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'fetchRoadmap' });
+      });
+    });
+    root.querySelectorAll('button[data-action="roadmap-open-live"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'openExternal', url: 'https://roadmap.dashable.dev' });
+      });
+    });
+    root.querySelectorAll('button[data-roadmap-cat]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-roadmap-cat');
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, roadmapCat: id });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-roadmap-stage]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-roadmap-stage');
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, roadmapStage: id });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('input[data-roadmap-search]').forEach((el) => {
+      let t;
+      el.addEventListener('input', (e) => {
+        clearTimeout(t);
+        const v = e.target.value;
+        t = setTimeout(() => {
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, roadmapSearch: v });
+          if (lastSnapshot) render(lastSnapshot);
+        }, 200);
+      });
+    });
+    root.querySelectorAll('button[data-roadmap-open-url]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const url = btn.getAttribute('data-roadmap-open-url');
+        if (url) vscode.postMessage({ type: 'openExternal', url });
       });
     });
 

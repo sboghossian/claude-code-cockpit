@@ -2,6 +2,18 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] — 2026-05-06
+
+### Added
+
+- **Roadmap tab.** Mirrors `roadmap.dashable.dev` directly inside Cockpit. Lists every project across HAQQ, AI Frameworks, AI Visualization, AI Simulation, AI Research, AI Desktop, Developer Tools, Fintech, Knowledge Management, Meta, and Other. Filter by category, filter by stage (concept / active / shipped / etc.), live search across name + description + tech stack. Each project card shows emoji, stage badge, description, top tech, next steps, and Open / GitHub buttons. Session counts roll in from the same scanner the live site uses.
+- **Local-first roadmap fetch.** Tries `http://localhost:3000/api/projects` first (when the Roadmap server is running on this machine), falls back to `https://roadmap.dashable.dev/api/projects`, then falls back to a disk cache at `~/.claude/.cache/cockpit-roadmap.json`. Auto-fetches on first view and refreshes if the cache is older than 10 minutes.
+- New `Roadmap` widget available in the Custom tab.
+
+### Changed
+
+- PRIVACY.md note: when the Roadmap tab is opened, Cockpit fetches `roadmap.dashable.dev` (or `localhost:3000`) for project metadata. No telemetry, no auth.
+
 ## [0.13.0] — 2026-05-06
 
 ### Added
