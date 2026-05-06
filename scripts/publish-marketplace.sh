@@ -19,8 +19,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-PUBLISHER="dashable"
-EXT_ID="claude-cockpit"
+PUBLISHER=$(node -p "require('./package.json').publisher")
+EXT_ID=$(node -p "require('./package.json').name")
 
 if [[ -z "${VSCE_PAT:-}" ]]; then
   echo "ERROR: VSCE_PAT is not set." >&2

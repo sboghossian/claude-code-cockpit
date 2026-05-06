@@ -1,6 +1,8 @@
-# Claude Cockpit
+# Claude Code Cockpit
 
-> The personal-OS HUD for Claude Code. VSCode-native. 100% local.
+> The local-first HUD for Claude Code. Every session, every token, every dollar — in your VSCode sidebar. Read-only. 100% local.
+
+[![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/dashable.claude-code-cockpit?label=Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit) [![GitHub release](https://img.shields.io/github/v/release/sboghossian/claude-cockpit?label=GitHub)](https://github.com/sboghossian/claude-cockpit/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ![Claude Cockpit — Now and Mac tabs](media/screenshots/hero.png)
 
@@ -54,16 +56,28 @@ Claude Code stores rich session state on disk. The CLI doesn't surface most of i
 
 ## Install
 
+### Marketplace (recommended)
+
+```bash
+code --install-extension dashable.claude-code-cockpit
+```
+
+Or in VSCode: **Extensions** sidebar → search **"Claude Code Cockpit"** → click **Install**.
+
+[View on the VSCode Marketplace →](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit)
+
 ### Quick start (90 seconds)
 
-1. **Grab the latest `.vsix`** from the [Releases page](https://github.com/sboghossian/claude-cockpit/releases) — pick the one named `claude-cockpit-<latest>.vsix`.
-2. **Install it:**
-   ```bash
-   code --install-extension claude-cockpit-<latest>.vsix
-   ```
-   Or in VSCode: Extensions sidebar → `…` menu → **Install from VSIX…** → pick the file.
-3. **Open the Cockpit:** click the Cockpit icon in the Activity Bar (left rail). On first launch you'll see a **Welcome** tab with a system-check checklist and "Next steps" buttons (Customize widgets · Open settings · Go to Now · Read the docs).
-4. **Bootstrap data:** open any folder in VSCode and run `claude` in its terminal. The moment Claude Code writes its first JSONL turn, the Cockpit lights up.
+1. **Install** via the marketplace command above (or grab the `.vsix` from [Releases](https://github.com/sboghossian/claude-cockpit/releases)).
+2. **Open the Cockpit:** click the Cockpit icon in the Activity Bar (left rail). On first launch you'll see a **Welcome** tab with a system-check checklist and "Next steps" buttons (Customize widgets · Open settings · Go to Now · Read the docs).
+3. **Bootstrap data:** open any folder in VSCode and run `claude` in its terminal. The moment Claude Code writes its first JSONL turn, the Cockpit lights up.
+
+### Sideload (offline / air-gapped)
+
+```bash
+# Download claude-code-cockpit-<latest>.vsix from the GitHub Releases page, then:
+code --install-extension claude-code-cockpit-<latest>.vsix
+```
 
 That's it. Cockpit is read-only and runs entirely on your machine — no telemetry, no network calls without an explicit opt-in (`Discover` and `Cloud routines` are both off by default).
 
@@ -89,13 +103,11 @@ npm run compile
 
 Then open the folder in VSCode and press `F5` to launch an Extension Development Host.
 
-### Marketplace
+### Marketplace (for maintainers)
 
-<!-- Uncomment once the first marketplace publish lands:
-[Install from the VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=dashable.claude-cockpit)
--->
+[Listing →](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit)
 
-For maintainers — publishing a new version:
+To publish a new version:
 
 1. Generate a Personal Access Token (PAT) for the `dashable` publisher in Azure DevOps (Marketplace → Manage scope). See the [Microsoft publish guide](https://learn.microsoft.com/en-us/azure/devops/marketplace/publish-extension).
 2. Export it: `export VSCE_PAT="<your-pat>"`.
