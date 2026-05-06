@@ -32,6 +32,9 @@ export function activate(context: vscode.ExtensionContext): void {
       enabled: cfg.get<boolean>('enabled') ?? false,
       dailyCapUsd: cfg.get<number>('dailyCapUsd') ?? 0,
       sessionCapUsd: cfg.get<number>('sessionCapUsd') ?? 0,
+      weeklyCapUsd: cfg.get<number>('weeklyCapUsd') ?? 0,
+      monthlyCapUsd: cfg.get<number>('monthlyCapUsd') ?? 0,
+      yearlyCapUsd: cfg.get<number>('yearlyCapUsd') ?? 0,
     };
   }
 

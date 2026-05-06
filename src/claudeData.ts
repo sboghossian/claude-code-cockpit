@@ -209,6 +209,7 @@ export interface CockpitSnapshot {
   notifications: Notification[];
   recommendations: Recommendation[];
   budget: BudgetStatus;
+  usage: UsageRollups;
   plans: PlanFile[];
   chatExport: ChatExportStatus;
   heatmap: ActivityHeatmap;
@@ -331,6 +332,39 @@ export interface BudgetConfig {
   enabled: boolean;
   dailyCapUsd: number;
   sessionCapUsd: number;
+  weeklyCapUsd: number;
+  monthlyCapUsd: number;
+  yearlyCapUsd: number;
+}
+
+export interface UsagePeriodTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  totalTokens: number;
+  totalUsd: number;
+  turns: number;
+  byModel: { family: ModelFamily; tokens: number; usd: number }[];
+}
+
+export interface UsageRollupPeriod extends UsagePeriodTotals {
+  capUsd: number;
+  pct: number;
+  tone: 'ok' | 'warn' | 'danger';
+  rangeLabel: string;
+}
+
+export interface UsageRollups {
+  session: UsageRollupPeriod;
+  today: UsageRollupPeriod;
+  week: UsageRollupPeriod;
+  month: UsageRollupPeriod;
+  year: UsageRollupPeriod;
+  allTime: UsageRollupPeriod;
+  scannedFiles: number;
+  cacheHits: number;
+  scanMs: number;
 }
 
 export interface LocalEntry {
@@ -1430,6 +1464,293 @@ function readSessionLight(
   return out;
 }
 
+// ===== Usage rollups ==========================================================
+// Multi-period usage aggregations (session/today/week/month/year/all-time)
+// computed across every JSONL under ~/.claude/projects/. The full scan is
+// heavy on first run; subsequent runs use a (mtime, size)-keyed cache at
+// ~/.claude/cockpit-usage-cache.json so only changed JSONLs re-parse.
+
+interface UsageCacheFileEntry {
+  mtimeMs: number;
+  size: number;
+  byDate: Record<string, {
+    iT: number;
+    oT: number;
+    cR: number;
+    cC: number;
+    fam: ModelFamily;
+    turns: number;
+  }>;
+}
+
+interface UsageCacheV1 {
+  version: 1;
+  files: Record<string, UsageCacheFileEntry>;
+}
+
+const USAGE_CACHE_FILE = path.join(os.homedir(), '.claude', 'cockpit-usage-cache.json');
+
+function readUsageCache(): UsageCacheV1 {
+  try {
+    const raw = fs.readFileSync(USAGE_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.version === 1 && parsed.files && typeof parsed.files === 'object') {
+      return parsed as UsageCacheV1;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { version: 1, files: {} };
+}
+
+function writeUsageCache(cache: UsageCacheV1): void {
+  try {
+    fs.writeFileSync(USAGE_CACHE_FILE, JSON.stringify(cache));
+  } catch (err) {
+    logger.warn(`usage cache write failed: ${String(err)}`);
+  }
+}
+
+function readSessionByDate(file: string): UsageCacheFileEntry['byDate'] {
+  const out: UsageCacheFileEntry['byDate'] = {};
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return out;
+  }
+  let lastFamily: ModelFamily = 'unknown';
+  for (const line of raw.split('\n')) {
+    const parsed = parseLine(line);
+    if (!parsed) continue;
+    const m = parsed.message?.model;
+    if (typeof m === 'string') lastFamily = modelFamilyOf(m);
+    const usage = parsed.message?.usage;
+    if (!usage) continue;
+    const ts = parsed.timestamp;
+    if (!ts) continue;
+    const dt = new Date(ts);
+    if (isNaN(dt.getTime())) continue;
+    const y = dt.getFullYear();
+    const mo = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    const key = `${y}-${mo}-${d}`;
+    const entry = out[key] ?? { iT: 0, oT: 0, cR: 0, cC: 0, fam: lastFamily, turns: 0 };
+    entry.iT += usage.input_tokens ?? 0;
+    entry.oT += usage.output_tokens ?? 0;
+    entry.cR += usage.cache_read_input_tokens ?? 0;
+    entry.cC += usage.cache_creation_input_tokens ?? 0;
+    entry.fam = lastFamily;
+    if (parsed.type === 'assistant') entry.turns += 1;
+    out[key] = entry;
+  }
+  return out;
+}
+
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${day}`;
+}
+
+function isoWeekStart(d: Date): Date {
+  // Monday as week start (matches ISO weeks).
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  const dow = out.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  out.setDate(out.getDate() + diff);
+  return out;
+}
+
+function emptyPeriod(rangeLabel: string, capUsd: number): UsageRollupPeriod {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    totalUsd: 0,
+    turns: 0,
+    byModel: [],
+    capUsd,
+    pct: 0,
+    tone: 'ok',
+    rangeLabel,
+  };
+}
+
+type FamilyTotals = Record<ModelFamily, { tokens: number; usd: number }>;
+function emptyFamily(): FamilyTotals {
+  return {
+    opus: { tokens: 0, usd: 0 },
+    sonnet: { tokens: 0, usd: 0 },
+    haiku: { tokens: 0, usd: 0 },
+    unknown: { tokens: 0, usd: 0 },
+  };
+}
+
+function addToPeriod(
+  period: UsagePeriodTotals,
+  fam: FamilyTotals,
+  d: { iT: number; oT: number; cR: number; cC: number; fam: ModelFamily; turns: number },
+  cost: CostBreakdown,
+  tokens: number,
+): void {
+  period.inputTokens += d.iT;
+  period.outputTokens += d.oT;
+  period.cacheReadTokens += d.cR;
+  period.cacheCreationTokens += d.cC;
+  period.totalTokens += tokens;
+  period.totalUsd += cost.totalUsd;
+  period.turns += d.turns;
+  fam[d.fam].tokens += tokens;
+  fam[d.fam].usd += cost.totalUsd;
+}
+
+export interface UsageRollupOptions {
+  sessionCapUsd?: number;
+  dailyCapUsd?: number;
+  weeklyCapUsd?: number;
+  monthlyCapUsd?: number;
+  yearlyCapUsd?: number;
+  activeSessionFile?: string | undefined;
+}
+
+export function computeUsageRollups(opts: UsageRollupOptions = {}): UsageRollups {
+  const t0 = Date.now();
+  const rollups: UsageRollups = {
+    session: emptyPeriod('current session', opts.sessionCapUsd ?? 0),
+    today: emptyPeriod('today', opts.dailyCapUsd ?? 0),
+    week: emptyPeriod('this week (Mon–Sun)', opts.weeklyCapUsd ?? 0),
+    month: emptyPeriod('this month', opts.monthlyCapUsd ?? 0),
+    year: emptyPeriod('this year', opts.yearlyCapUsd ?? 0),
+    allTime: emptyPeriod('all time', 0),
+    scannedFiles: 0,
+    cacheHits: 0,
+    scanMs: 0,
+  };
+  if (!fs.existsSync(claudeHome)) {
+    rollups.scanMs = Date.now() - t0;
+    return rollups;
+  }
+
+  const cache = readUsageCache();
+  const now = new Date();
+  const todayKey = localDateKey(now);
+  const weekStartKey = localDateKey(isoWeekStart(now));
+  const monthKey = todayKey.slice(0, 7);
+  const yearKey = todayKey.slice(0, 4);
+
+  const famAccum: Record<
+    'session' | 'today' | 'week' | 'month' | 'year' | 'allTime',
+    FamilyTotals
+  > = {
+    session: emptyFamily(),
+    today: emptyFamily(),
+    week: emptyFamily(),
+    month: emptyFamily(),
+    year: emptyFamily(),
+    allTime: emptyFamily(),
+  };
+
+  const seenFiles = new Set<string>();
+  let projects: string[];
+  try {
+    projects = fs.readdirSync(claudeHome);
+  } catch {
+    rollups.scanMs = Date.now() - t0;
+    return rollups;
+  }
+
+  for (const proj of projects) {
+    const dir = path.join(claudeHome, proj);
+    let dStat;
+    try {
+      dStat = fs.statSync(dir);
+    } catch {
+      continue;
+    }
+    if (!dStat.isDirectory()) continue;
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const full = path.join(dir, f);
+      let fStat;
+      try {
+        fStat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      seenFiles.add(full);
+      const cached = cache.files[full];
+      let byDate: UsageCacheFileEntry['byDate'];
+      if (cached && cached.mtimeMs === fStat.mtimeMs && cached.size === fStat.size) {
+        byDate = cached.byDate;
+        rollups.cacheHits += 1;
+      } else {
+        byDate = readSessionByDate(full);
+        cache.files[full] = { mtimeMs: fStat.mtimeMs, size: fStat.size, byDate };
+      }
+      rollups.scannedFiles += 1;
+      const isActiveSession = !!opts.activeSessionFile && full === opts.activeSessionFile;
+
+      for (const dateKey of Object.keys(byDate)) {
+        const d = byDate[dateKey];
+        const cost = computeCost({
+          inputTokens: d.iT,
+          outputTokens: d.oT,
+          cacheReadTokens: d.cR,
+          cacheCreationTokens: d.cC,
+          modelFamily: d.fam,
+        });
+        const tokens = d.iT + d.oT + d.cR + d.cC;
+
+        addToPeriod(rollups.allTime, famAccum.allTime, d, cost, tokens);
+        if (dateKey.slice(0, 4) === yearKey) {
+          addToPeriod(rollups.year, famAccum.year, d, cost, tokens);
+        }
+        if (dateKey.slice(0, 7) === monthKey) {
+          addToPeriod(rollups.month, famAccum.month, d, cost, tokens);
+        }
+        if (dateKey >= weekStartKey && dateKey <= todayKey) {
+          addToPeriod(rollups.week, famAccum.week, d, cost, tokens);
+        }
+        if (dateKey === todayKey) {
+          addToPeriod(rollups.today, famAccum.today, d, cost, tokens);
+        }
+        if (isActiveSession) {
+          addToPeriod(rollups.session, famAccum.session, d, cost, tokens);
+        }
+      }
+    }
+  }
+
+  for (const cachedPath of Object.keys(cache.files)) {
+    if (!seenFiles.has(cachedPath)) delete cache.files[cachedPath];
+  }
+  writeUsageCache(cache);
+
+  for (const periodKey of ['session', 'today', 'week', 'month', 'year', 'allTime'] as const) {
+    const period = rollups[periodKey];
+    const fam = famAccum[periodKey];
+    period.byModel = (Object.entries(fam) as [ModelFamily, { tokens: number; usd: number }][])
+      .filter(([, v]) => v.tokens > 0)
+      .map(([family, v]) => ({ family, tokens: v.tokens, usd: v.usd }))
+      .sort((a, b) => b.usd - a.usd);
+    period.pct = period.capUsd > 0 ? Math.min(100, (period.totalUsd / period.capUsd) * 100) : 0;
+    period.tone = period.pct >= 100 ? 'danger' : period.pct >= 80 ? 'warn' : 'ok';
+  }
+
+  rollups.scanMs = Date.now() - t0;
+  return rollups;
+}
+
 // Disk usage — sum of all .jsonl files under ~/.claude/projects/.
 export function computeDiskUsage(): number {
   if (!fs.existsSync(claudeHome)) return 0;
@@ -1719,6 +2040,16 @@ function snapshotInner(
   if (!active) {
     const stats = emptyStatsFor(undefined);
     const budget = computeBudget(budgetConfig, today.totalUsd, 0);
+    const usage = recordTime('snapshot.computeUsageRollups', () =>
+      computeUsageRollups({
+        sessionCapUsd: budgetConfig?.sessionCapUsd ?? 0,
+        dailyCapUsd: budgetConfig?.dailyCapUsd ?? 0,
+        weeklyCapUsd: budgetConfig?.weeklyCapUsd ?? 0,
+        monthlyCapUsd: budgetConfig?.monthlyCapUsd ?? 0,
+        yearlyCapUsd: budgetConfig?.yearlyCapUsd ?? 0,
+        activeSessionFile: undefined,
+      }),
+    );
     const skillsEmpty = listSkills();
     return {
       cwd: undefined,
@@ -1760,6 +2091,7 @@ function snapshotInner(
         cwd: undefined,
       }),
       budget,
+      usage,
       plans,
       chatExport,
       heatmap,
@@ -1796,6 +2128,16 @@ function snapshotInner(
   const claudeMdStack = readClaudeMdStack(active.decodedPath);
   const costByTool = computeCostByTool(stats);
   const budget = computeBudget(budgetConfig, today.totalUsd, stats.cost.totalUsd, stats.costPerHourUsd);
+  const usage = recordTime('snapshot.computeUsageRollups', () =>
+    computeUsageRollups({
+      sessionCapUsd: budgetConfig?.sessionCapUsd ?? 0,
+      dailyCapUsd: budgetConfig?.dailyCapUsd ?? 0,
+      weeklyCapUsd: budgetConfig?.weeklyCapUsd ?? 0,
+      monthlyCapUsd: budgetConfig?.monthlyCapUsd ?? 0,
+      yearlyCapUsd: budgetConfig?.yearlyCapUsd ?? 0,
+      activeSessionFile: active.sessionFile,
+    }),
+  );
   const notifications = computeNotifications({
     stats,
     memory,
@@ -1838,6 +2180,7 @@ function snapshotInner(
     notifications,
     recommendations,
     budget,
+    usage,
     plans,
     chatExport,
     heatmap,

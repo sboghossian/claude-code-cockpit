@@ -1164,6 +1164,71 @@
     `;
   }
 
+  function fmtUsdAmount(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '$0.00';
+    if (n >= 1000) return '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (n >= 100) return '$' + n.toFixed(0);
+    if (n >= 10) return '$' + n.toFixed(1);
+    return '$' + n.toFixed(2);
+  }
+
+  function fmtTokensCompact(n) {
+    if (typeof n !== 'number' || !isFinite(n) || n === 0) return '0';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n));
+  }
+
+  function usageRollupsSection(snap) {
+    const u = snap.usage;
+    if (!u) {
+      return '<h2>Usage rollups</h2><p class="empty">No usage data scanned yet.</p>';
+    }
+    const periods = [
+      { key: 'session', label: 'Session' },
+      { key: 'today',   label: 'Today' },
+      { key: 'week',    label: 'This week' },
+      { key: 'month',   label: 'This month' },
+      { key: 'year',    label: 'This year' },
+      { key: 'allTime', label: 'All time' },
+    ];
+    const rows = periods.map(({ key, label }) => {
+      const p = u[key];
+      if (!p) return '';
+      const cap = p.capUsd > 0;
+      const bar = cap
+        ? `<div class="bar"><div class="bar-fill bar-${escapeHtml(p.tone)}" style="width: ${p.pct.toFixed(1)}%"></div></div>`
+        : '';
+      const capText = cap
+        ? `${fmtUsdAmount(p.totalUsd)} / ${fmtUsdAmount(p.capUsd)}`
+        : fmtUsdAmount(p.totalUsd);
+      const subline = `${fmtTokensCompact(p.totalTokens)} tok · ${p.turns} turn${p.turns === 1 ? '' : 's'}`;
+      const noCapHint = !cap && (key === 'week' || key === 'month' || key === 'year')
+        ? ` <span class="tag" title="Set claudeCockpit.budget.${key === 'week' ? 'weekly' : key === 'month' ? 'monthly' : 'yearly'}CapUsd to enable progress bar">no cap</span>`
+        : '';
+      return `
+        <div class="budget-row" style="margin-top: 6px;">
+          <span>${escapeHtml(label)}${noCapHint}</span>
+          <span class="b-cap">${escapeHtml(capText)}</span>
+        </div>
+        <div class="budget-row" style="opacity: 0.7; font-size: 11px;">
+          <span>${escapeHtml(subline)}</span>
+          <span></span>
+        </div>
+        ${bar}
+      `;
+    }).join('');
+    const scanInfo = u.scanMs > 0
+      ? `<p class="empty" style="font-size: 10px; margin-top: 6px;">Scanned ${u.scannedFiles} file${u.scannedFiles === 1 ? '' : 's'} · ${u.cacheHits} cached · ${u.scanMs}ms</p>`
+      : '';
+    return `
+      <h2>Usage rollups</h2>
+      <div class="budget-card">${rows}</div>
+      ${scanInfo}
+    `;
+  }
+
   function usageDashboardSection(snap) {
     const u = snap.usageDashboard;
     if (!u) return '';
@@ -3061,6 +3126,7 @@
     cost:            { label: 'Cost',               category: 'Session',  requiresCwd: true,  render: (s) => costSection(s.stats) },
     costByTool:      { label: 'Cost by tool',       category: 'Session',  requiresCwd: true,  render: (s) => costByToolSection(s) },
     budget:          { label: 'Budget caps',        category: 'Session',  requiresCwd: false, render: (s) => budgetSection(s) },
+    usageRollups:    { label: 'Usage rollups',      category: 'Session',  requiresCwd: false, render: (s) => usageRollupsSection(s) },
     sessionMeta:     { label: 'Session metadata',   category: 'Session',  requiresCwd: true,  render: (s) => sessionMetaFragment(s) },
     claudeMd:        { label: 'CLAUDE.md stack',    category: 'Session',  requiresCwd: true,  render: (s) => claudeMdSection(s) },
     toolHistogram:   { label: 'Tool histogram',     category: 'Session',  requiresCwd: true,  render: (s) => toolHistogramSection(s.stats) },
@@ -3093,6 +3159,17 @@
     officeFloor:     { label: 'Office floor',       category: 'Cross',    requiresCwd: false, render: (s) => officeFloorSection(s) },
     settings:        { label: 'Global settings',    category: 'Config',   requiresCwd: false, render: (s) => settingsSection(s) },
     diskUsage:       { label: 'Disk usage',         category: 'Config',   requiresCwd: false, render: (s) => diskUsageSection(s) },
+    sessionActive:   { label: 'Active session block', category: 'Session', requiresCwd: true,  render: (s) => activeSessionFragment(s) },
+    watchtowerIdle:  { label: 'Idle sentinel',      category: 'Cross',    requiresCwd: false, render: (s) => watchtowerSection(s, { idleOnly: true }) },
+    timeline:        { label: 'Timeline (full)',    category: 'Cross',    requiresCwd: false, render: (s) => timelineSection(s) },
+    unifiedSettings: { label: 'Settings (full)',    category: 'Config',   requiresCwd: false, render: (s) => unifiedSettingsSection(s) },
+    history:         { label: 'History (full)',     category: 'Cross',    requiresCwd: false, render: (s) => historySection(s) },
+    library:         { label: 'Library (full)',     category: 'Memory',   requiresCwd: false, render: (s) => librarySection(s) },
+    browse:          { label: 'Browse (full)',      category: 'Cross',    requiresCwd: false, render: (s) => browseSection(s) },
+    talk:            { label: 'Talk',               category: 'Cross',    requiresCwd: false, render: (s) => talkSection(s) },
+    securityFull:    { label: 'Security (full)',    category: 'System',   requiresCwd: false, render: (s) => securitySection(s) },
+    helpDoc:         { label: 'Help',               category: 'Config',   requiresCwd: false, render: () => helpSection() },
+    selfTelemetry:   { label: 'Self · telemetry',   category: 'System',   requiresCwd: false, render: (s) => selfTelemetrySection(s) },
   };
 
   // Fragments used as components but not standalone sections — they get
@@ -3131,6 +3208,18 @@
     `;
   }
 
+  function activeSessionFragment(snap) {
+    if (!snap.cwd) return '';
+    const s = snap.stats || {};
+    const liveDot = s.isActive ? '<span class="live-dot" title="written in last 10s"></span>' : '';
+    return `
+      <h2>Active session ${liveDot}</h2>
+      <div class="kv">
+        <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
+      </div>
+    `;
+  }
+
   function filesTouchedFragment(snap) {
     const s = snap.stats;
     const items = s.filesTouched.length
@@ -3158,6 +3247,38 @@
   // ===========================================================================
   const PINNED_TABS = ['custom', 'now', 'help'];
   const DEFAULT_CUSTOM_COMPONENTS = ['greeting', 'inbox', 'statsGrid', 'quickActions', 'tokens', 'cost', 'routines'];
+
+  // Per-tab default compositions. Each tab's body is now a list of widget IDs;
+  // the user can override any tab via the Customize panel. Empty array =
+  // "user wants this tab empty" — never falls back to defaults silently.
+  const DEFAULT_TAB_COMPOSITIONS = {
+    custom:     DEFAULT_CUSTOM_COMPONENTS,
+    now: [
+      'greeting', 'notifications', 'inbox', 'statsGrid', 'pilot',
+      'quickActions', 'plans', 'sessionActive', 'tokens', 'heatmap',
+      'contextFill', 'cost', 'costByTool', 'budget', 'usageRollups',
+      'sessionMeta', 'claudeMd', 'toolHistogram', 'subAgents', 'toolHistory',
+      'activityFeed', 'filesTouched', 'today',
+    ],
+    recs:       ['recommendations'],
+    mac:        ['macHealth'],
+    watchtower: ['watchtower', 'watchtowerIdle'],
+    office:     ['officeFloor', 'office'],
+    agents:     ['agents'],
+    routines:   ['routines'],
+    discover:   ['discover'],
+    timeline:   ['timeline'],
+    settings:   ['unifiedSettings'],
+    history:    ['history'],
+    obsidian:   ['obsidian'],
+    library:    ['library'],
+    skills:     ['skills'],
+    browse:     ['browse'],
+    talk:       ['talk'],
+    security:   ['securityFull'],
+    help:       ['helpDoc'],
+    self:       ['selfTelemetry'],
+  };
 
   function tabCatalogue(snap) {
     const chatLabel = snap.chatExport && snap.chatExport.installed
@@ -3243,16 +3364,37 @@
     }));
   }
 
-  function getCustomComponentIds(snap) {
+  // Returns the widget IDs for a tab, honoring user prefs FIRST. An empty
+  // array in prefs.tabComponents[tabId] means "user wants this empty" and
+  // we DO NOT fall back to defaults (option a + bug-fix).
+  function getTabComponentIds(snap, tabId) {
     const prefs = (snap && snap.userPrefs) || {};
-    if (Array.isArray(prefs.customComponents) && prefs.customComponents.length) {
-      return prefs.customComponents.filter((id) => COMPONENTS[id]);
+    const tabPrefs = prefs.tabComponents;
+    if (tabPrefs && Object.prototype.hasOwnProperty.call(tabPrefs, tabId)) {
+      const list = tabPrefs[tabId];
+      if (Array.isArray(list)) return list.filter((id) => COMPONENTS[id]);
     }
-    return DEFAULT_CUSTOM_COMPONENTS.filter((id) => COMPONENTS[id]);
+    // Legacy migration: prior versions stored a single `customComponents`
+    // list that drove the Custom tab. Honor it for backward compat until the
+    // user touches the new per-tab picker, but only for the Custom tab.
+    if (tabId === 'custom') {
+      const legacy = prefs.customComponents;
+      if (Array.isArray(legacy) && legacy.length) {
+        return legacy.filter((id) => COMPONENTS[id]);
+      }
+    }
+    const def = DEFAULT_TAB_COMPOSITIONS[tabId];
+    if (Array.isArray(def)) return def.filter((id) => COMPONENTS[id]);
+    return [];
   }
 
-  function customTabBody(snap) {
-    const ids = getCustomComponentIds(snap);
+  // Back-compat shim — global search overlay still calls this name.
+  function getCustomComponentIds(snap) {
+    return getTabComponentIds(snap, 'custom');
+  }
+
+  function tabBodyComposed(snap, tabId) {
+    const ids = getTabComponentIds(snap, tabId);
     const hasCwd = !!snap.cwd;
     const blocked = [];
     const rendered = ids
@@ -3273,27 +3415,47 @@
     const blockedNote = blocked.length
       ? `<p class="empty" style="font-size: 11px;">Hidden until a Claude Code session is active in this folder: ${blocked.map((b) => escapeHtml(b)).join(', ')}.</p>`
       : '';
-    const empty = !rendered.trim()
-      ? `<p class="empty">No components selected. Click <strong>Customize</strong> in the header to pick widgets for this tab.</p>`
+    const empty = !rendered.trim() && !blocked.length
+      ? `<p class="empty">No widgets on this tab. Click <strong>⚙</strong> in the header to add some.</p>`
       : '';
-    return `${customizeHint(snap)}${empty}${rendered}${blockedNote}`;
+    return `${customizeHint(snap, tabId)}${empty}${rendered}${blockedNote}`;
   }
 
-  function customizeHint(snap) {
-    const ids = getCustomComponentIds(snap);
+  // Back-compat alias; some call sites may still reference customTabBody.
+  function customTabBody(snap) {
+    return tabBodyComposed(snap, 'custom');
+  }
+
+  function customizeHint(snap, tabId) {
+    const ids = getTabComponentIds(snap, tabId);
+    const cat = tabCatalogue(snap);
+    const tab = cat.find((t) => t.id === tabId);
+    const tabLabel = tab ? stripCount(tab.label) : tabId;
     return `
       <div class="customize-hint">
-        <span><strong>Custom</strong> · ${ids.length} widget${ids.length === 1 ? '' : 's'}</span>
-        <button class="office-btn" data-action="open-customize">Customize ⚙</button>
+        <span><strong>${escapeHtml(tabLabel)}</strong> · ${ids.length} widget${ids.length === 1 ? '' : 's'}</span>
+        <button class="office-btn" data-action="open-customize" data-customize-tab="${escapeHtml(tabId)}">Customize ⚙</button>
       </div>
     `;
   }
 
+  function getCustomizeTab(snap) {
+    const state = vscode.getState() || {};
+    if (typeof state.customizeTab === 'string') {
+      const cat = tabCatalogue(snap);
+      if (cat.some((t) => t.id === state.customizeTab)) return state.customizeTab;
+    }
+    return 'custom';
+  }
+
   function customizePanel(snap) {
-    const customSet = new Set(getCustomComponentIds(snap));
     const tabSet = new Set(getEnabledTabIds(snap).map((t) => t.id));
     const cat = tabCatalogue(snap);
     const themePref = ((snap.userPrefs || {}).theme) || 'auto';
+    const editingTabId = getCustomizeTab(snap);
+    const editingTab = cat.find((t) => t.id === editingTabId);
+    const editingLabel = editingTab ? stripCount(editingTab.label) : editingTabId;
+    const activeSet = new Set(getTabComponentIds(snap, editingTabId));
 
     const compsByCat = {};
     for (const [id, c] of Object.entries(COMPONENTS)) {
@@ -3307,8 +3469,8 @@
         <div class="comp-grid">
           ${items
             .map(
-              (c) => `<label class="comp-toggle ${customSet.has(c.id) ? 'on' : ''}">
-                <input type="checkbox" data-component-toggle="${escapeHtml(c.id)}" ${customSet.has(c.id) ? 'checked' : ''} />
+              (c) => `<label class="comp-toggle ${activeSet.has(c.id) ? 'on' : ''}">
+                <input type="checkbox" data-component-toggle="${escapeHtml(c.id)}" ${activeSet.has(c.id) ? 'checked' : ''} />
                 <span class="comp-label">${escapeHtml(c.label)}</span>
                 ${c.requiresCwd ? '<span class="tag" title="Requires active session">cwd</span>' : ''}
               </label>`,
@@ -3347,13 +3509,28 @@
       )
       .join('');
 
+    // Tab selector for per-tab widget editing.
+    const editTabSelector = `
+      <div class="filter-chips" data-tab-edit-row>
+        ${cat
+          .map(
+            (t) => `<button class="filter-chip ${t.id === editingTabId ? 'on' : ''}" data-customize-edit-tab="${escapeHtml(t.id)}" title="${escapeHtml(t.hint || '')}">${escapeHtml(stripCount(t.label))}</button>`,
+          )
+          .join('')}
+      </div>
+    `;
+
+    const widgetCount = activeSet.size;
+    const resetBtn = `<button class="office-btn" data-action="reset-tab-widgets" data-customize-edit-tab="${escapeHtml(editingTabId)}" title="Restore the default widget set for this tab">Reset to default</button>`;
+    const clearBtn = `<button class="office-btn" data-action="clear-tab-widgets" data-customize-edit-tab="${escapeHtml(editingTabId)}" title="Remove every widget on this tab">Clear all</button>`;
+
     return `
       <div class="customize-panel">
         <div class="row">
           <h2 class="left">Customize Cockpit</h2>
           <button class="office-btn right" data-action="close-customize">Done</button>
         </div>
-        <p class="empty" style="font-size: 11px;">Pick widgets for the <strong>Custom</strong> tab and choose which tabs are visible. Pinned tabs (Custom, Now, Help) can't be hidden.</p>
+        <p class="empty" style="font-size: 11px;">Pick widgets for any tab. Empty = empty (no fallback). Pinned tabs (Custom, Now, Help) can't be hidden.</p>
 
         <h3 class="sub-h">Theme</h3>
         <div class="theme-toggle">
@@ -3371,7 +3548,10 @@
         ${filterChips}
         <div class="comp-grid">${tabHtml}</div>
 
-        <h3 class="sub-h">Custom-tab widgets</h3>
+        <h3 class="sub-h">Widgets on tab: <em>${escapeHtml(editingLabel)}</em> <span class="cost-rate">${widgetCount} active</span></h3>
+        <p class="empty" style="font-size: 11px;">Pick a tab to edit, then toggle widgets on/off. Each tab keeps its own widget set.</p>
+        ${editTabSelector}
+        <div class="actions" style="margin-top: 6px; gap: 6px;">${resetBtn}${clearBtn}</div>
         ${compHtml}
       </div>
     `;
@@ -3714,175 +3894,20 @@
       bindEvents();
       return;
     }
-    if (!snap.cwd) {
-      const tabs = visibleTabBar(snap);
-      const activeTab = ensureValidActiveTab(getActiveTab(), tabs);
-      const tabBar = renderTabBar(tabs, activeTab);
-      let body = '';
-      if (activeTab === 'custom') body = customTabBody(snap);
-      else if (activeTab === 'recs') body = recommendationsSection(snap);
-      else if (activeTab === 'watchtower') body = watchtowerSection(snap);
-      else if (activeTab === 'office') body = `${officeFloorSection(snap)}${officeSection(snap)}`;
-      else if (activeTab === 'mac') body = macHealthSection(snap);
-      else if (activeTab === 'agents') body = agentsSection(snap);
-      else if (activeTab === 'routines') body = routinesSection(snap);
-      else if (activeTab === 'discover') body = discoverSection(snap);
-      else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') body = timelineSection(snap);
-      else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') body = unifiedSettingsSection(snap);
-      else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') body = historySection(snap);
-      else if (activeTab === 'obsidian') body = obsidianSection(snap);
-      else if (activeTab === 'skills') body = skillsSection(snap);
-      else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
-      else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') body = browseSection(snap);
-      else if (activeTab === 'security') body = securitySection(snap);
-      else if (activeTab === 'talk') body = talkSection(snap);
-      else if (activeTab === 'help') body = helpSection();
-      else if (activeTab === 'self') body = selfTelemetrySection(snap);
-      else body = `
-        ${greetingSection(snap)}
-        ${notificationsSection(snap)}
-        ${inboxSection(snap)}
-        ${statsGridSection(snap)}
-        ${quickActionsSection(snap)}
-        <p class="empty">No Claude Code session for the open folder. Use Watchtower to see other projects, or run <code>claude</code> here to start.</p>
-        ${heatmapSection(snap)}
-        ${snap.watchtower.length ? watchtowerSection(snap) : ''}
-        ${snap.today.sessions ? todaySection(snap) : ''}
-      `;
-      root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
-      bindEvents();
-      if (activeTab === 'talk') Talk.init();
-      else Talk.teardown();
-      return;
-    }
-    const s = snap.stats;
-    const sessionShort = s.sessionId ? s.sessionId.slice(0, 8) : '—';
-    const liveDot = s.isActive ? '<span class="live-dot" title="written in last 10s"></span>' : '';
-
-    const tokens = `
-      <div class="tokens-header">
-        <h2>Tokens</h2>
-        ${sparklineSvg(s.sparkline)}
-      </div>
-      <div class="tokens">
-        <div class="token-card"><div class="label">Total</div><div class="value">${escapeHtml(s.totalTokensFormatted)}</div></div>
-        <div class="token-card"><div class="label">Output</div><div class="value">${escapeHtml(s.outputTokensFormatted)}</div></div>
-        <div class="token-card"><div class="label">Cache read</div><div class="value">${escapeHtml(s.cacheReadTokensFormatted)}</div></div>
-        <div class="token-card"><div class="label">Cache write</div><div class="value">${escapeHtml(s.cacheCreationTokensFormatted)}</div></div>
-      </div>
-    `;
-
-    const modeRow = s.permissionMode
-      ? `\n        <span class="k">Mode</span><span class="v"><span class="tag tag-mode-${escapeHtml(s.permissionMode)}" title="Latest permissionMode seen in the session JSONL — Cockpit displays only; toggle in Claude Code itself.">${escapeHtml(s.permissionMode)}</span></span>`
-      : '';
-    const session = `
-      <h2>Session</h2>
-      <div class="kv">
-        <span class="k">ID</span><span class="v">${escapeHtml(sessionShort)}</span>
-        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>${modeRow}
-        <span class="k">Messages</span><span class="v">${s.messageCount}</span>
-        <span class="k">Tool calls</span><span class="v">${s.toolCallCount}</span>
-        <span class="k">Last activity</span><span class="v">${escapeHtml(s.lastActivityAt ?? '—')}</span>
-      </div>
-    `;
-
-    const fileItems = s.filesTouched.length
-      ? s.filesTouched
-          .slice(0, 50)
-          .map(
-            (f) => `
-        <li>
-          <div class="row">
-            <a class="left link" data-file="${escapeHtml(f.filePath)}" title="${escapeHtml(f.filePath)}">${escapeHtml(basename(f.filePath))}</a>
-            <span class="right"><span class="tag">${escapeHtml(f.tool)}</span>${f.count}×</span>
-          </div>
-        </li>`,
-          )
-          .join('')
-      : '<li><span class="empty">No file edits yet.</span></li>';
-
-    const filesTouchedHtml = `
-      <h2>Files touched (${s.filesTouched.length})</h2>
-      <ul class="list">${fileItems}</ul>
-    `;
-
     const tabs = visibleTabBar(snap);
     const activeTab = ensureValidActiveTab(getActiveTab(), tabs);
     const tabBar = renderTabBar(tabs, activeTab);
-
-    let body = '';
-    if (activeTab === 'custom') {
-      body = customTabBody(snap);
-    } else if (activeTab === 'now') {
-      body = `
-        ${greetingSection(snap)}
-        ${notificationsSection(snap)}
-        ${inboxSection(snap)}
-        ${statsGridSection(snap)}
-        ${pilotSection(snap)}
-        ${quickActionsSection(snap)}
-        ${plansSection(snap)}
-        <h2>Active session ${liveDot}</h2>
-        <div class="kv">
-          <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
-        </div>
-        ${tokens}
-        ${heatmapSection(snap)}
-        ${contextFillSection(s)}
-        ${costSection(s)}
-        ${costByToolSection(snap)}
-        ${budgetSection(snap)}
-        ${session}
-        ${claudeMdSection(snap)}
-        ${toolHistogramSection(s)}
-        ${subAgentsSection(s)}
-        ${toolHistorySection(s)}
-        ${activityFeedSection(s)}
-        ${filesTouchedHtml}
-        ${todaySection(snap)}
-      `;
-    } else if (activeTab === 'recs') {
-      body = recommendationsSection(snap);
-    } else if (activeTab === 'watchtower') {
-      body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
-    } else if (activeTab === 'office') {
-      body = `${officeFloorSection(snap)}${officeSection(snap)}`;
-    } else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') {
-      body = historySection(snap);
-    } else if (activeTab === 'obsidian') {
-      body = obsidianSection(snap);
-    } else if (activeTab === 'memory' || activeTab === 'prompts' || activeTab === 'library') {
-      body = librarySection(snap);
-    } else if (activeTab === 'skills') {
-      body = skillsSection(snap);
-    } else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') {
-      body = browseSection(snap);
-    } else if (activeTab === 'security') {
-      body = securitySection(snap);
-    } else if (activeTab === 'talk') {
-      body = talkSection(snap);
-    } else if (activeTab === 'agents') {
-      body = agentsSection(snap);
-    } else if (activeTab === 'routines') {
-      body = routinesSection(snap);
-    } else if (activeTab === 'discover') {
-      body = discoverSection(snap);
-    } else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') {
-      body = timelineSection(snap);
-    } else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') {
-      body = unifiedSettingsSection(snap);
-    } else if (activeTab === 'mac') {
-      body = macHealthSection(snap);
-    } else if (activeTab === 'help') {
-      body = helpSection();
-    } else if (activeTab === 'self') {
-      body = selfTelemetrySection(snap);
-    }
+    // Map any legacy tab id (e.g. 'memory' → 'library') to the modern one
+    // before composing, so prefs and defaults line up.
+    const composeTabId = TAB_MIGRATIONS[activeTab] || activeTab;
+    const body = tabBodyComposed(snap, composeTabId);
 
     root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
     bindEvents();
-    // Talk tab lifecycle: init the canvas/raf when active, tear down otherwise.
-    if (activeTab === 'talk') Talk.init();
+    // Talk lifecycle now follows the rendered composition, not the active
+    // tab id — user can drop the Talk widget on any tab.
+    const composition = getTabComponentIds(snap, composeTabId);
+    if (composition.includes('talk')) Talk.init();
     else Talk.teardown();
   }
 
@@ -3940,6 +3965,13 @@
         if (action === 'memory') vscode.postMessage({ type: 'openMemory' });
         if (action === 'session') vscode.postMessage({ type: 'openSessionFile' });
         if (action === 'open-customize') {
+          // If the click came from a per-tab customize hint, scope the panel
+          // to that tab. The header ⚙ button has no data-customize-tab.
+          const targetTab = btn.getAttribute('data-customize-tab');
+          if (targetTab) {
+            const cur = vscode.getState() || {};
+            vscode.setState({ ...cur, customizeTab: targetTab });
+          }
           openCustomize();
           if (lastSnapshot) render(lastSnapshot);
         }
@@ -3966,19 +3998,67 @@
       });
     });
 
-    // Customize panel — component picker checkboxes
+    // Customize panel — tab selector chips ("which tab am I editing?")
+    root.querySelectorAll('button[data-customize-edit-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-customize-edit-tab');
+        if (!id) return;
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, customizeTab: id });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    // Customize panel — component picker checkboxes (per-tab)
     root.querySelectorAll('input[data-component-toggle]').forEach((input) => {
       input.addEventListener('change', () => {
         const id = input.getAttribute('data-component-toggle');
         if (!id || !lastSnapshot) return;
-        const current = getCustomComponentIds(lastSnapshot);
+        const editingTabId = getCustomizeTab(lastSnapshot);
+        const current = getTabComponentIds(lastSnapshot, editingTabId);
         let next;
         if (input.checked) {
           next = current.includes(id) ? current : [...current, id];
         } else {
           next = current.filter((x) => x !== id);
         }
-        persistUserPrefs({ customComponents: next });
+        const prefs = (lastSnapshot.userPrefs || {});
+        const allTabComponents = (prefs.tabComponents && typeof prefs.tabComponents === 'object')
+          ? { ...prefs.tabComponents }
+          : {};
+        // Seed with current legacy customComponents on first edit of Custom,
+        // so we don't lose the user's previous picks during migration.
+        if (editingTabId === 'custom' && !allTabComponents.custom && Array.isArray(prefs.customComponents)) {
+          allTabComponents.custom = prefs.customComponents.slice();
+        }
+        allTabComponents[editingTabId] = next;
+        persistUserPrefs({ tabComponents: allTabComponents });
+      });
+    });
+
+    // Customize panel — Reset / Clear shortcut buttons (per-tab)
+    root.querySelectorAll('button[data-action="reset-tab-widgets"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!lastSnapshot) return;
+        const id = btn.getAttribute('data-customize-edit-tab') || getCustomizeTab(lastSnapshot);
+        const prefs = (lastSnapshot.userPrefs || {});
+        const allTabComponents = (prefs.tabComponents && typeof prefs.tabComponents === 'object')
+          ? { ...prefs.tabComponents }
+          : {};
+        delete allTabComponents[id]; // remove the override → fall back to defaults
+        persistUserPrefs({ tabComponents: allTabComponents });
+      });
+    });
+    root.querySelectorAll('button[data-action="clear-tab-widgets"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!lastSnapshot) return;
+        const id = btn.getAttribute('data-customize-edit-tab') || getCustomizeTab(lastSnapshot);
+        const prefs = (lastSnapshot.userPrefs || {});
+        const allTabComponents = (prefs.tabComponents && typeof prefs.tabComponents === 'object')
+          ? { ...prefs.tabComponents }
+          : {};
+        allTabComponents[id] = []; // empty array = "user wants empty" (no fallback)
+        persistUserPrefs({ tabComponents: allTabComponents });
       });
     });
 

@@ -2,6 +2,21 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] — 2026-05-06
+
+### Added
+- **Usage rollups widget** — native multi-period token + cost aggregation across every JSONL under `~/.claude/projects/`, broken into Session / Today / This week / This month / This year / All-time. Progress bars when caps are set; "no cap" hint chip otherwise. Drops into the Now tab under Budget caps and is pickable on any tab.
+- **Per-tab widget customization** — every tab is now a composition of widgets the user chooses, not just the Custom tab. New `tabComponents` user-pref (per-tab widget lists). Customize panel grew tab-selector chips + "Reset to default" / "Clear all" buttons per tab. Bespoke tabs (History, Settings, Talk, Library, Browse, etc.) are exposed as composite widgets so any of them can be dropped on any tab.
+- 3 new VSCode settings: `claudeCockpit.budget.weeklyCapUsd`, `monthlyCapUsd`, `yearlyCapUsd`.
+- mtime+size cache at `~/.claude/cockpit-usage-cache.json` so multi-period rollups reload in ~10ms after the first scan.
+
+### Fixed
+- Custom tab now respects "0 widgets selected" — previously emptying the list silently fell back to defaults so you could never have an empty Custom tab.
+
+### Changed
+- The big tab-render switch in `sidebar.js` is gone — every tab body is now produced by `tabBodyComposed(snap, tabId)`. No-cwd / active-session paths converged into one renderer; per-component `requiresCwd` plus the auto-blocked-list note replace the old per-tab empty-state copy.
+- Talk tab lifecycle (`Talk.init/teardown`) follows the rendered composition, not the active tab id, so you can drop the Talk widget anywhere.
+
 ## [0.18.0] — 2026-05-06
 
 ### Added

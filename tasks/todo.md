@@ -204,6 +204,61 @@ All seven features built in one batch:
 4. Bump to 0.3.0, package, install via `code --install-extension`.
 5. PR on `feat/v0.3.0` against `main`.
 
+## Phase 4 — usage rollups + per-tab customization (DONE, this PR)
+
+User goal: native multi-period usage tracking with caps, plus full
+ownership of every tab's widget composition (not just the Custom tab).
+
+### Usage rollups
+
+- [x] `claudeData.ts:computeUsageRollups()` — scans `~/.claude/projects/*/*.jsonl`,
+      aggregates per session/today/week/month/year/all-time, with byModel breakdown.
+- [x] `~/.claude/cockpit-usage-cache.json` mtime+size cache — 138 files cold ~900ms,
+      warm reload **11ms / 137 hits**.
+- [x] `BudgetConfig` extended with `weeklyCapUsd / monthlyCapUsd / yearlyCapUsd`.
+      `extension.ts` reads them; `package.json` exposes 3 new VSCode settings.
+- [x] `usage` field on `CockpitSnapshot` (both no-cwd and active-session branches).
+- [x] `usageRollups` widget in `COMPONENTS` registry — six-row card with
+      progress bars and "no cap" hint chips. Drops into the Now tab default
+      composition under Budget caps; pickable on any tab.
+
+### Per-tab widget composition
+
+- [x] `tabComponents: Record<string, string[]>` added to `UserPrefs`
+      (sidebarProvider.ts). Empty array = "user wants empty" — no fallback.
+- [x] `DEFAULT_TAB_COMPOSITIONS` map mirrors today's hardcoded bodies for
+      every tab (Now is the heaviest at ~22 widgets).
+- [x] Wrapper components registered for bespoke tabs: `history`,
+      `unifiedSettings`, `timeline`, `library`, `browse`, `talk`,
+      `securityFull`, `helpDoc`, `selfTelemetry`, `watchtowerIdle`,
+      `sessionActive`. Drop any of them on any tab.
+- [x] `tabBodyComposed(snap, tabId)` replaces the ~80-line render switch
+      (no-cwd + active-session paths collapsed into one).
+- [x] Customize panel: tab-selector chips at top of "Widgets on tab"
+      section + per-tab grid + Reset/Clear shortcut buttons.
+- [x] `data-customize-tab` plumbed through the per-section ⚙ button so
+      clicking from a tab opens the customize panel scoped to that tab.
+- [x] Talk lifecycle (`Talk.init/teardown`) gated on whether the rendered
+      composition includes the `talk` widget — not the active tab id.
+- [x] Legacy `customComponents` honored as fallback for the Custom tab on
+      first edit, then migrated into `tabComponents.custom`.
+
+### Bug fix shipped alongside
+
+- [x] Empty Custom tab is now actually empty. Previously
+      `getCustomComponentIds()` fell back to `DEFAULT_CUSTOM_COMPONENTS`
+      whenever the user's list was empty; you literally couldn't have an
+      empty Custom tab.
+
+### Verification
+
+- [x] `npm run compile` clean.
+- [x] `npm test` 42/42 pass.
+- [x] `node --check media/sidebar.js` passes.
+- [x] Live data smoke test: scanned 138 files in 897ms cold / 11ms warm;
+      year-to-date $8,646 (99.4% Opus, 0.4% Sonnet, 0.4% unknown — matches
+      the "default Opus, burn budget" pattern).
+
 ## Phase 3 — later
 
 - [ ] Mode toggle (plan / auto / bypass / default) — needs human-gate per LeCun memory
