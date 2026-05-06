@@ -12,6 +12,7 @@ import {
   SessionSearchHit,
   snapshot,
 } from './claudeData';
+import { detectUsageDashboard } from './integrations';
 import { logger } from './logger';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 
@@ -39,7 +40,9 @@ interface InboundMessage {
     | 'pinMemory'
     | 'unpinMemory'
     | 'setDailyCap'
-    | 'goToSession';
+    | 'goToSession'
+    | 'startUsageDashboard'
+    | 'detectUsageDashboard';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -355,6 +358,29 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           void vscode.window.showTextDocument(vscode.Uri.file(msg.sessionFile));
         }
         return;
+      case 'detectUsageDashboard':
+        await detectUsageDashboard();
+        this.refresh();
+        return;
+      case 'startUsageDashboard': {
+        const installed = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        void installed;
+        const status = await detectUsageDashboard();
+        if (status.url) {
+          void vscode.env.openExternal(vscode.Uri.parse(status.url));
+          return;
+        }
+        if (status.installPath) {
+          const term = vscode.window.createTerminal({ name: 'claude-usage' });
+          term.show();
+          term.sendText(`cd "${status.installPath}" && python3 server.py`);
+        } else {
+          void vscode.env.openExternal(
+            vscode.Uri.parse('https://github.com/phuryn/claude-usage'),
+          );
+        }
+        return;
+      }
     }
   }
 
