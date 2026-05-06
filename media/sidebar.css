@@ -2038,3 +2038,32 @@ select[data-prompt-cat-new] {
   overflow: hidden;
   position: relative;
 }
+
+/* Sub-tab bar (used by merged tabs like Library) */
+.sub-tab-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding-bottom: 0;
+}
+.sub-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 12px;
+  margin-bottom: -1px;
+}
+.sub-tab:hover {
+  color: var(--vscode-foreground);
+}
+.sub-tab-active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-focusBorder, var(--vscode-button-background));
+}
+.sub-tab-panel {
+  padding-top: 2px;
+}

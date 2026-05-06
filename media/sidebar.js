@@ -1991,6 +1991,21 @@
     `;
   }
 
+  function librarySection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.libraryView === 'memory' ? 'memory' : 'prompts';
+    const memCount = (snap.memory || []).length;
+    const promptCount = (snap.prompts || []).length;
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'prompts' ? 'sub-tab-active' : ''}" data-library-view="prompts">Prompts <span class="chip-count">${promptCount}</span></button>
+        <button class="sub-tab ${view === 'memory' ? 'sub-tab-active' : ''}" data-library-view="memory">Memory <span class="chip-count">${memCount}</span></button>
+      </div>
+    `;
+    const body = view === 'memory' ? memorySection(snap) : promptsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function memorySection(snap) {
     const list = snap.memory || [];
     const pinned = new Set(snap.pinnedMemory || []);
@@ -2271,8 +2286,7 @@
       { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
       { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
-      { id: 'memory',     label: `Memory (${snap.memory.length})`,                                    pinned: false, requiresCwd: true,  hint: 'Per-project memory entries' },
-      { id: 'prompts',    label: `Prompts (${(snap.prompts || []).length})`,                          pinned: false, requiresCwd: false, hint: 'Personal prompt library' },
+      { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
       { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
       { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
@@ -2280,6 +2294,21 @@
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
+  }
+
+  // Tab merges remap old IDs onto new ones so persisted enabledTabs still
+  // surface the right tab. Update this when consolidating tabs.
+  const TAB_MIGRATIONS = {
+    memory: 'library',
+    prompts: 'library',
+  };
+
+  function migrateEnabledTabIds(ids) {
+    const out = new Set();
+    for (const id of ids) {
+      out.add(TAB_MIGRATIONS[id] || id);
+    }
+    return out;
   }
 
   function getEnabledTabIds(snap) {
@@ -2293,7 +2322,7 @@
       return true;
     });
     if (Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length) {
-      const set = new Set(prefs.enabledTabs);
+      const set = migrateEnabledTabIds(prefs.enabledTabs);
       return filtered.filter((t) => t.pinned || set.has(t.id));
     }
     // First-launch default: every tab visible (preserves prior UX).
@@ -2504,7 +2533,8 @@
         type: 'memory',
         title: m.title || m.filename,
         subtitle: `${m.filename}${m.isStale ? ' · stale' : ''}`,
-        tab: 'memory',
+        tab: 'library',
+        librarySubview: 'memory',
         action: 'open-memory-file',
         payload: m.filename,
         keywords: `${m.title || ''} ${m.filename} ${(m.preview || '').slice(0, 200)}`.toLowerCase(),
@@ -2528,7 +2558,8 @@
         type: 'prompt',
         title: p.title,
         subtitle: (p.body || '').slice(0, 120),
-        tab: 'prompts',
+        tab: 'library',
+        librarySubview: 'prompts',
         action: 'use-prompt',
         payload: p.id,
         promptBody: p.body,
@@ -2663,6 +2694,7 @@
           data-search-action="${escapeHtml(r.action)}"
           data-search-payload="${escapeHtml(r.payload || '')}"
           data-search-tab="${escapeHtml(r.tab || '')}"
+          data-search-subview="${escapeHtml(r.librarySubview || '')}"
           data-search-prompt-body="${escapeHtml(r.promptBody || '')}"
           title="${escapeHtml((r.subtitle || '') + ' — opens ' + (r.tab || ''))}">
           <div class="row">
@@ -2797,6 +2829,7 @@
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
+      else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
       else if (activeTab === 'projects') body = projectsSection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
@@ -2914,10 +2947,8 @@
       body = searchSection(snap);
     } else if (activeTab === 'obsidian') {
       body = obsidianSection(snap);
-    } else if (activeTab === 'memory') {
-      body = memorySection(snap);
-    } else if (activeTab === 'prompts') {
-      body = promptsSection(snap);
+    } else if (activeTab === 'memory' || activeTab === 'prompts' || activeTab === 'library') {
+      body = librarySection(snap);
     } else if (activeTab === 'skills') {
       body = skillsSection(snap);
     } else if (activeTab === 'projects') {
@@ -3132,9 +3163,15 @@
         const action = btn.getAttribute('data-search-action');
         const payload = btn.getAttribute('data-search-payload') || '';
         const targetTab = btn.getAttribute('data-search-tab') || '';
+        const subview = btn.getAttribute('data-search-subview') || '';
         const promptBody = btn.getAttribute('data-search-prompt-body') || '';
         // Always close the overlay first.
         setSearchState({ searchOpen: false, searchQuery: '' });
+        // Library sub-view: set before navigation so render picks it up.
+        if (targetTab === 'library' && subview) {
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, libraryView: subview });
+        }
         if (action === 'goto-tab') {
           setActiveTab(payload || targetTab);
         } else if (action === 'goto-customize') {
@@ -3477,6 +3514,15 @@
         const f = btn.getAttribute('data-prompt-filter');
         const state = vscode.getState() || {};
         vscode.setState({ ...state, promptFilter: f });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-library-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-library-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, libraryView: v });
         if (lastSnapshot) render(lastSnapshot);
       });
     });
