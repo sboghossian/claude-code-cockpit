@@ -276,6 +276,21 @@ test('computeBudget reports tones based on percent spent', () => {
   assert.equal(danger.sessionTone, 'danger');
 });
 
+test('computeBudget surfaces forward-looking burn-rate fields', () => {
+  // No burn rate → projection fields collapse to zero / undefined.
+  const idle = computeBudget({ enabled: true, dailyCapUsd: 50, sessionCapUsd: 0 }, 10, 0, 0);
+  assert.equal(idle.burnUsdPerHour, 0);
+  assert.equal(idle.projected30MinUsd, 0);
+  assert.equal(idle.minutesToDailyCap, undefined);
+
+  // Active burn → 30-min projection is half the hourly rate; ETA is computed.
+  const active = computeBudget({ enabled: true, dailyCapUsd: 50, sessionCapUsd: 0 }, 10, 0, 12);
+  assert.equal(active.burnUsdPerHour, 12);
+  assert.equal(active.projected30MinUsd, 6);
+  // 40 remaining / 12 per hour = 200 minutes (rounded).
+  assert.equal(active.minutesToDailyCap, 200);
+});
+
 test('computeNotifications surfaces context, cache, and budget alerts', () => {
   const stats = {
     totalTokens: 100_000,

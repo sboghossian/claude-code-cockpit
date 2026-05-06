@@ -55,6 +55,7 @@ export interface SessionStats {
   contextFillPct: number;
   cacheHitRate: number;
   toolHistory: ToolHistoryEntry[];
+  permissionMode: string | undefined;
 }
 
 export interface ToolHistoryEntry {
@@ -297,6 +298,10 @@ export interface BudgetStatus {
   sessionPct: number;
   dailyTone: 'ok' | 'warn' | 'danger';
   sessionTone: 'ok' | 'warn' | 'danger';
+  burnUsdPerHour: number;
+  projected30MinUsd: number;
+  projectedDailyHitsCap: boolean;
+  minutesToDailyCap: number | undefined;
 }
 
 export interface BudgetConfig {
@@ -387,6 +392,7 @@ interface SessionLine {
   type?: string;
   timestamp?: string;
   sessionId?: string;
+  permissionMode?: string;
   message?: {
     model?: string;
     usage?: UsageBlock;
@@ -442,6 +448,7 @@ function emptyStatsFor(file: string | undefined): SessionStats {
     contextFillPct: 0,
     cacheHitRate: 0,
     toolHistory: [],
+    permissionMode: undefined,
   };
 }
 
@@ -1753,7 +1760,7 @@ export function snapshot(
   const skills = listSkills(active.sessionFile);
   const claudeMdStack = readClaudeMdStack(active.decodedPath);
   const costByTool = computeCostByTool(stats);
-  const budget = computeBudget(budgetConfig, today.totalUsd, stats.cost.totalUsd);
+  const budget = computeBudget(budgetConfig, today.totalUsd, stats.cost.totalUsd, stats.costPerHourUsd);
   const notifications = computeNotifications({
     stats,
     memory,
@@ -1998,6 +2005,7 @@ export function computeBudget(
   cfg: BudgetConfig | undefined,
   spentTodayUsd: number,
   spentSessionUsd: number,
+  burnUsdPerHour = 0,
 ): BudgetStatus {
   const enabled = Boolean(cfg?.enabled);
   const dailyCapUsd = cfg?.dailyCapUsd ?? 0;
@@ -2006,6 +2014,20 @@ export function computeBudget(
   const sessionPct = sessionCapUsd > 0 ? Math.min(100, (spentSessionUsd / sessionCapUsd) * 100) : 0;
   const tone = (pct: number): 'ok' | 'warn' | 'danger' =>
     pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : 'ok';
+  // Forward-looking: extrapolate from current burn rate. Only meaningful
+  // when there's an active session producing measurable cost-per-hour.
+  const burn = burnUsdPerHour > 0 ? burnUsdPerHour : 0;
+  const projected30MinUsd = burn / 2;
+  const remainingDaily = dailyCapUsd > 0 ? Math.max(0, dailyCapUsd - spentTodayUsd) : 0;
+  const minutesToDailyCap =
+    burn > 0 && dailyCapUsd > 0 && remainingDaily > 0
+      ? Math.round((remainingDaily / burn) * 60)
+      : undefined;
+  const now = new Date();
+  const hoursLeftToday = Math.max(0, 24 - (now.getHours() + now.getMinutes() / 60));
+  const projectedRemainingSpend = burn * hoursLeftToday;
+  const projectedDailyHitsCap =
+    enabled && dailyCapUsd > 0 && spentTodayUsd + projectedRemainingSpend >= dailyCapUsd;
   return {
     enabled,
     dailyCapUsd,
@@ -2016,6 +2038,10 @@ export function computeBudget(
     sessionPct,
     dailyTone: tone(dailyPct),
     sessionTone: tone(sessionPct),
+    burnUsdPerHour: burn,
+    projected30MinUsd,
+    projectedDailyHitsCap,
+    minutesToDailyCap,
   };
 }
 
