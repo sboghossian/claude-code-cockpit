@@ -1991,6 +1991,25 @@
     `;
   }
 
+  function timelineSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.timelineView === 'changelog' ? 'changelog' : 'roadmap';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'roadmap' ? 'sub-tab-active' : ''}" data-timeline-view="roadmap">Roadmap (planned)</button>
+        <button class="sub-tab ${view === 'changelog' ? 'sub-tab-active' : ''}" data-timeline-view="changelog">Changelog (shipped)</button>
+      </div>
+    `;
+    let body = '';
+    if (view === 'roadmap') {
+      body = roadmapSection(snap);
+      maybeAutoFetchRoadmap();
+    } else {
+      body = changelogSection(snap);
+    }
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function unifiedSettingsSection(snap) {
     const state = vscode.getState() || {};
     const view = state.settingsView || 'budget';
@@ -2307,8 +2326,7 @@
       { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
       { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
-      { id: 'roadmap',    label: `Roadmap${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Mirror of roadmap.dashable.dev — every project, filters, links' },
-      { id: 'changelog',  label: 'Changelog',                                                         pinned: false, requiresCwd: false, hint: 'What shipped, when, plus update check' },
+      { id: 'timeline',   label: `Timeline${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Roadmap (planned) + Changelog (shipped) — what happened and what is next' },
       { id: 'settings',   label: 'Settings',                                                          pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins, dashboards' },
       { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
       { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
@@ -2329,6 +2347,8 @@
     prompts: 'library',
     manage: 'settings',
     config: 'settings',
+    roadmap: 'timeline',
+    changelog: 'timeline',
   };
 
   function migrateEnabledTabIds(ids) {
@@ -2852,8 +2872,7 @@
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'routines') body = routinesSection(snap);
       else if (activeTab === 'discover') body = discoverSection(snap);
-      else if (activeTab === 'roadmap') { body = roadmapSection(snap); maybeAutoFetchRoadmap(); }
-      else if (activeTab === 'changelog') body = changelogSection(snap);
+      else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') body = timelineSection(snap);
       else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') body = unifiedSettingsSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
@@ -2990,11 +3009,8 @@
       body = routinesSection(snap);
     } else if (activeTab === 'discover') {
       body = discoverSection(snap);
-    } else if (activeTab === 'roadmap') {
-      body = roadmapSection(snap);
-      maybeAutoFetchRoadmap();
-    } else if (activeTab === 'changelog') {
-      body = changelogSection(snap);
+    } else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') {
+      body = timelineSection(snap);
     } else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') {
       body = unifiedSettingsSection(snap);
     } else if (activeTab === 'mac') {
@@ -3075,7 +3091,9 @@
           if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'goto-changelog') {
-          setActiveTab('changelog');
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, timelineView: 'changelog' });
+          setActiveTab('timeline');
           if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'check-update') {
@@ -3552,6 +3570,15 @@
         const v = btn.getAttribute('data-settings-view');
         const state = vscode.getState() || {};
         vscode.setState({ ...state, settingsView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-timeline-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-timeline-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, timelineView: v });
         if (lastSnapshot) render(lastSnapshot);
       });
     });
