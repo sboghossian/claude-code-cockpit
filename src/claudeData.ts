@@ -4,6 +4,7 @@ import * as path from 'path';
 import { logger } from './logger';
 import { ObsidianStatus, readObsidianStatus } from './obsidian';
 import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
+import { RoutinesStatus, readRoutinesStatus } from './routines';
 import {
   ActivityHeatmap,
   AgentDef,
@@ -213,6 +214,7 @@ export interface CockpitSnapshot {
   rtk: RtkStatus;
   greeting: string;
   macHealth: MacHealthSnapshot;
+  routines: RoutinesStatus;
 }
 
 export interface WatchtowerSession {
@@ -1624,6 +1626,7 @@ function locationForCwd(cwd: string): ActiveLocation | undefined {
 export function snapshot(
   cwd: string | undefined,
   budgetConfig?: BudgetConfig,
+  cloudRoutinesEnabled?: boolean,
 ): CockpitSnapshot {
   const projects = listProjects();
   const settings = readGlobalSettings();
@@ -1653,6 +1656,7 @@ export function snapshot(
   const tunnels = readTunnels();
   const rtk = readRTKSavingsSync();
   const macHealth = readMacHealthSync();
+  const routines = readRoutinesStatus(cloudRoutinesEnabled === true);
   const greeting = computeGreeting();
   const cockpitStats = computeStats({
     byHour: heatmap.byHour,
@@ -1731,6 +1735,7 @@ export function snapshot(
       rtk,
       greeting,
       macHealth,
+      routines,
     };
   }
 
@@ -1817,6 +1822,7 @@ export function snapshot(
     rtk,
     greeting,
     macHealth,
+    routines,
   };
 }
 

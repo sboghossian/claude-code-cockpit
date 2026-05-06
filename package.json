@@ -2,7 +2,7 @@
   "name": "claude-cockpit",
   "displayName": "Claude Cockpit",
   "description": "Surface Claude Code's hidden state — token burn, files touched, memory, modes — directly in VSCode.",
-  "version": "0.9.0",
+  "version": "0.12.0",
   "publisher": "dashable",
   "license": "MIT",
   "repository": {
@@ -101,6 +101,22 @@
           "default": 0,
           "minimum": 0,
           "description": "Per-session spend cap in USD. 0 disables the session cap."
+        },
+        "claudeCockpit.cloudRoutines.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Surface a deep-link to manage cloud routines (scheduled remote agents) on claude.ai. Off by default to preserve Cockpit's local-only stance — turning this on does not yet make any network calls; it just unhides the link."
+        },
+        "claudeCockpit.theme": {
+          "type": "string",
+          "enum": ["auto", "dark", "light"],
+          "default": "auto",
+          "description": "Initial theme for the Cockpit sidebar. 'auto' inherits VSCode's theme via CSS variables (default). 'dark'/'light' force a fixed palette regardless of VSCode's theme. The Customize panel inside the sidebar can override this at runtime."
+        },
+        "claudeCockpit.discover.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the Discover tab (top GitHub projects + RSS from Obsidian). Off by default — turning it on lets Cockpit fetch api.github.com on demand (when you click Refresh). RSS reads from your Obsidian vault and makes no network calls."
         }
       }
     },

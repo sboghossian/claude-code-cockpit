@@ -18,6 +18,14 @@ import { detectUsageDashboard, readRTKSavings } from './integrations';
 import { readMacHealth } from './macHealth';
 import { logger } from './logger';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
+import {
+  createRoutineSkill,
+  DiscoverWindow,
+  fetchGithubTrending,
+  GithubRepo,
+  readRssFromObsidian,
+  RssEntry,
+} from './discover';
 
 interface InboundMessage {
   type:
@@ -45,7 +53,11 @@ interface InboundMessage {
     | 'setDailyCap'
     | 'goToSession'
     | 'startUsageDashboard'
-    | 'detectUsageDashboard';
+    | 'detectUsageDashboard'
+    | 'setUserPrefs'
+    | 'createRoutine'
+    | 'runRoutine'
+    | 'fetchDiscover';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -61,6 +73,25 @@ interface InboundMessage {
   promptTitle?: string;
   promptBody?: string;
   sessionFile?: string;
+  patch?: UserPrefsPatch;
+  routineName?: string;
+  window?: DiscoverWindow;
+}
+
+interface UserPrefs {
+  customComponents: string[] | undefined;
+  enabledTabs: string[] | undefined;
+  theme: 'auto' | 'dark' | 'light';
+  tabFilter: 'all' | 'requires' | 'standalone';
+  discoverEnabled: boolean;
+}
+
+interface UserPrefsPatch {
+  customComponents?: string[];
+  enabledTabs?: string[];
+  theme?: 'auto' | 'dark' | 'light';
+  tabFilter?: 'all' | 'requires' | 'standalone';
+  discoverEnabled?: boolean;
 }
 
 interface PromptEntry {
@@ -72,6 +103,25 @@ interface PromptEntry {
 
 const PROMPTS_KEY = 'claudeCockpit.prompts';
 const PINS_KEY = 'claudeCockpit.pinnedMemory';
+const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
+
+function readUserPrefs(state: vscode.Memento): UserPrefs {
+  const stored = state.get<Partial<UserPrefs>>(USER_PREFS_KEY, {});
+  const cfg = vscode.workspace.getConfiguration('claudeCockpit');
+  const settingsTheme = cfg.get<'auto' | 'dark' | 'light'>('theme', 'auto');
+  const settingsDiscover = cfg.get<boolean>('discover.enabled', false);
+  return {
+    customComponents: Array.isArray(stored.customComponents) ? stored.customComponents : undefined,
+    enabledTabs: Array.isArray(stored.enabledTabs) ? stored.enabledTabs : undefined,
+    theme: stored.theme === 'dark' || stored.theme === 'light' || stored.theme === 'auto'
+      ? stored.theme
+      : settingsTheme,
+    tabFilter: stored.tabFilter === 'requires' || stored.tabFilter === 'standalone' || stored.tabFilter === 'all'
+      ? stored.tabFilter
+      : 'all',
+    discoverEnabled: typeof stored.discoverEnabled === 'boolean' ? stored.discoverEnabled : settingsDiscover,
+  };
+}
 
 export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'claudeCockpit.sidebar';
@@ -80,6 +130,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private watcher: fs.FSWatcher | undefined;
   private debounce: NodeJS.Timeout | undefined;
   private lastSearch: { query: string; hits: SessionSearchHit[] } | undefined;
+  private discoverGithub: { window: DiscoverWindow; fetchedAt: number; repos: GithubRepo[]; error: string | undefined } | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -117,10 +168,14 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const snap = snapshot(cwd, this.readBudgetConfig());
+    const cloudRoutinesEnabled = vscode.workspace
+      .getConfiguration('claudeCockpit')
+      .get<boolean>('cloudRoutines.enabled', false);
+    const snap = snapshot(cwd, this.readBudgetConfig(), cloudRoutinesEnabled);
     this.onSnapshot(snap);
     const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
     const pinnedMemory = this.globalState.get<string[]>(PINS_KEY, []);
+    const userPrefs = readUserPrefs(this.globalState);
     // Recompute recommendations with prompts populated — snapshot() doesn't
     // see globalState, so its baseline list misses prompt-driven recs.
     const recommendations = computeRecommendations({
@@ -142,6 +197,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       recommendations,
       prompts,
       pinnedMemory,
+      userPrefs,
+      discover: {
+        enabled: userPrefs.discoverEnabled,
+        github: this.discoverGithub,
+        rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
+      },
       lastSearch: this.lastSearch,
       stats: {
         ...snap.stats,
@@ -238,7 +299,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private watchActive(): void {
     this.watcher?.close();
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const snap = snapshot(cwd, this.readBudgetConfig());
+    const snap = snapshot(cwd, this.readBudgetConfig(), false);
     const target = snap.projectDir ?? path.join(os.homedir(), '.claude', 'projects');
     if (!fs.existsSync(target)) {
       return;
@@ -395,6 +456,86 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         await detectUsageDashboard();
         this.refresh();
         return;
+      case 'createRoutine': {
+        const name = await vscode.window.showInputBox({
+          prompt: 'Routine name (lowercase, hyphen-separated)',
+          placeHolder: 'e.g. weekly-haqq-summary',
+          validateInput: (v) => (!v || !v.trim() ? 'Name is required' : undefined),
+        });
+        if (!name) return;
+        const description = await vscode.window.showInputBox({
+          prompt: 'One-line description (shown in the cockpit and used by Claude when picking the routine)',
+          placeHolder: 'e.g. Weekly summary of HAQQ Stripe activity',
+        });
+        const result = createRoutineSkill(name, description ?? '', '');
+        if (!result.ok) {
+          void vscode.window.showErrorMessage(`Cockpit: ${result.error}`);
+          return;
+        }
+        if (result.filePath) {
+          const doc = await vscode.workspace.openTextDocument(result.filePath);
+          void vscode.window.showTextDocument(doc);
+        }
+        this.refresh();
+        return;
+      }
+      case 'runRoutine': {
+        const name = msg.routineName;
+        if (!name) return;
+        const skill = path.join(os.homedir(), '.claude', 'scheduled-tasks', name, 'SKILL.md');
+        if (!fs.existsSync(skill)) {
+          void vscode.window.showErrorMessage(`Cockpit: routine SKILL.md not found at ${skill}`);
+          return;
+        }
+        const term = vscode.window.createTerminal({ name: `routine: ${name}` });
+        term.show();
+        // Pipe the SKILL body into a fresh claude session so the routine
+        // executes on demand. The user reviews the trailing prompt before
+        // hitting enter (the terminal remains interactive).
+        term.sendText(`cat ${shellQuote(skill)} | claude`);
+        return;
+      }
+      case 'fetchDiscover': {
+        const win = msg.window ?? 'week';
+        try {
+          const repos = await fetchGithubTrending(win);
+          this.discoverGithub = { window: win, fetchedAt: Date.now(), repos, error: undefined };
+        } catch (err) {
+          this.discoverGithub = {
+            window: win,
+            fetchedAt: Date.now(),
+            repos: [],
+            error: String(err instanceof Error ? err.message : err),
+          };
+        }
+        this.refresh();
+        return;
+      }
+      case 'setUserPrefs': {
+        const patch = msg.patch ?? {};
+        const current = readUserPrefs(this.globalState);
+        const next: UserPrefs = {
+          customComponents: Array.isArray(patch.customComponents)
+            ? patch.customComponents
+            : current.customComponents,
+          enabledTabs: Array.isArray(patch.enabledTabs)
+            ? patch.enabledTabs
+            : current.enabledTabs,
+          theme:
+            patch.theme === 'auto' || patch.theme === 'dark' || patch.theme === 'light'
+              ? patch.theme
+              : current.theme,
+          tabFilter:
+            patch.tabFilter === 'all' || patch.tabFilter === 'requires' || patch.tabFilter === 'standalone'
+              ? patch.tabFilter
+              : current.tabFilter,
+          discoverEnabled:
+            typeof patch.discoverEnabled === 'boolean' ? patch.discoverEnabled : current.discoverEnabled,
+        };
+        await this.globalState.update(USER_PREFS_KEY, next);
+        this.refresh();
+        return;
+      }
       case 'startUsageDashboard': {
         const installed = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         void installed;
@@ -447,7 +588,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       logger.warn(`openMemoryFile rejected suspicious filename: ${filename}`);
       return;
     }
-    const snap = snapshot(cwd, this.readBudgetConfig());
+    const snap = snapshot(cwd, this.readBudgetConfig(), false);
     if (!snap.projectDir) {
       return;
     }
@@ -502,4 +643,8 @@ function makeNonce(): string {
     out += chars[Math.floor(Math.random() * chars.length)];
   }
   return out;
+}
+
+function shellQuote(p: string): string {
+  return `'${p.replace(/'/g, "'\\''")}'`;
 }
