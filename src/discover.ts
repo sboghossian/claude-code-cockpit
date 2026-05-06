@@ -126,30 +126,91 @@ export function readRssFromObsidian(): { folder: string | undefined; entries: Rs
   if (!status.installed || !status.vaults || status.vaults.length === 0) {
     return { folder: undefined, entries: [], error: 'No Obsidian vault detected.' };
   }
+  // Common locations across PARA / Johnny.Decimal / inbox-driven vaults.
+  const candidates = [
+    '30-Knowledge/rss-feeds',
+    '30-Knowledge/rss',
+    'Knowledge/rss-feeds',
+    'Knowledge/rss',
+    'rss-feeds',
+    'rss',
+    'RSS',
+    'Inbox/RSS',
+    'Inbox/rss',
+    '50-Inbox/rss',
+    '50-Inbox/RSS',
+    '00-Inbox/rss',
+    '00-Inbox/RSS',
+  ];
   for (const v of status.vaults) {
-    const candidates = ['rss', 'RSS', 'Inbox/RSS', 'Inbox/rss', '50-Inbox/rss', '50-Inbox/RSS'];
     for (const cand of candidates) {
       const folder = path.join(v.path, cand);
-      if (fs.existsSync(folder) && fs.statSync(folder).isDirectory()) {
-        return { folder, entries: scanRssFolder(folder, v.name), error: undefined };
+      try {
+        if (fs.existsSync(folder) && fs.statSync(folder).isDirectory()) {
+          return { folder, entries: scanRssFolder(folder, v.name), error: undefined };
+        }
+      } catch {
+        /* try next candidate */
       }
     }
   }
-  return { folder: undefined, entries: [], error: 'No RSS folder found in Obsidian vaults (looked for rss/, Inbox/RSS/, 50-Inbox/rss/).' };
+  // Fallback: shallow scan for any folder with "rss" in the name (≤3 deep).
+  for (const v of status.vaults) {
+    const found = findRssFolder(v.path, 3);
+    if (found) {
+      return { folder: found, entries: scanRssFolder(found, v.name), error: undefined };
+    }
+  }
+  return {
+    folder: undefined,
+    entries: [],
+    error: 'No RSS folder found in vault. Looked under common paths and did a shallow scan. Create a folder named "rss" or "rss-feeds" in your vault.',
+  };
 }
 
+function findRssFolder(root: string, maxDepth: number): string | undefined {
+  const stack: { p: string; depth: number }[] = [{ p: root, depth: 0 }];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur.depth > maxDepth) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur.p, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      if (e.name.startsWith('.')) continue;
+      if (/^rss(-?feeds?)?$/i.test(e.name)) {
+        return path.join(cur.p, e.name);
+      }
+      if (cur.depth < maxDepth) {
+        stack.push({ p: path.join(cur.p, e.name), depth: cur.depth + 1 });
+      }
+    }
+  }
+  return undefined;
+}
+
+// Some vaults have 10k+ files — naive readdir+stat freezes the extension
+// host. Use Dirent to skip non-files, sort by name DESC (RSS items use
+// `YYYY-MM-DD-…` so name order ≈ reverse-chronological), then stat top N.
 function scanRssFolder(folder: string, vault: string): RssEntry[] {
-  const out: RssEntry[] = [];
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(folder, { withFileTypes: true });
   } catch {
     return [];
   }
-  for (const e of entries) {
-    if (!e.isFile()) continue;
-    if (!e.name.endsWith('.md')) continue;
-    const full = path.join(folder, e.name);
+  const candidates = entries
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, 200);
+  const out: RssEntry[] = [];
+  for (const name of candidates) {
+    const full = path.join(folder, name);
     let stat: fs.Stats;
     try {
       stat = fs.statSync(full);
@@ -157,8 +218,8 @@ function scanRssFolder(folder: string, vault: string): RssEntry[] {
       continue;
     }
     out.push({
-      title: e.name.replace(/\.md$/, ''),
-      source: inferSource(e.name),
+      title: name.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, ''),
+      source: inferSource(name),
       vault,
       filePath: full,
       mtimeMs: stat.mtimeMs,

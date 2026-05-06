@@ -2117,45 +2117,93 @@ select[data-prompt-cat-new] {
 .sec-tile-high  { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 .tag-warn { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
-/* Talk tab — particle viz + voice */
+/* Talk tab — Jarvis-style particle viz + voice */
 .talk-shell {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .talk-canvas-wrap {
   position: relative;
   width: 100%;
-  height: 240px;
-  background: #080c18;
+  height: 320px;
+  background:
+    radial-gradient(circle at 50% 50%, #0a1428 0%, #04081a 60%, #02030d 100%);
   border-radius: 6px;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 60px rgba(0, 200, 255, 0.05),
+    inset 0 0 20px rgba(0, 0, 0, 0.6);
 }
 .talk-canvas-wrap canvas {
   width: 100%;
   height: 100%;
   display: block;
 }
-.talk-status {
+.talk-mode-indicator {
   position: absolute;
-  bottom: 6px;
-  left: 8px;
-  right: 8px;
-  text-align: center;
-  font-size: 11px;
-  color: rgba(180, 200, 255, 0.85);
+  top: 8px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--vscode-editor-font-family, 'SF Mono', monospace);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(180, 220, 255, 0.85);
   pointer-events: none;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 8px rgba(0, 180, 255, 0.4);
+}
+.talk-mode-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5fb8ff;
+  box-shadow: 0 0 8px rgba(95, 184, 255, 0.9);
+}
+.talk-mode-indicator [data-talk-mode][data-mode="listening"] { color: #6ee7ff; }
+.talk-mode-indicator [data-talk-mode][data-mode="thinking"]  { color: #c4b5fd; }
+.talk-mode-indicator [data-talk-mode][data-mode="speaking"]  { color: #fcd34d; }
+.talk-banner {
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+.talk-banner-warn {
+  background: rgba(252, 211, 77, 0.08);
+  color: #fcd34d;
+  border-color: rgba(252, 211, 77, 0.25);
+}
+.talk-banner-error {
+  background: rgba(239, 68, 68, 0.08);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+.talk-banner-info {
+  background: rgba(95, 184, 255, 0.08);
+  color: #93c5fd;
+  border-color: rgba(95, 184, 255, 0.25);
 }
 .talk-controls {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
+}
+.talk-btn-speak {
+  background: linear-gradient(135deg, rgba(252, 211, 77, 0.18), rgba(252, 165, 95, 0.12));
+  border-color: rgba(252, 211, 77, 0.4);
+  color: #fde68a;
+}
+.talk-btn-speak:hover {
+  background: linear-gradient(135deg, rgba(252, 211, 77, 0.32), rgba(252, 165, 95, 0.22));
 }
 .talk-text {
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
+  border: 1px solid var(--vscode-input-border, rgba(95, 184, 255, 0.15));
   padding: 8px;
   border-radius: 4px;
   font-family: var(--vscode-editor-font-family);
