@@ -29,6 +29,68 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 - [x] Enabled plugins panel
 - [x] Sessions are first-class, not workspace folders (v0.2.0 refactor)
 
+## v0.6.0 — Watchtower (DONE, shipped)
+
+User asked for: fix v0.5.0 gaps, integrate Obsidian, mine claude-overlay
+prototype for ideas, ship as much as possible.
+
+- [x] **Obsidian integration** — auto-detect vaults via `obsidian.json` registry,
+      list recent notes (md walk, depth ≤ 4, with first-1.5KB excerpt),
+      "Save active session →" writes a markdown digest with frontmatter
+      (`type: claude-session`, project, session_id, tokens, cost, files, tools)
+      to a configurable subdir, "Open in Obsidian" via `obsidian://` URI
+- [x] **Watchtower** — cross-project session heartbeat, last 60min, color-coded
+      (live <10s / recent <15min / idle <30min / stale >30min), per-card
+      tokens+cost+age, click to open the JSONL
+- [x] **Idle sentinel** — same data filtered to idle+stale only, dedicated view
+- [x] **Notification center** — strip at top of Now tab, surfaces context >75/>90,
+      low cache hit (<30% on >50k tokens), stale memory (≥5 entries), idle
+      sessions, budget breaches
+- [x] **Budget caps** — VSCode settings (`claudeCockpit.budget.*`), per-day +
+      per-session caps, progress bars with ok/warn/danger tones, alerts wired
+      into notifications, "Set Daily Budget Cap" command + button
+- [x] **Prompt library** — personal snippets in `globalState`, list/add/delete,
+      one-click copy to clipboard
+- [x] **Global session search** — grep across every JSONL under
+      `~/.claude/projects/`, ranks newest first, surfaces user/assistant/tool_use
+      /tool_result with snippet + highlight, clickable to open the session
+- [x] **Cost by tool** — weighted attribution (Read/Edit/Bash/Task get higher
+      weight) of session cost across tool calls, bar chart in Now tab
+- [x] **Pinnable memory** — pin/unpin entries, pinned float to top with 📌
+- [x] **Quick-action toolbar** — Search / Watchtower / Save→Obsidian / Open vault
+      / Open session, all from Now tab
+- [x] **New tabs**: Watchtower, Search, Obsidian, Prompts (alongside existing
+      Now / Memory / Skills / Projects / Files / Config)
+- [x] **Commands**: saveToObsidian, openVault, searchAllSessions, watchtower,
+      setDailyCap
+- [x] **Tests**: +5 tests (computeBudget, computeNotifications, computeCostByTool,
+      computeWatchtower, globalSessionSearch). 24/24 pass.
+
+### Recon notes (so compaction doesn't lose them)
+- Obsidian vault registry: `~/Library/Application Support/obsidian/obsidian.json`,
+  shape `{vaults: {<id>: {path, ts, open}}}`. Stephane's primary vault is
+  `~/Documents/Code/stephane_claude` on his machine — ts-sorted gives the most
+  recently opened first.
+- Idle thresholds: 10s = live, 15min = recent->idle, 30min = idle->stale.
+  Watchtower window is 60min total.
+- Budget config flows: `vscode.workspace.getConfiguration('claudeCockpit.budget')`
+  read at every refresh, `onDidChangeConfiguration` triggers a refresh.
+- Prompts + pinned memory live in `context.globalState` keyed
+  `claudeCockpit.prompts` / `claudeCockpit.pinnedMemory`. Survives reload.
+- Cost-by-tool weights live at `claudeData.ts:computeCostByTool` — adjust if
+  attribution feels off (Task=2.0, Read/Edit/Write=1.5–1.7, Glob=0.9, default=1.0).
+
+## v0.4.0 — DONE, shipped
+
+User asked for tabs + more features:
+
+- [x] **Tab system** — Now / Memory / Skills / Projects / Config. State persisted via `vscode.setState`/`getState`. Sticky tab bar at top.
+- [x] **Cost rate ($/hour)** — derived from cost / (lastActivity - startedAt). Shown as a small badge next to the model tag.
+- [x] **Tool histogram** — per-tool counts tracked in `readSession`, rendered as horizontal bar chart in the Now tab.
+- [x] **Today summary** — `computeToday()` walks `~/.claude/projects/<*>/*.jsonl` filtering by `mtimeMs >= today00:00`. Per-project breakdown.
+- [x] **Activity feed** — last 25 events (tool_use + messages) collected during readSession, displayed as monospace tail-style list.
+- [x] **Disk usage** — recursive walk of `~/.claude/projects/`, shown in Config tab.
+
 ## v0.3.0 — DONE, shipped
 
 All seven features built in one batch:

@@ -2,7 +2,7 @@
   "name": "claude-cockpit",
   "displayName": "Claude Cockpit",
   "description": "Surface Claude Code's hidden state — token burn, files touched, memory, modes — directly in VSCode.",
-  "version": "0.3.0",
+  "version": "0.6.0",
   "publisher": "dashable",
   "license": "MIT",
   "repository": {
@@ -60,8 +60,50 @@
       {
         "command": "claudeCockpit.openSessionFile",
         "title": "Claude Cockpit: Open Active Session JSONL"
+      },
+      {
+        "command": "claudeCockpit.saveToObsidian",
+        "title": "Claude Cockpit: Save Session to Obsidian"
+      },
+      {
+        "command": "claudeCockpit.openVault",
+        "title": "Claude Cockpit: Open Obsidian Vault"
+      },
+      {
+        "command": "claudeCockpit.searchAllSessions",
+        "title": "Claude Cockpit: Search All Sessions"
+      },
+      {
+        "command": "claudeCockpit.watchtower",
+        "title": "Claude Cockpit: Watchtower (cross-project sessions)"
+      },
+      {
+        "command": "claudeCockpit.setDailyCap",
+        "title": "Claude Cockpit: Set Daily Budget Cap"
       }
     ],
+    "configuration": {
+      "title": "Claude Cockpit",
+      "properties": {
+        "claudeCockpit.budget.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable budget alerts when daily/session caps are exceeded."
+        },
+        "claudeCockpit.budget.dailyCapUsd": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Daily spend cap in USD across all projects. 0 disables the daily cap."
+        },
+        "claudeCockpit.budget.sessionCapUsd": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Per-session spend cap in USD. 0 disables the session cap."
+        }
+      }
+    },
     "menus": {
       "view/title": [
         {

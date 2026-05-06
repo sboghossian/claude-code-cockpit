@@ -19,6 +19,11 @@ const {
   readMemoryIndex,
   snapshot,
   formatTokens,
+  computeWatchtower,
+  computeBudget,
+  computeNotifications,
+  computeCostByTool,
+  globalSessionSearch,
 } = require('../out/claudeData.js');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -187,21 +192,29 @@ test('readMemoryIndex parses only lines that match the link+hook pattern', () =>
 
   const entries = readMemoryIndex(ws.cwd);
   assert.equal(entries.length, 3);
-  assert.deepEqual(entries[0], {
+  // Strip per-file mtime fields — they vary per run.
+  const stripMtime = (e) => ({ title: e.title, filename: e.filename, hook: e.hook });
+  assert.deepEqual(stripMtime(entries[0]), {
     title: 'Roadmap',
     filename: 'roadmap.md',
     hook: 'single source of truth for shipping',
   });
-  assert.deepEqual(entries[1], {
+  assert.deepEqual(stripMtime(entries[1]), {
     title: 'Subdomains',
     filename: 'subdomains.md',
     hook: 'dash separator works too',
   });
-  assert.deepEqual(entries[2], {
+  assert.deepEqual(stripMtime(entries[2]), {
     title: 'Plans',
     filename: 'plans.md',
     hook: 'pricing tiers and rollout',
   });
+  // Each entry has the staleness metadata fields, even when the file is missing.
+  for (const e of entries) {
+    assert.ok('lastModifiedAt' in e, 'lastModifiedAt missing');
+    assert.ok('lastModifiedMs' in e, 'lastModifiedMs missing');
+    assert.equal(typeof e.isStale, 'boolean');
+  }
 });
 
 test('snapshot composes projectDir, stats and memory in one call', () => {
@@ -240,6 +253,108 @@ test('snapshot prefers cwd session when its mtime is newer than the global one',
   assert.equal(snap.cwd, ws.cwd);
   assert.equal(snap.projectDir, ws.projectDir);
   assert.equal(snap.stats.sessionFile, session);
+});
+
+test('computeBudget reports tones based on percent spent', () => {
+  const off = computeBudget(undefined, 5, 1);
+  assert.equal(off.enabled, false);
+  assert.equal(off.dailyTone, 'ok');
+
+  const ok = computeBudget({ enabled: true, dailyCapUsd: 100, sessionCapUsd: 0 }, 25, 0);
+  assert.equal(ok.dailyTone, 'ok');
+
+  const warn = computeBudget({ enabled: true, dailyCapUsd: 100, sessionCapUsd: 0 }, 85, 0);
+  assert.equal(warn.dailyTone, 'warn');
+
+  const danger = computeBudget(
+    { enabled: true, dailyCapUsd: 100, sessionCapUsd: 5 },
+    100,
+    6,
+  );
+  assert.equal(danger.dailyTone, 'danger');
+  assert.equal(danger.sessionTone, 'danger');
+});
+
+test('computeNotifications surfaces context, cache, and budget alerts', () => {
+  const stats = {
+    totalTokens: 100_000,
+    contextWindowMax: 200_000,
+    contextFillPct: 95,
+    cacheHitRate: 0.1,
+  };
+  const memory = Array.from({ length: 7 }, (_, i) => ({
+    isStale: true,
+    title: `m${i}`,
+    filename: `m${i}.md`,
+    hook: '',
+    lastModifiedAt: undefined,
+    lastModifiedMs: 0,
+  }));
+  const watchtower = [
+    { name: 'a', status: 'idle', ageSeconds: 1200 },
+    { name: 'b', status: 'live', ageSeconds: 5 },
+  ];
+  const budget = computeBudget(
+    { enabled: true, dailyCapUsd: 50, sessionCapUsd: 0 },
+    55,
+    0,
+  );
+  const notifs = computeNotifications({
+    stats,
+    memory,
+    watchtower,
+    obsidian: { installed: false, vaults: [], primaryVault: undefined, recentNotes: [] },
+    budget,
+  });
+  const ids = notifs.map((n) => n.id);
+  assert.ok(ids.includes('context-full'));
+  assert.ok(ids.includes('cache-low'));
+  assert.ok(ids.includes('memory-stale'));
+  assert.ok(ids.includes('idle-sessions'));
+  assert.ok(ids.includes('budget-day'));
+});
+
+test('computeCostByTool returns proportional approximations', () => {
+  const stats = {
+    totalTokens: 10_000,
+    cost: { totalUsd: 1.0 },
+    toolHistogram: [
+      { tool: 'Read', count: 10 },
+      { tool: 'Bash', count: 5 },
+      { tool: 'Glob', count: 1 },
+    ],
+  };
+  const out = computeCostByTool(stats);
+  assert.equal(out.length, 3);
+  // Read should rank highest given count + weight
+  assert.equal(out[0].tool, 'Read');
+  // Sum should approximate the total cost
+  const sum = out.reduce((a, b) => a + b.approxUsd, 0);
+  assert.ok(Math.abs(sum - 1.0) < 0.01);
+});
+
+test('computeWatchtower returns recent sessions sorted by mtime', () => {
+  // Touch a session to ensure something shows up. Use a far-future mtime so
+  // we beat any other "fresh" session that earlier tests left behind.
+  const ws = makeWorkspace('watch-' + Date.now());
+  const session = path.join(ws.projectDir, 'session.jsonl');
+  copyFixture('valid.jsonl', session);
+  const future = new Date(Date.now() + 5 * 60_000);
+  fs.utimesSync(session, future, future);
+  const list = computeWatchtower();
+  assert.ok(Array.isArray(list));
+  assert.ok(list.length >= 1);
+  assert.equal(list[0].sessionFile, session);
+  // Each entry has a status string and ageSeconds.
+  for (const w of list) {
+    assert.ok(['live', 'recent', 'idle', 'stale'].includes(w.status));
+    assert.equal(typeof w.ageSeconds, 'number');
+  }
+});
+
+test('globalSessionSearch rejects queries shorter than 2 chars', () => {
+  assert.deepEqual(globalSessionSearch(''), []);
+  assert.deepEqual(globalSessionSearch('a'), []);
 });
 
 test('formatTokens formats raw, k, and M ranges', () => {

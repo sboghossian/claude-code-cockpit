@@ -2,8 +2,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { CockpitSnapshot, snapshot, formatTokens, formatUsd } from './claudeData';
+import {
+  BudgetConfig,
+  CockpitSnapshot,
+  formatBytes,
+  formatTokens,
+  formatUsd,
+  globalSessionSearch,
+  SessionSearchHit,
+  snapshot,
+} from './claudeData';
 import { logger } from './logger';
+import { obsidianUriFor, readObsidianStatus } from './obsidian';
 
 interface InboundMessage {
   type:
@@ -14,13 +24,48 @@ interface InboundMessage {
     | 'openSessionFile'
     | 'openProject'
     | 'openProjectSession'
-    | 'copySkill';
+    | 'copySkill'
+    | 'revealInOS'
+    | 'openExternal'
+    | 'openTerminal'
+    | 'saveToObsidian'
+    | 'openVault'
+    | 'openVaultNote'
+    | 'openSessionInObsidian'
+    | 'searchSessions'
+    | 'addPrompt'
+    | 'deletePrompt'
+    | 'usePrompt'
+    | 'pinMemory'
+    | 'unpinMemory'
+    | 'setDailyCap'
+    | 'goToSession';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
   projectDir?: string;
   skillName?: string;
+  path?: string;
+  url?: string;
+  command?: string;
+  vaultName?: string;
+  noteRelPath?: string;
+  query?: string;
+  promptId?: string;
+  promptTitle?: string;
+  promptBody?: string;
+  sessionFile?: string;
 }
+
+interface PromptEntry {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: number;
+}
+
+const PROMPTS_KEY = 'claudeCockpit.prompts';
+const PINS_KEY = 'claudeCockpit.pinnedMemory';
 
 export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'claudeCockpit.sidebar';
@@ -28,9 +73,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private watcher: fs.FSWatcher | undefined;
   private debounce: NodeJS.Timeout | undefined;
+  private lastSearch: { query: string; hits: SessionSearchHit[] } | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
+    private readonly globalState: vscode.Memento,
+    private readonly readBudgetConfig: () => BudgetConfig,
     private readonly onSnapshot: (snap: CockpitSnapshot) => void,
   ) {}
 
@@ -55,10 +103,15 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const snap = snapshot(cwd);
+    const snap = snapshot(cwd, this.readBudgetConfig());
     this.onSnapshot(snap);
+    const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+    const pinnedMemory = this.globalState.get<string[]>(PINS_KEY, []);
     const payload = {
       ...snap,
+      prompts,
+      pinnedMemory,
+      lastSearch: this.lastSearch,
       stats: {
         ...snap.stats,
         totalTokensFormatted: formatTokens(snap.stats.totalTokens),
@@ -66,6 +119,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         outputTokensFormatted: formatTokens(snap.stats.outputTokens),
         cacheReadTokensFormatted: formatTokens(snap.stats.cacheReadTokens),
         cacheCreationTokensFormatted: formatTokens(snap.stats.cacheCreationTokens),
+        costPerHourFormatted: formatUsd(snap.stats.costPerHourUsd),
+        contextWindowMaxFormatted: formatTokens(snap.stats.contextWindowMax),
+        contextFillPctFormatted: `${snap.stats.contextFillPct.toFixed(1)}%`,
+        cacheHitRatePctFormatted: `${(snap.stats.cacheHitRate * 100).toFixed(1)}%`,
         cost: {
           ...snap.stats.cost,
           totalUsdFormatted: formatUsd(snap.stats.cost.totalUsd),
@@ -79,18 +136,73 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           totalTokensFormatted: formatTokens(a.totalTokens),
         })),
       },
+      claudeMdStack: snap.claudeMdStack.map((c) => ({
+        ...c,
+        sizeFormatted: formatBytes(c.sizeBytes),
+      })),
       projects: snap.projects.map((p) => ({
         ...p,
         totalTokensFormatted: formatTokens(p.totalTokens),
       })),
+      today: {
+        ...snap.today,
+        totalTokensFormatted: formatTokens(snap.today.totalTokens),
+        totalUsdFormatted: formatUsd(snap.today.totalUsd),
+        perProject: snap.today.perProject.map((p) => ({
+          ...p,
+          tokensFormatted: formatTokens(p.tokens),
+          usdFormatted: formatUsd(p.usd),
+        })),
+      },
+      diskUsageBytesFormatted: formatBytes(snap.diskUsageBytes),
+      localLayout: {
+        ...snap.localLayout,
+        motherEntries: snap.localLayout.motherEntries.map((e) => ({
+          ...e,
+          sizeFormatted: e.isDirectory ? `${e.itemCount ?? 0} items` : formatBytes(e.sizeBytes),
+        })),
+        sessionEntries: snap.localLayout.sessionEntries.map((e) => ({
+          ...e,
+          sizeFormatted: e.isDirectory ? `${e.itemCount ?? 0} items` : formatBytes(e.sizeBytes),
+        })),
+      },
+      watchtower: snap.watchtower.map((w) => ({
+        ...w,
+        totalTokensFormatted: formatTokens(w.totalTokens),
+        totalUsdFormatted: formatUsd(w.totalUsd),
+        ageLabel: ageLabel(w.ageSeconds),
+      })),
+      costByTool: snap.costByTool.map((c) => ({
+        ...c,
+        approxUsdFormatted: formatUsd(c.approxUsd),
+        approxTokensFormatted: formatTokens(c.approxTokens),
+      })),
+      budget: {
+        ...snap.budget,
+        spentTodayFormatted: formatUsd(snap.budget.spentTodayUsd),
+        spentSessionFormatted: formatUsd(snap.budget.spentSessionUsd),
+        dailyCapFormatted: formatUsd(snap.budget.dailyCapUsd),
+        sessionCapFormatted: formatUsd(snap.budget.sessionCapUsd),
+      },
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
+  }
+
+  setActiveTabFromHost(tab: string): void {
+    this.view?.webview.postMessage({ type: 'setTab', tab });
+  }
+
+  runSearch(query: string): void {
+    const hits = globalSessionSearch(query, 30);
+    this.lastSearch = { query, hits };
+    this.refresh();
+    this.setActiveTabFromHost('search');
   }
 
   private watchActive(): void {
     this.watcher?.close();
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const snap = snapshot(cwd);
+    const snap = snapshot(cwd, this.readBudgetConfig());
     const target = snap.projectDir ?? path.join(os.homedir(), '.claude', 'projects');
     if (!fs.existsSync(target)) {
       return;
@@ -107,7 +219,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private handle(msg: InboundMessage): void {
+  private async handle(msg: InboundMessage): Promise<void> {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     switch (msg.type) {
       case 'refresh':
@@ -151,6 +263,98 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           });
         }
         return;
+      case 'revealInOS':
+        if (msg.path) {
+          void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(msg.path));
+        }
+        return;
+      case 'openExternal':
+        if (msg.url) {
+          void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+        }
+        return;
+      case 'openTerminal':
+        if (msg.command) {
+          const term = vscode.window.createTerminal({ name: 'Claude Cockpit' });
+          term.show();
+          term.sendText(msg.command);
+        }
+        return;
+      case 'saveToObsidian':
+        void vscode.commands.executeCommand('claudeCockpit.saveToObsidian');
+        return;
+      case 'openVault':
+        void vscode.commands.executeCommand('claudeCockpit.openVault');
+        return;
+      case 'openVaultNote':
+        if (msg.vaultName && msg.noteRelPath) {
+          const obs = readObsidianStatus();
+          const v = obs.vaults.find((x) => x.name === msg.vaultName);
+          if (v) {
+            void vscode.env.openExternal(vscode.Uri.parse(obsidianUriFor(v, msg.noteRelPath)));
+          }
+        }
+        return;
+      case 'searchSessions':
+        if (msg.query) {
+          this.runSearch(msg.query);
+        }
+        return;
+      case 'addPrompt':
+        if (msg.promptTitle && msg.promptBody) {
+          const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+          prompts.push({
+            id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+            title: msg.promptTitle.slice(0, 80),
+            body: msg.promptBody,
+            createdAt: Date.now(),
+          });
+          await this.globalState.update(PROMPTS_KEY, prompts);
+          this.refresh();
+        }
+        return;
+      case 'deletePrompt':
+        if (msg.promptId) {
+          const prompts = this.globalState
+            .get<PromptEntry[]>(PROMPTS_KEY, [])
+            .filter((p) => p.id !== msg.promptId);
+          await this.globalState.update(PROMPTS_KEY, prompts);
+          this.refresh();
+        }
+        return;
+      case 'usePrompt':
+        if (msg.promptBody) {
+          await vscode.env.clipboard.writeText(msg.promptBody);
+          void vscode.window.setStatusBarMessage('Prompt copied — paste into Claude', 1800);
+        }
+        return;
+      case 'pinMemory':
+        if (msg.filename) {
+          const pins = this.globalState.get<string[]>(PINS_KEY, []);
+          if (!pins.includes(msg.filename)) {
+            pins.push(msg.filename);
+            await this.globalState.update(PINS_KEY, pins);
+            this.refresh();
+          }
+        }
+        return;
+      case 'unpinMemory':
+        if (msg.filename) {
+          const pins = this.globalState
+            .get<string[]>(PINS_KEY, [])
+            .filter((f) => f !== msg.filename);
+          await this.globalState.update(PINS_KEY, pins);
+          this.refresh();
+        }
+        return;
+      case 'setDailyCap':
+        void vscode.commands.executeCommand('claudeCockpit.setDailyCap');
+        return;
+      case 'goToSession':
+        if (msg.sessionFile) {
+          void vscode.window.showTextDocument(vscode.Uri.file(msg.sessionFile));
+        }
+        return;
     }
   }
 
@@ -184,7 +388,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       logger.warn(`openMemoryFile rejected suspicious filename: ${filename}`);
       return;
     }
-    const snap = snapshot(cwd);
+    const snap = snapshot(cwd, this.readBudgetConfig());
     if (!snap.projectDir) {
       return;
     }
@@ -221,6 +425,15 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+function ageLabel(seconds: number): string {
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
 }
 
 function makeNonce(): string {
