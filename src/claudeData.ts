@@ -749,6 +749,10 @@ export function memoryIndexPath(cwd: string): string {
 }
 
 function decodeProjectName(encoded: string): string {
+  // TODO: lossy — Claude encodes project paths by replacing every `/` with
+  // `-`, so a literal hyphen in the original path becomes indistinguishable
+  // from a separator. A correct fix requires reading the session JSONL's cwd
+  // field and cross-referencing per session; punted for now.
   return '/' + encoded.replace(/^-/, '').replace(/-/g, '/');
 }
 
@@ -803,7 +807,9 @@ export function listProjects(limit = 20): ProjectSummary[] {
     const decoded = decodeProjectName(entry);
     let totalTokens = 0;
     if (bestSessionFile) {
-      const summary = readSession(bestSessionFile, decoded);
+      // Use the lighter parser — listProjects only needs totalTokens, not
+      // activity feed / sparkline / subagents.
+      const summary = readSessionLight(bestSessionFile);
       totalTokens = summary.totalTokens;
     }
     out.push({
@@ -1473,6 +1479,9 @@ function readSessionLight(
 interface UsageCacheFileEntry {
   mtimeMs: number;
   size: number;
+  // Key shape: `${YYYY-MM-DD}|${family}` so each model on a given day gets
+  // its own bucket. v1 used only `${YYYY-MM-DD}` and lost attribution when
+  // a session spanned multiple models.
   byDate: Record<string, {
     iT: number;
     oT: number;
@@ -1483,27 +1492,28 @@ interface UsageCacheFileEntry {
   }>;
 }
 
-interface UsageCacheV1 {
-  version: 1;
+interface UsageCacheV2 {
+  version: 2;
   files: Record<string, UsageCacheFileEntry>;
 }
+type UsageCache = UsageCacheV2;
 
 const USAGE_CACHE_FILE = path.join(os.homedir(), '.claude', 'cockpit-usage-cache.json');
 
-function readUsageCache(): UsageCacheV1 {
+function readUsageCache(): UsageCache {
   try {
     const raw = fs.readFileSync(USAGE_CACHE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.version === 1 && parsed.files && typeof parsed.files === 'object') {
-      return parsed as UsageCacheV1;
+    if (parsed && parsed.version === 2 && parsed.files && typeof parsed.files === 'object') {
+      return parsed as UsageCache;
     }
   } catch {
     /* ignore */
   }
-  return { version: 1, files: {} };
+  return { version: 2, files: {} };
 }
 
-function writeUsageCache(cache: UsageCacheV1): void {
+function writeUsageCache(cache: UsageCache): void {
   try {
     fs.writeFileSync(USAGE_CACHE_FILE, JSON.stringify(cache));
   } catch (err) {
@@ -1534,7 +1544,9 @@ function readSessionByDate(file: string): UsageCacheFileEntry['byDate'] {
     const y = dt.getFullYear();
     const mo = String(dt.getMonth() + 1).padStart(2, '0');
     const d = String(dt.getDate()).padStart(2, '0');
-    const key = `${y}-${mo}-${d}`;
+    const dateKey = `${y}-${mo}-${d}`;
+    // Key by date+family so each model gets its own bucket.
+    const key = `${dateKey}|${lastFamily}`;
     const entry = out[key] ?? { iT: 0, oT: 0, cR: 0, cC: 0, fam: lastFamily, turns: 0 };
     entry.iT += usage.input_tokens ?? 0;
     entry.oT += usage.output_tokens ?? 0;
@@ -1700,8 +1712,12 @@ export function computeUsageRollups(opts: UsageRollupOptions = {}): UsageRollups
       rollups.scannedFiles += 1;
       const isActiveSession = !!opts.activeSessionFile && full === opts.activeSessionFile;
 
-      for (const dateKey of Object.keys(byDate)) {
-        const d = byDate[dateKey];
+      for (const bucketKey of Object.keys(byDate)) {
+        const d = byDate[bucketKey];
+        // bucketKey is `${YYYY-MM-DD}|${family}` (cache v2). Tolerate v1
+        // entries (just date) for in-memory upgrades during the same run.
+        const pipeIdx = bucketKey.indexOf('|');
+        const dateKey = pipeIdx >= 0 ? bucketKey.slice(0, pipeIdx) : bucketKey;
         const cost = computeCost({
           inputTokens: d.iT,
           outputTokens: d.oT,

@@ -2,6 +2,39 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] — 2026-05-06
+
+### Fixed
+
+- Talk widget no longer leaks ResizeObserver / AudioContext on refresh.
+- Recommendations dropdown actions now route to the correct tab ids (library/settings) instead of falling back to a default tab.
+- Roadmap auto-fetch fires on the `'timeline'` tab id (tab was renamed in v0.17.0).
+- Manage tab no longer renders the literal string `"undefined"` for missing config keys.
+- Tab bar sticky positioning fixed — was clipping 12px of content on scroll.
+- Welcome dismiss / reset-first-run / goto-tab now re-render the sidebar instantly.
+- Per-day cost attribution now correctly splits cost across model families instead of attributing the whole day to whichever model logged last.
+- Wispr shortcut config validated against an injection-safe whitelist before AppleScript dispatch.
+- `runRoutine` validates the routine name against a strict regex to block path traversal.
+- App-usage tracker no longer leaks the polling timer on extension reload; uses local timezone consistently for both the day key and hourly buckets.
+- `httpGet` caps response bodies at 2 MB and follows up to 5 redirects.
+- Git branch detection now works inside worktrees (parses `gitdir:` from the `.git` file).
+- Mac Health network parser tolerates macOS Sequoia layout variations.
+- Security scan processes long lines in 2000-char windows instead of skipping them entirely.
+- `listProjects` uses the lighter head-only session reader on refresh (was doing one full-file parse per project).
+- Health refresh no longer double-runs the full snapshot scan.
+- Jarvis dead-code paths removed from the inbound message union.
+
+### Added
+
+- **Tab icons.** Every tab now shows an inline-SVG line icon beside its label. Covers all 20 tabs (now, library, skills, browse, history, timeline, settings, watchtower, search, prompts, talk, security, mac, inbox, agents, chat, discover, welcome, custom, help). Icons use `currentColor` and adapt to both dark and light themes.
+- **System Stats cards in the Mac tab.** Five expandable detail cards sit below the existing summary row:
+  - **CPU**: total used %, user/sys/idle stacked bar, physical and logical core count, CPU model name (click to copy).
+  - **Memory**: pressure %, wired/active/compressed/free stacked bar, swap used and total.
+  - **Energy**: battery %, cycle count, design-vs-current health %, AC wattage, time remaining, AC/Battery source pill.
+  - **Disk**: main volume percentage plus per-volume mini bars for every mounted volume.
+  - **Network**: combined rx/tx KB/s, active interface, SSID, IPv4, and per-interface IP list.
+  All cards use the existing tone thresholds (green/amber/red at 75/90 for disk and memory, <15 % unplugged for battery, 100/200 for CPU load). Cards collapse to single column when the sidebar is narrower than 300 px.
+
 ## [0.20.2] — 2026-05-06
 
 ### Changed

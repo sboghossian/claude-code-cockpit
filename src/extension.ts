@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   BudgetConfig,
@@ -146,7 +147,7 @@ export function activate(context: vscode.ExtensionContext): void {
         'Open in editor',
       );
       if (open === 'Open in Obsidian') {
-        const rel = written.replace(choice.path + '/', '');
+        const rel = path.relative(choice.path, written);
         void vscode.env.openExternal(vscode.Uri.parse(obsidianUriFor(choice, rel)));
       } else if (open === 'Open in editor') {
         void vscode.window.showTextDocument(vscode.Uri.file(written));

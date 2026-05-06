@@ -447,7 +447,8 @@ input.search:focus {
   background: var(--vscode-editorWidget-background);
   border-bottom: 1px solid var(--vscode-editorWidget-border);
   position: sticky;
-  top: -12px;
+  top: 0;
+  padding-top: 12px;
   z-index: 5;
 }
 
@@ -464,6 +465,16 @@ input.search:focus {
   padding: 6px 10px 7px;
   border-radius: 0;
   transition: color 120ms ease, border-color 120ms ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tab-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  stroke: currentColor;
 }
 
 .tab:hover {
@@ -1100,6 +1111,129 @@ h3.sub-h {
 
 .mac-card .bar {
   margin-top: 6px;
+}
+
+/* Rich system-stats cards (CPU/Memory/Energy/Disk/Network detail) */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 300px) {
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stat-card {
+  padding: 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-card-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  color: var(--vscode-descriptionForeground);
+}
+
+.stat-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.stat-card-value {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.stat-card-value.tone-ok { color: #6ad48f; }
+.stat-card-value.tone-warn { color: #ffa05a; }
+.stat-card-value.tone-bad { color: #e36161; }
+
+.stat-card-sub {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  word-wrap: break-word;
+}
+
+.stat-stack {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--vscode-editorWidget-border);
+  margin-top: 4px;
+}
+
+.stat-stack > span {
+  display: block;
+  height: 100%;
+}
+
+.stat-stack .seg-user { background: var(--vscode-textLink-foreground, #4ea1f3); }
+.stat-stack .seg-sys { background: #ffa05a; }
+.stat-stack .seg-idle { background: var(--vscode-editorWidget-border); }
+.stat-stack .seg-wired { background: #c082ff; }
+.stat-stack .seg-active { background: var(--vscode-textLink-foreground, #4ea1f3); }
+.stat-stack .seg-compressed { background: #ffa05a; }
+.stat-stack .seg-free { background: var(--vscode-editorWidget-border); }
+
+.stat-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--vscode-textLink-foreground, #4ea1f3);
+  color: var(--vscode-editor-background, #000);
+  margin-left: 4px;
+}
+
+.stat-mini-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.stat-mini-row .stat-mini-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--vscode-editorWidget-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stat-mini-row .stat-mini-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--vscode-textLink-foreground, #4ea1f3);
 }
 
 /* Bluetooth peripheral rings */

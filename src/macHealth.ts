@@ -33,6 +33,45 @@ export interface CpuInfo {
   cores: number;
   loadPct1: number;
   uptime: { days: number; hours: number; minutes: number };
+  // Rich detail (top -l 1 -n 0 + sysctl). All optional so legacy callers still work.
+  userPct?: number;
+  sysPct?: number;
+  idlePct?: number;
+  physicalCores?: number;
+  model?: string;
+}
+
+export interface MemoryDetail {
+  totalMb: number;
+  wiredMb: number;
+  activeMb: number;
+  inactiveMb: number;
+  compressedMb: number;
+  freeMb: number;
+  swapUsedMb: number;
+  swapTotalMb: number;
+}
+
+export interface EnergyDetail {
+  source: 'AC' | 'Battery' | 'Unknown';
+  cycleCount?: number;
+  designCapacityMah?: number;
+  currentCapacityMah?: number;
+  healthPct?: number;
+  acWattage?: number;
+  timeRemaining?: string;
+}
+
+export interface VolumeInfo {
+  mount: string;
+  totalGb: number;
+  freeGb: number;
+  pct: number;
+}
+
+export interface InterfaceInfo {
+  name: string;
+  ipv4?: string;
 }
 
 export interface NetworkInfo {
@@ -69,6 +108,11 @@ export interface MacHealthSnapshot {
   externalDrives: ExternalDrive[];
   bluetooth: BluetoothDevice[];
   overallHealth: 'excellent' | 'good' | 'attention';
+  // Rich detail (optional — populated on macOS, undefined elsewhere or on probe failure).
+  memoryDetail?: MemoryDetail;
+  energy?: EnergyDetail;
+  volumes?: VolumeInfo[];
+  interfaces?: InterfaceInfo[];
 }
 
 let cached: { snap: MacHealthSnapshot; ts: number } | undefined;
@@ -199,18 +243,23 @@ async function readNetwork(): Promise<NetworkInfo | undefined> {
 
   // netstat -bI <iface> shows byte counters.
   const out = await run('netstat', ['-bI', iface]);
-  // Header + "Link" line + "Inet" line. We want the Link line which has byte
-  // totals. Columns: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
+  // Header + "Link" line(s) + "Inet" line. We want any Link# line — locate
+  // the Link by scanning for a `<Link#…>` token (column position varies by
+  // macOS version) rather than relying on column 0 matching the iface name.
+  // Columns include: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
   const lines = out.trim().split('\n').slice(1); // skip header
   let rx = 0;
   let tx = 0;
   for (const line of lines) {
     const cols = line.split(/\s+/).filter(Boolean);
-    if (cols.length >= 10 && cols[0] === iface) {
-      rx = Number(cols[6]);
-      tx = Number(cols[9]);
-      break;
-    }
+    if (cols.length < 10) continue;
+    const linkIdx = cols.findIndex((c) => /^<Link#\d+>$/.test(c));
+    if (linkIdx < 0) continue;
+    // Ibytes/Obytes sit at offsets +3 and +6 from the <Link#…> column.
+    const ib = Number(cols[linkIdx + 3]);
+    const ob = Number(cols[linkIdx + 6]);
+    if (Number.isFinite(ib)) rx += ib;
+    if (Number.isFinite(ob)) tx += ob;
   }
   if (!rx && !tx) return { interfaceName: iface, ssid, rxKbps: 0, txKbps: 0 };
 
@@ -308,6 +357,189 @@ async function readModel(): Promise<string | undefined> {
   return trimmed || undefined;
 }
 
+// --- Rich detail collectors (cached via the parent snapshot's CACHE_MS). ---
+
+async function readCpuDetail(): Promise<{
+  userPct?: number;
+  sysPct?: number;
+  idlePct?: number;
+  physicalCores?: number;
+  model?: string;
+}> {
+  try {
+    const [topOut, ncpu, physical, modelOut] = await Promise.all([
+      run('top', ['-l', '1', '-n', '0'], 2500),
+      run('sysctl', ['-n', 'hw.ncpu']),
+      run('sysctl', ['-n', 'hw.physicalcpu']),
+      // hw.model is laptop ID; CPU brand string is on macOS via machdep.cpu.brand_string.
+      run('sysctl', ['-n', 'machdep.cpu.brand_string']),
+    ]);
+    void ncpu;
+    // "CPU usage: 4.12% user, 6.18% sys, 89.69% idle"
+    const m = /CPU usage:\s*([\d.]+)%\s*user,\s*([\d.]+)%\s*sys,\s*([\d.]+)%\s*idle/i.exec(topOut);
+    const physicalCores = Number(physical.trim()) || undefined;
+    const model = modelOut.trim() || undefined;
+    if (!m) return { physicalCores, model };
+    return {
+      userPct: Number(m[1]),
+      sysPct: Number(m[2]),
+      idlePct: Number(m[3]),
+      physicalCores,
+      model,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function readMemoryDetail(totalBytes: number): Promise<MemoryDetail | undefined> {
+  try {
+    const [vmStat, swap] = await Promise.all([
+      run('vm_stat', []),
+      run('sysctl', ['-n', 'vm.swapusage']),
+    ]);
+    const pageSize = Number((vmStat.match(/page size of (\d+)/) ?? ['', '4096'])[1]);
+    function field(key: string): number {
+      const m = new RegExp(`${key}:\\s*(\\d+)`).exec(vmStat);
+      return m ? Number(m[1]) * pageSize : 0;
+    }
+    const wired = field('Pages wired down');
+    const active = field('Pages active');
+    const inactive = field('Pages inactive');
+    const compressed = field('Pages occupied by compressor');
+    const free = field('Pages free');
+    // "total = 2048.00M  used = 512.00M  free = 1536.00M (encrypted)"
+    const sm = /total\s*=\s*([\d.]+)M\s+used\s*=\s*([\d.]+)M/i.exec(swap);
+    const swapTotalMb = sm ? Number(sm[1]) : 0;
+    const swapUsedMb = sm ? Number(sm[2]) : 0;
+    return {
+      totalMb: totalBytes / 1024 / 1024,
+      wiredMb: wired / 1024 / 1024,
+      activeMb: active / 1024 / 1024,
+      inactiveMb: inactive / 1024 / 1024,
+      compressedMb: compressed / 1024 / 1024,
+      freeMb: free / 1024 / 1024,
+      swapUsedMb,
+      swapTotalMb,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function readEnergyDetail(): Promise<EnergyDetail | undefined> {
+  try {
+    const [batt, ac, profile] = await Promise.all([
+      run('pmset', ['-g', 'batt']),
+      run('pmset', ['-g', 'ac']),
+      run('system_profiler', ['SPPowerDataType', '-json'], 4000),
+    ]);
+    // Source from first line: "Now drawing from 'AC Power'" / "'Battery Power'"
+    const srcMatch = /drawing from '([^']+)'/i.exec(batt);
+    const source: EnergyDetail['source'] = srcMatch
+      ? (/AC/i.test(srcMatch[1]) ? 'AC' : 'Battery')
+      : 'Unknown';
+    const timeMatch = /(\d{1,2}:\d{2})\s+remaining/.exec(batt);
+    const wattMatch = /Wattage\s*=\s*(\d+)/i.exec(ac);
+    let cycleCount: number | undefined;
+    let designCapacityMah: number | undefined;
+    let currentCapacityMah: number | undefined;
+    let healthPct: number | undefined;
+    if (profile) {
+      try {
+        const parsed = JSON.parse(profile) as { SPPowerDataType?: Array<Record<string, unknown>> };
+        const items = parsed.SPPowerDataType ?? [];
+        // Find the entry with sppower_battery_health_info.
+        for (const it of items) {
+          const health = it['sppower_battery_health_info'] as Record<string, unknown> | undefined;
+          if (health) {
+            const cc = Number(health['sppower_battery_health_maximum_capacity']);
+            // Some macOS versions stash the Mah values under different keys.
+            const cyc = Number(
+              health['sppower_battery_cycle_count'] ??
+                (it['sppower_battery_charge_info'] as Record<string, unknown> | undefined)?.[
+                  'sppower_battery_cycle_count'
+                ],
+            );
+            if (Number.isFinite(cyc)) cycleCount = cyc;
+            if (Number.isFinite(cc)) healthPct = cc;
+          }
+          const charge = it['sppower_battery_charge_info'] as Record<string, unknown> | undefined;
+          if (charge) {
+            const cyc = Number(charge['sppower_battery_cycle_count']);
+            if (Number.isFinite(cyc) && cycleCount === undefined) cycleCount = cyc;
+          }
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    }
+    return {
+      source,
+      cycleCount,
+      designCapacityMah,
+      currentCapacityMah,
+      healthPct,
+      acWattage: wattMatch ? Number(wattMatch[1]) : undefined,
+      timeRemaining: timeMatch ? timeMatch[1] : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function readVolumes(): Promise<VolumeInfo[]> {
+  const out = await run('df', ['-k']);
+  const lines = out.trim().split('\n').slice(1);
+  const vols: VolumeInfo[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const cols = line.split(/\s+/).filter(Boolean);
+    if (cols.length < 9) continue;
+    const mount = cols.slice(8).join(' ');
+    if (!mount.startsWith('/')) continue;
+    // Skip pseudo / system mounts that aren't user-meaningful.
+    if (mount.startsWith('/System/Volumes/') && mount !== '/System/Volumes/Data') continue;
+    if (mount.startsWith('/dev')) continue;
+    if (mount.startsWith('/private/var/vm')) continue;
+    if (seen.has(mount)) continue;
+    seen.add(mount);
+    const total = Number(cols[1]) * 1024;
+    const used = Number(cols[2]) * 1024;
+    const avail = Number(cols[3]) * 1024;
+    if (!Number.isFinite(total) || total <= 0) continue;
+    vols.push({
+      mount,
+      totalGb: total / 1e9,
+      freeGb: avail / 1e9,
+      pct: (used / total) * 100,
+    });
+  }
+  return vols;
+}
+
+async function readInterfaces(): Promise<InterfaceInfo[]> {
+  const out = await run('ifconfig', ['-a']);
+  if (!out) return [];
+  const blocks = out.split(/^(?=\S)/m);
+  const ifaces: InterfaceInfo[] = [];
+  for (const block of blocks) {
+    const headerMatch = /^([a-zA-Z0-9]+):/m.exec(block);
+    if (!headerMatch) continue;
+    const name = headerMatch[1];
+    if (!/^(en|utun|bridge|awdl|llw)\d*$/.test(name)) continue;
+    // Only include interfaces in UP state.
+    if (!/\bflags=[^\s]*UP/.test(block) && !/status:\s*active/.test(block)) {
+      // Still allow utun if it has an inet line — utun won't always show UP.
+      if (!/^\s+inet\s+/m.test(block)) continue;
+    }
+    const inetMatch = /^\s+inet\s+([0-9.]+)/m.exec(block);
+    if (!inetMatch) continue;
+    ifaces.push({ name, ipv4: inetMatch[1] });
+  }
+  return ifaces;
+}
+
 function deriveOverall(snap: Omit<MacHealthSnapshot, 'overallHealth'>): MacHealthSnapshot['overallHealth'] {
   let bad = 0;
   let warn = 0;
@@ -343,7 +575,20 @@ export async function readMacHealth(): Promise<MacHealthSnapshot> {
     return cached.snap;
   }
   try {
-    const [model, disk, memory, battery, cpu, network, drives, bt] = await Promise.all([
+    const [
+      model,
+      disk,
+      memory,
+      battery,
+      cpu,
+      network,
+      drives,
+      bt,
+      cpuDetail,
+      energy,
+      volumes,
+      interfaces,
+    ] = await Promise.all([
       readModel(),
       readDisk(),
       readMemory(),
@@ -352,7 +597,23 @@ export async function readMacHealth(): Promise<MacHealthSnapshot> {
       readNetwork(),
       readExternalDrives(),
       readBluetooth(),
+      readCpuDetail(),
+      readEnergyDetail(),
+      readVolumes(),
+      readInterfaces(),
     ]);
+    // Total bytes for memoryDetail; reuse the value already computed in readMemory
+    // by re-reading sysctl is cheap enough (cached at OS level).
+    const totalBytesOut = await run('sysctl', ['-n', 'hw.memsize']);
+    const totalBytes = Number(totalBytesOut.trim());
+    const memoryDetail = Number.isFinite(totalBytes) && totalBytes > 0
+      ? await readMemoryDetail(totalBytes)
+      : undefined;
+
+    const cpuMerged: CpuInfo | undefined = cpu
+      ? { ...cpu, ...cpuDetail }
+      : undefined;
+
     const partial = {
       available: true,
       hostname: os.hostname(),
@@ -360,7 +621,7 @@ export async function readMacHealth(): Promise<MacHealthSnapshot> {
       disk,
       memory,
       battery,
-      cpu,
+      cpu: cpuMerged,
       network,
       externalDrives: drives,
       bluetooth: bt,
@@ -368,6 +629,10 @@ export async function readMacHealth(): Promise<MacHealthSnapshot> {
     const snap: MacHealthSnapshot = {
       ...partial,
       overallHealth: deriveOverall(partial),
+      memoryDetail,
+      energy,
+      volumes,
+      interfaces,
     };
     cached = { snap, ts: Date.now() };
     return snap;
