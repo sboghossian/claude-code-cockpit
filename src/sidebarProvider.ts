@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import {
   BudgetConfig,
   CockpitSnapshot,
+  computeRecommendations,
   formatBytes,
   formatTokens,
   formatUsd,
@@ -120,8 +121,25 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     this.onSnapshot(snap);
     const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
     const pinnedMemory = this.globalState.get<string[]>(PINS_KEY, []);
+    // Recompute recommendations with prompts populated — snapshot() doesn't
+    // see globalState, so its baseline list misses prompt-driven recs.
+    const recommendations = computeRecommendations({
+      stats: snap.stats,
+      memory: snap.memory,
+      skills: snap.skills,
+      prompts: prompts.map((p) => ({ id: p.id, title: p.title, body: p.body })),
+      agents: snap.agents,
+      watchtower: snap.watchtower,
+      budget: snap.budget,
+      settings: snap.settings,
+      rtk: snap.rtk,
+      obsidian: snap.obsidian,
+      diskUsageBytes: snap.diskUsageBytes,
+      cwd: snap.cwd,
+    });
     const payload = {
       ...snap,
+      recommendations,
       prompts,
       pinnedMemory,
       lastSearch: this.lastSearch,
