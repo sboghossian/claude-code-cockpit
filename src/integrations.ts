@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
+import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
@@ -414,6 +415,97 @@ export function detectUsageDashboardSync(): UsageDashboardStatus {
     runningOnPort: undefined,
     url: undefined,
   };
+}
+
+// ===========================================================================
+// Subdomain health — HEAD-probe the user's "always live" subdomains so the
+// pilot card's dots reflect reality instead of being decorative.
+// ===========================================================================
+
+export type SubdomainStatus = 'up' | 'down' | 'unknown';
+
+export interface SubdomainHealthEntry {
+  domain: string;
+  status: SubdomainStatus;
+  httpStatus: number | undefined;
+  checkedAtMs: number;
+}
+
+const subdomainHealthCache = new Map<string, SubdomainHealthEntry>();
+
+export function readSubdomainHealthSync(domains: string[]): SubdomainHealthEntry[] {
+  return domains.map(
+    (d) =>
+      subdomainHealthCache.get(d) ?? {
+        domain: d,
+        status: 'unknown' as SubdomainStatus,
+        httpStatus: undefined,
+        checkedAtMs: 0,
+      },
+  );
+}
+
+export async function refreshSubdomainHealth(domains: string[]): Promise<void> {
+  await Promise.all(domains.map((d) => probeSubdomain(d)));
+}
+
+async function probeSubdomain(domain: string): Promise<void> {
+  const result = await httpsHead(domain);
+  subdomainHealthCache.set(domain, {
+    domain,
+    status: result.ok ? 'up' : 'down',
+    httpStatus: result.statusCode,
+    checkedAtMs: Date.now(),
+  });
+}
+
+function httpsHead(host: string): Promise<{ ok: boolean; statusCode: number | undefined }> {
+  return new Promise((resolve) => {
+    const req = https.request(
+      { host, method: 'HEAD', timeout: 3000, path: '/' },
+      (res) => {
+        res.resume();
+        const code = res.statusCode ?? 0;
+        // 2xx + 3xx + auth-walls (401/403) all mean "the host answered" → up.
+        const ok = code >= 200 && code < 500;
+        resolve({ ok, statusCode: code });
+      },
+    );
+    req.on('error', () => resolve({ ok: false, statusCode: undefined }));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ ok: false, statusCode: undefined });
+    });
+    req.end();
+  });
+}
+
+// ===========================================================================
+// Git branch — read .git/HEAD without shelling out, walking up to find repo.
+// ===========================================================================
+
+export function readGitBranchSync(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  let dir = cwd;
+  for (let i = 0; i < 8; i++) {
+    const head = path.join(dir, '.git', 'HEAD');
+    if (fs.existsSync(head)) {
+      try {
+        const raw = fs.readFileSync(head, 'utf8').trim();
+        const m = /^ref:\s+refs\/heads\/(.+)$/.exec(raw);
+        if (m) return m[1];
+        // Detached HEAD — show short SHA.
+        if (/^[0-9a-f]{7,}$/i.test(raw)) return raw.slice(0, 7);
+        return undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+  return undefined;
 }
 
 // ===========================================================================

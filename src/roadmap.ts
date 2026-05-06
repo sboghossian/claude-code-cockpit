@@ -41,7 +41,7 @@ export interface RoadmapData {
 
 const CACHE_PATH = path.join(os.homedir(), '.claude', '.cache', 'cockpit-roadmap.json');
 const DEFAULT_REMOTE = 'https://roadmap.dashable.dev/api/projects';
-const DEFAULT_LOCAL = 'http://localhost:3000/api/projects';
+const DEFAULT_LOCAL = 'http://localhost:3777/api/projects';
 
 function ensureDir(p: string): void {
   try {

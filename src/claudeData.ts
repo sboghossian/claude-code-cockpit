@@ -13,6 +13,7 @@ import {
   InboxItem,
   PlanFile,
   RtkStatus,
+  SubdomainHealthEntry,
   TunnelConfig,
   UsageDashboardStatus,
   computeActivityHeatmap,
@@ -21,8 +22,10 @@ import {
   detectUsageDashboardSync,
   readAgents,
   readChatExport,
+  readGitBranchSync,
   readPlans,
   readRTKSavingsSync,
+  readSubdomainHealthSync,
   readTunnels,
 } from './integrations';
 
@@ -215,6 +218,8 @@ export interface CockpitSnapshot {
   greeting: string;
   macHealth: MacHealthSnapshot;
   routines: RoutinesStatus;
+  gitBranch: string | undefined;
+  subdomainHealth: SubdomainHealthEntry[];
 }
 
 export interface WatchtowerSession {
@@ -1658,6 +1663,7 @@ export function snapshot(
   const macHealth = readMacHealthSync();
   const routines = readRoutinesStatus(cloudRoutinesEnabled === true);
   const greeting = computeGreeting();
+  const gitBranch = readGitBranchSync(cwd ?? (active ? active.decodedPath : undefined));
   const cockpitStats = computeStats({
     byHour: heatmap.byHour,
     byDay: heatmap.byDay,
@@ -1736,6 +1742,8 @@ export function snapshot(
       greeting,
       macHealth,
       routines,
+      gitBranch: undefined,
+      subdomainHealth: readSubdomainHealthSync([]),
     };
   }
 
@@ -1823,6 +1831,8 @@ export function snapshot(
     greeting,
     macHealth,
     routines,
+    gitBranch,
+    subdomainHealth: readSubdomainHealthSync(pilot ? pilot.alwaysLive : []),
   };
 }
 
