@@ -26,6 +26,8 @@ const {
   computeRecommendations,
   computeCostByTool,
   globalSessionSearch,
+  classifyPrompt,
+  minePrompts,
 } = require('../out/claudeData.js');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -485,6 +487,40 @@ test('computeOfficeFloor surfaces last tool, current file, and subagent name per
 test('globalSessionSearch rejects queries shorter than 2 chars', () => {
   assert.deepEqual(globalSessionSearch(''), []);
   assert.deepEqual(globalSessionSearch('a'), []);
+});
+
+test('classifyPrompt returns expected category for keyword-bearing bodies', () => {
+  assert.equal(classifyPrompt('Please draft an NDA clause for HAQQ Legal'), 'legal');
+  assert.equal(classifyPrompt('Ship a PR refactoring the auth middleware'), 'build');
+  assert.equal(classifyPrompt('Review this design for accessibility'), 'review');
+  assert.equal(classifyPrompt('Plan the architecture for the lead pipeline'), 'plan');
+  assert.equal(classifyPrompt('Investigate why the build is slow'), 'research');
+  assert.equal(classifyPrompt('Configure the kubernetes deploy pipeline'), 'infra');
+  assert.equal(classifyPrompt('hi there'), 'other');
+});
+
+test('minePrompts dedupes recurring prompts and surfaces reuse signal', () => {
+  // Build a fake project dir with a JSONL that contains the same prompt twice
+  // and a one-shot. minePrompts should return the recurring one with
+  // occurrences=2, and the one-shot only if it's substantial enough.
+  const ws = makeWorkspace('mine-' + Date.now());
+  fs.mkdirSync(ws.projectDir, { recursive: true });
+  const reused = 'Review the latest diff for SQL injection risks and tell me if any user input flows unescaped into a query.';
+  const oneShot = 'short prompt';
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: '2026-05-01T10:00:00Z', message: { content: reused } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-05-02T10:00:00Z', message: { content: reused } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-05-03T10:00:00Z', message: { content: oneShot } }),
+  ].join('\n');
+  fs.writeFileSync(path.join(ws.projectDir, 'sess.jsonl'), lines);
+
+  const mined = minePrompts(20);
+  const reusedHit = mined.find((p) => p.body.startsWith('Review the latest diff'));
+  assert.ok(reusedHit, 'reused prompt should be mined');
+  assert.equal(reusedHit.occurrences, 2);
+  assert.equal(reusedHit.category, 'review');
+  // One-shot below 80 chars should be filtered.
+  assert.ok(!mined.some((p) => p.body === oneShot));
 });
 
 test('readPlans parses checkboxes from tasks/todo.md', () => {

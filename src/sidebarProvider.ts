@@ -4,12 +4,15 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   BudgetConfig,
+  classifyPrompt,
   CockpitSnapshot,
   computeRecommendations,
   formatBytes,
   formatTokens,
   formatUsd,
   globalSessionSearch,
+  minePrompts,
+  PromptCategory,
   SessionSearchHit,
   snapshot,
 } from './claudeData';
@@ -64,6 +67,9 @@ interface InboundMessage {
     | 'addPrompt'
     | 'deletePrompt'
     | 'usePrompt'
+    | 'updatePromptCategory'
+    | 'minePrompts'
+    | 'savePromptsBatch'
     | 'pinMemory'
     | 'unpinMemory'
     | 'setDailyCap'
@@ -98,6 +104,8 @@ interface InboundMessage {
   promptId?: string;
   promptTitle?: string;
   promptBody?: string;
+  promptCategory?: PromptCategory;
+  promptBatch?: { title: string; body: string; category?: PromptCategory }[];
   sessionFile?: string;
   patch?: UserPrefsPatch;
   routineName?: string;
@@ -133,6 +141,7 @@ interface PromptEntry {
   title: string;
   body: string;
   createdAt: number;
+  category?: PromptCategory;
 }
 
 const PROMPTS_KEY = 'claudeCockpit.prompts';
@@ -604,11 +613,13 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       case 'addPrompt':
         if (msg.promptTitle && msg.promptBody) {
           const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+          const category = msg.promptCategory || classifyPrompt(msg.promptBody);
           prompts.push({
             id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
             title: msg.promptTitle.slice(0, 80),
             body: msg.promptBody,
             createdAt: Date.now(),
+            category,
           });
           await this.globalState.update(PROMPTS_KEY, prompts);
           this.refresh();
@@ -629,6 +640,44 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           void vscode.window.setStatusBarMessage('Prompt copied — paste into Claude', 1800);
         }
         return;
+      case 'updatePromptCategory':
+        if (msg.promptId && msg.promptCategory) {
+          const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+          const idx = prompts.findIndex((p) => p.id === msg.promptId);
+          if (idx >= 0) {
+            prompts[idx] = { ...prompts[idx], category: msg.promptCategory };
+            await this.globalState.update(PROMPTS_KEY, prompts);
+            this.refresh();
+          }
+        }
+        return;
+      case 'minePrompts': {
+        const existing = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+        const seen = new Set(
+          existing.map((p) => p.body.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)),
+        );
+        const mined = minePrompts(60).filter((m) => !seen.has(m.fingerprint));
+        this.view?.webview.postMessage({ type: 'minedPrompts', prompts: mined });
+        return;
+      }
+      case 'savePromptsBatch': {
+        if (!Array.isArray(msg.promptBatch) || msg.promptBatch.length === 0) return;
+        const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+        for (const entry of msg.promptBatch) {
+          if (!entry.title || !entry.body) continue;
+          const category = entry.category || classifyPrompt(entry.body);
+          prompts.push({
+            id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+            title: entry.title.slice(0, 80),
+            body: entry.body,
+            createdAt: Date.now(),
+            category,
+          });
+        }
+        await this.globalState.update(PROMPTS_KEY, prompts);
+        this.refresh();
+        return;
+      }
       case 'pinMemory':
         if (msg.filename) {
           const pins = this.globalState.get<string[]>(PINS_KEY, []);

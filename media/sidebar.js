@@ -2,6 +2,19 @@
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
   let lastSnapshot = null;
+  let minedPromptsState = null; // { prompts: MinedPrompt[], selected: Set<fingerprint> }
+
+  const PROMPT_CATEGORIES = ['legal', 'build', 'review', 'plan', 'research', 'infra', 'other'];
+  const PROMPT_CATEGORY_LABELS = {
+    all: 'All',
+    legal: 'Legal',
+    build: 'Build',
+    review: 'Review',
+    plan: 'Plan',
+    research: 'Research',
+    infra: 'Infra',
+    other: 'Other',
+  };
 
   function basename(p) {
     if (!p) return '';
@@ -1194,31 +1207,141 @@
   }
 
   function promptsSection(snap) {
-    const prompts = snap.prompts || [];
-    const cards = prompts.length
-      ? prompts
+    const prompts = (snap.prompts || []).map((p) => ({
+      ...p,
+      category: p.category || 'other',
+    }));
+    const state = vscode.getState() || {};
+    const activeFilter = state.promptFilter || 'all';
+    // Count per category for chip labels.
+    const counts = { all: prompts.length };
+    for (const c of PROMPT_CATEGORIES) counts[c] = 0;
+    for (const p of prompts) counts[p.category] = (counts[p.category] || 0) + 1;
+
+    const chipFilters = ['all', ...PROMPT_CATEGORIES.filter((c) => counts[c] > 0)];
+    const chips = chipFilters
+      .map(
+        (f) => `<button class="filter-chip ${activeFilter === f ? 'on' : ''}" data-prompt-filter="${f}">${
+          PROMPT_CATEGORY_LABELS[f]
+        }${counts[f] ? ` <span class="chip-count">${counts[f]}</span>` : ''}</button>`,
+      )
+      .join('');
+
+    const filtered = activeFilter === 'all' ? prompts : prompts.filter((p) => p.category === activeFilter);
+
+    const search = prompts.length
+      ? '<input type="search" class="search" data-search="prompts" placeholder="Search prompts…" style="margin-top: 6px;" />'
+      : '';
+
+    const cards = filtered.length
+      ? `<ul class="list" data-search-target="prompts" style="list-style: none; padding: 0;">${filtered
           .map(
-            (p) => `
-            <div class="prompt-card">
-              <div class="prompt-title">${escapeHtml(p.title)}</div>
-              <div class="prompt-body">${escapeHtml(p.body)}</div>
-              <div class="prompt-actions">
-                <button class="watch-action" data-prompt-use="${escapeHtml(p.id)}">Copy</button>
-                <button class="watch-action" data-prompt-delete="${escapeHtml(p.id)}" style="color: var(--vscode-errorForeground);">Delete</button>
+            (p) => `<li data-search-text="${escapeHtml((p.title + ' ' + p.body).toLowerCase())}">
+              <div class="prompt-card">
+                <div class="row">
+                  <div class="prompt-title left">${escapeHtml(p.title)}</div>
+                  <span class="right">
+                    <select class="prompt-cat-select" data-prompt-cat-id="${escapeHtml(p.id)}" title="Category">
+                      ${PROMPT_CATEGORIES.map(
+                        (c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${PROMPT_CATEGORY_LABELS[c]}</option>`,
+                      ).join('')}
+                    </select>
+                  </span>
+                </div>
+                <div class="prompt-body">${escapeHtml(p.body)}</div>
+                <div class="prompt-actions">
+                  <button class="watch-action" data-prompt-use="${escapeHtml(p.id)}">Copy</button>
+                  <button class="watch-action" data-prompt-delete="${escapeHtml(p.id)}" style="color: var(--vscode-errorForeground);">Delete</button>
+                </div>
               </div>
-            </div>`,
+            </li>`,
           )
-          .join('')
-      : '<p class="empty">No saved prompts yet. Add one below.</p>';
+          .join('')}</ul>`
+      : prompts.length
+      ? `<p class="empty">No prompts in <strong>${escapeHtml(PROMPT_CATEGORY_LABELS[activeFilter])}</strong>. Switch filter or add one below.</p>`
+      : `<p class="empty">No saved prompts yet. Click <strong>Mine recent prompts</strong> to scan your sessions, or add one manually below.</p>`;
+
+    const minedBlock = renderMinedPromptsBlock();
+
     return `
-      <h2>Prompt library <span class="cost-rate">${prompts.length}</span></h2>
+      <h2>Prompt library <span class="cost-rate">${prompts.length}</span>
+        <button class="office-btn" data-prompt-mine style="float: right;">⛏ Mine recent prompts</button>
+      </h2>
+      ${prompts.length ? `<div class="filter-chips">${chips}</div>` : ''}
+      ${search}
+      ${minedBlock}
       ${cards}
       <div class="prompt-form">
         <input data-prompt-title placeholder="Prompt title (e.g. 'plan-review')" />
+        <select data-prompt-cat-new>
+          <option value="">Auto-classify</option>
+          ${PROMPT_CATEGORIES.map((c) => `<option value="${c}">${PROMPT_CATEGORY_LABELS[c]}</option>`).join('')}
+        </select>
         <textarea data-prompt-body placeholder="Prompt body — gets copied to clipboard"></textarea>
         <button class="office-btn" data-prompt-add>Save prompt</button>
       </div>
     `;
+  }
+
+  function renderMinedPromptsBlock() {
+    if (!minedPromptsState) return '';
+    const { prompts, selected } = minedPromptsState;
+    if (!prompts.length) {
+      return `
+        <div class="mined-block">
+          <div class="row">
+            <h3 class="sub-h left">Mined prompts</h3>
+            <button class="watch-action right" data-prompt-mine-close>Dismiss</button>
+          </div>
+          <p class="empty">No reusable prompts found in your recent sessions. Once you've reused a prompt across sessions, it'll show up here.</p>
+        </div>
+      `;
+    }
+    const rows = prompts
+      .map((p, idx) => {
+        const fp = p.fingerprint;
+        const checked = selected.has(fp) ? 'checked' : '';
+        const preview = p.body.length > 220 ? p.body.slice(0, 220) + '…' : p.body;
+        const occ = p.occurrences > 1 ? `<span class="tag tag-used">×${p.occurrences}</span>` : '';
+        const proj = p.projectHint ? `<span class="tag">${escapeHtml(p.projectHint)}</span>` : '';
+        return `<li>
+          <label class="mined-row">
+            <input type="checkbox" data-mined-toggle="${escapeHtml(fp)}" ${checked} />
+            <div class="mined-content">
+              <div class="row">
+                <span class="left"><strong>${escapeHtml(deriveTitle(p.body, idx))}</strong> <span class="tag tag-${escapeHtml(p.category)}">${escapeHtml(PROMPT_CATEGORY_LABELS[p.category])}</span></span>
+                <span class="right">${occ}${proj}</span>
+              </div>
+              <div class="mined-preview">${escapeHtml(preview)}</div>
+            </div>
+          </label>
+        </li>`;
+      })
+      .join('');
+    const selCount = selected.size;
+    return `
+      <div class="mined-block">
+        <div class="row">
+          <h3 class="sub-h left">Mined prompts <span class="cost-rate">${prompts.length}</span></h3>
+          <span class="right">
+            <button class="watch-action" data-prompt-mine-select-all>${selCount === prompts.length ? 'Deselect all' : 'Select all'}</button>
+            <button class="office-btn" data-prompt-mine-save ${selCount ? '' : 'disabled'}>Save ${selCount || ''} selected</button>
+            <button class="watch-action" data-prompt-mine-close>Dismiss</button>
+          </span>
+        </div>
+        <p class="empty" style="font-size: 11px;">Found ${prompts.length} reusable prompts across your recent sessions. Tick the ones to add to your library.</p>
+        <ul class="list" style="list-style: none; padding: 0;">${rows}</ul>
+      </div>
+    `;
+  }
+
+  function deriveTitle(body, idx) {
+    // First line, capped at 60 chars. If first line is too generic, fall back
+    // to a numbered title.
+    const first = body.split(/\n/)[0].trim();
+    if (first.length >= 8 && first.length <= 80) return first;
+    if (first.length > 80) return first.slice(0, 77) + '…';
+    return `Mined prompt ${idx + 1}`;
   }
 
   function budgetSection(snap) {
@@ -3318,13 +3441,16 @@
       btn.addEventListener('click', () => {
         const titleEl = root.querySelector('input[data-prompt-title]');
         const bodyEl = root.querySelector('textarea[data-prompt-body]');
+        const catEl = root.querySelector('select[data-prompt-cat-new]');
         if (!titleEl || !bodyEl) return;
         const title = titleEl.value.trim();
         const body = bodyEl.value.trim();
         if (!title || !body) return;
-        vscode.postMessage({ type: 'addPrompt', promptTitle: title, promptBody: body });
+        const category = catEl && catEl.value ? catEl.value : undefined;
+        vscode.postMessage({ type: 'addPrompt', promptTitle: title, promptBody: body, promptCategory: category });
         titleEl.value = '';
         bodyEl.value = '';
+        if (catEl) catEl.value = '';
       });
     });
 
@@ -3345,6 +3471,79 @@
         vscode.postMessage({ type: 'deletePrompt', promptId: btn.getAttribute('data-prompt-delete') });
       });
     });
+
+    root.querySelectorAll('button[data-prompt-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.getAttribute('data-prompt-filter');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, promptFilter: f });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('select[data-prompt-cat-id]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const id = sel.getAttribute('data-prompt-cat-id');
+        vscode.postMessage({ type: 'updatePromptCategory', promptId: id, promptCategory: sel.value });
+      });
+    });
+
+    const mineBtn = root.querySelector('button[data-prompt-mine]');
+    if (mineBtn) {
+      mineBtn.addEventListener('click', () => {
+        mineBtn.disabled = true;
+        mineBtn.textContent = '⛏ Mining…';
+        vscode.postMessage({ type: 'minePrompts' });
+      });
+    }
+
+    root.querySelectorAll('input[data-mined-toggle]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (!minedPromptsState) return;
+        const fp = cb.getAttribute('data-mined-toggle');
+        if (cb.checked) minedPromptsState.selected.add(fp);
+        else minedPromptsState.selected.delete(fp);
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    const selectAllBtn = root.querySelector('button[data-prompt-mine-select-all]');
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', () => {
+        if (!minedPromptsState) return;
+        if (minedPromptsState.selected.size === minedPromptsState.prompts.length) {
+          minedPromptsState.selected.clear();
+        } else {
+          minedPromptsState.selected = new Set(minedPromptsState.prompts.map((p) => p.fingerprint));
+        }
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    }
+
+    const saveSelBtn = root.querySelector('button[data-prompt-mine-save]');
+    if (saveSelBtn) {
+      saveSelBtn.addEventListener('click', () => {
+        if (!minedPromptsState || !minedPromptsState.selected.size) return;
+        const batch = minedPromptsState.prompts
+          .filter((p) => minedPromptsState.selected.has(p.fingerprint))
+          .map((p, idx) => ({
+            title: deriveTitle(p.body, idx),
+            body: p.body,
+            category: p.category,
+          }));
+        vscode.postMessage({ type: 'savePromptsBatch', promptBatch: batch });
+        minedPromptsState = null;
+        // Re-render will happen on next snapshot from backend.
+      });
+    }
+
+    const closeBtn = root.querySelector('button[data-prompt-mine-close]');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        minedPromptsState = null;
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    }
 
     const searchInput = root.querySelector('input[data-search-input]');
     if (searchInput) {
@@ -3381,6 +3580,12 @@
       onSnapshot(msg.snapshot);
     } else if (msg && msg.type === 'setTab') {
       setActiveTab(msg.tab);
+      if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'minedPrompts') {
+      minedPromptsState = {
+        prompts: msg.prompts || [],
+        selected: new Set((msg.prompts || []).filter((p) => p.occurrences >= 2).map((p) => p.fingerprint)),
+      };
       if (lastSnapshot) render(lastSnapshot);
     }
   });

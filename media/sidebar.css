@@ -1969,3 +1969,72 @@ body[data-theme="light"] .manage-group-head {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Prompt library category chips + mined prompt UI */
+.chip-count {
+  opacity: 0.6;
+  font-size: 10px;
+  margin-left: 2px;
+}
+.prompt-cat-select {
+  font-size: 10px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+select[data-prompt-cat-new] {
+  font-size: 11px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin: 4px 0;
+  width: 100%;
+}
+.tag-legal { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+.tag-build { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.tag-review { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.tag-plan { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.tag-research { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+.tag-infra { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+.tag-other { background: rgba(115, 115, 115, 0.2); color: var(--vscode-descriptionForeground); }
+
+.mined-block {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: var(--vscode-editor-inactiveSelectionBackground);
+}
+.mined-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.mined-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.mined-row input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.mined-content {
+  flex: 1;
+  min-width: 0;
+}
+.mined-preview {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 80px;
+  overflow: hidden;
+  position: relative;
+}

@@ -2781,3 +2781,177 @@ export function globalSessionSearch(query: string, limit = 30): SessionSearchHit
   }
   return out;
 }
+
+// ===========================================================================
+// Prompt mining — walks recent JSONL to surface reusable prompts the user
+// has typed across sessions. Used by the Library tab's "Mine prompts" flow.
+// ===========================================================================
+
+export type PromptCategory =
+  | 'legal'
+  | 'build'
+  | 'review'
+  | 'plan'
+  | 'research'
+  | 'infra'
+  | 'other';
+
+export interface MinedPrompt {
+  fingerprint: string;
+  body: string;
+  firstSeenAt: string | undefined;
+  lastSeenAt: string | undefined;
+  occurrences: number;
+  category: PromptCategory;
+  projectHint: string | undefined;
+}
+
+// Order matters — earlier patterns win when multiple match. Research and
+// review come before build so prompts like "investigate why the build is
+// slow" or "review the build" don't get mis-classified by the broad "build"
+// keyword. Build itself is a catch-all for ship/deploy/PR intent.
+const PROMPT_CATEGORY_KEYWORDS: Array<[PromptCategory, RegExp]> = [
+  ['legal', /\b(legal|contract|clause|nda|haqq|counsel|court|matter|filing|redline|jurisdic|gdpr|privilege)\b/i],
+  ['research', /\b(research|investigate|find out|how does|why does|explain|teach|summari[sz]e|compare)\b/i],
+  ['review', /\b(review|audit|critique|feedback|second opinion|sanity check|look over)\b/i],
+  ['plan', /\b(plan|design|architect|spec|roadmap|brainstorm|think through|explore|approach)\b/i],
+  ['infra', /\b(aws|gcp|cloudflare|nginx|kubernetes|docker|terraform|cicd|pipeline|server)\b/i],
+  ['build', /\b(ship|deploy|build|implement|refactor|fix|merge|pr|pull request|commit|release)\b/i],
+];
+
+export function classifyPrompt(body: string): PromptCategory {
+  for (const [cat, rx] of PROMPT_CATEGORY_KEYWORDS) {
+    if (rx.test(body)) return cat;
+  }
+  return 'other';
+}
+
+function fingerprintPrompt(body: string): string {
+  // Cheap dedupe key — first 80 chars normalized. Same prompt typed twice
+  // (with different trailing text) collapses; meaningfully different prompts
+  // stay distinct.
+  return body
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+function isInterestingPromptCandidate(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 40) return false;
+  if (t.length > 4000) return false;
+  // Skip pasted file contents / tool output the user piped back.
+  if (t.startsWith('{') && t.endsWith('}')) return false;
+  if (t.startsWith('[') && t.endsWith(']')) return false;
+  // Skip system-reminder and command-name passthroughs.
+  if (t.includes('<system-reminder>')) return false;
+  if (t.includes('<command-name>')) return false;
+  // Skip tool result paste-backs.
+  if (t.startsWith('Tool result:')) return false;
+  return true;
+}
+
+export function minePrompts(limit = 50): MinedPrompt[] {
+  if (!fs.existsSync(claudeHome)) return [];
+  let projects: string[];
+  try {
+    projects = fs.readdirSync(claudeHome);
+  } catch {
+    return [];
+  }
+  const byFingerprint = new Map<string, MinedPrompt>();
+  // Walk most recent files first so firstSeen/lastSeen are accurate.
+  type FileRef = { full: string; mtime: number; project: string };
+  const files: FileRef[] = [];
+  for (const proj of projects) {
+    const dir = path.join(claudeHome, proj);
+    let stat;
+    try {
+      stat = fs.statSync(dir);
+    } catch {
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of entries) {
+      if (!f.endsWith('.jsonl')) continue;
+      const full = path.join(dir, f);
+      try {
+        const s = fs.statSync(full);
+        files.push({ full, mtime: s.mtimeMs, project: proj });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  files.sort((a, b) => b.mtime - a.mtime);
+  // Cap files scanned to keep mining fast on large vaults.
+  const MAX_FILES = 80;
+  for (const ref of files.slice(0, MAX_FILES)) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(ref.full, 'utf8');
+    } catch {
+      continue;
+    }
+    const decodedProj = decodeProjectName(ref.project);
+    const projectHint = path.basename(decodedProj) || decodedProj;
+    for (const line of raw.split('\n')) {
+      const parsed = parseLine(line);
+      if (!parsed) continue;
+      if (parsed.type !== 'user') continue;
+      const content = parsed.message?.content;
+      const texts: string[] = [];
+      if (typeof content === 'string') {
+        texts.push(content);
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text' && typeof (block as { text?: unknown }).text === 'string') {
+            texts.push((block as { text: string }).text);
+          }
+        }
+      }
+      for (const t of texts) {
+        if (!isInterestingPromptCandidate(t)) continue;
+        const fp = fingerprintPrompt(t);
+        const ts = parsed.timestamp;
+        const existing = byFingerprint.get(fp);
+        if (existing) {
+          existing.occurrences += 1;
+          if (ts) {
+            if (!existing.firstSeenAt || ts < existing.firstSeenAt) existing.firstSeenAt = ts;
+            if (!existing.lastSeenAt || ts > existing.lastSeenAt) existing.lastSeenAt = ts;
+          }
+        } else {
+          byFingerprint.set(fp, {
+            fingerprint: fp,
+            body: t.trim(),
+            firstSeenAt: ts,
+            lastSeenAt: ts,
+            occurrences: 1,
+            category: classifyPrompt(t),
+            projectHint,
+          });
+        }
+      }
+    }
+  }
+  // Score: reuse signal first (occurrences > 1 wins), then recency.
+  const scored = Array.from(byFingerprint.values()).sort((a, b) => {
+    if (a.occurrences !== b.occurrences) return b.occurrences - a.occurrences;
+    const al = a.lastSeenAt || '';
+    const bl = b.lastSeenAt || '';
+    return bl.localeCompare(al);
+  });
+  // Filter: only surface prompts that appeared more than once OR are recent
+  // and substantial. One-shot copy-pastes aren't worth saving.
+  return scored
+    .filter((p) => p.occurrences >= 2 || (p.body.length >= 80 && !!p.lastSeenAt))
+    .slice(0, limit);
+}
