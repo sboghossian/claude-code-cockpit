@@ -251,9 +251,111 @@ ul.list li:last-child {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #6ad48f;
+  background: var(--vscode-descriptionForeground);
   margin-right: 4px;
   vertical-align: middle;
+  transition: background 0.3s ease;
+}
+
+.subdomain-dot-up {
+  background: #6ad48f;
+  animation: cockpit-pulse 2.4s infinite;
+}
+
+.subdomain-dot-down {
+  background: #e25c5c;
+}
+
+.subdomain-dot-unknown {
+  background: var(--vscode-descriptionForeground);
+  opacity: 0.5;
+}
+
+.pilot-flying {
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  background: var(--vscode-editor-background, transparent);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+}
+
+.pilot-flying-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pilot-flying-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.pilot-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--vscode-foreground);
+}
+
+.pilot-live-idle {
+  color: var(--vscode-descriptionForeground);
+  font-weight: 400;
+}
+
+.pilot-live-badge .live-dot {
+  margin-left: 0;
+}
+
+.pilot-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.pilot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pilot-chip-key {
+  color: var(--vscode-descriptionForeground);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pilot-chip-val {
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12ch;
+}
+
+.pilot-chip-warn {
+  border-color: var(--vscode-editorWarning-foreground, #d4a36a);
+}
+
+.pilot-chip-danger {
+  border-color: var(--vscode-editorError-foreground, #e25c5c);
 }
 
 .subdomain-name {

@@ -2,7 +2,7 @@
   "name": "claude-cockpit",
   "displayName": "Claude Cockpit",
   "description": "Surface Claude Code's hidden state — token burn, files touched, memory, modes — directly in VSCode.",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "dashable",
   "license": "MIT",
   "repository": {

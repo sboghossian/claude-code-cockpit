@@ -2,6 +2,17 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.15.0] — 2026-05-06
+
+### Added
+
+- **PILOT card "now flying" strip.** Session-aware row inside the pilot card showing live/idle status with last-activity age, plus chips for `cwd` (basename), `branch` (parsed from `.git/HEAD`), `model` family, context fill `%`, and pending todo count. Updates on every snapshot tick.
+- **Live "always-live" subdomain dots.** The decorative dots in the PILOT card are now real health indicators: green + pulse for up, red for down, dimmed gray for unknown. Background HTTPS HEAD probes refresh every 60s with a 3s timeout per host. Hover any dot to see HTTP status code and last check time.
+
+### Changed
+
+- PRIVACY.md note: when the PILOT card has at least one "always-live" subdomain entry, Cockpit issues HTTPS HEAD probes against those hosts every 60s. No bodies, no auth, no telemetry.
+
 ## [0.14.0] — 2026-05-06
 
 ### Added

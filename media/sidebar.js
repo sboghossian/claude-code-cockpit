@@ -1358,8 +1358,20 @@
   function pilotSection(snap) {
     const p = snap.pilot;
     if (!p) return '';
+    const healthByDomain = new Map(
+      (snap.subdomainHealth || []).map((h) => [h.domain, h]),
+    );
     const dots = (p.alwaysLive || [])
-      .map((d) => `<span class="subdomain-dot" title="${escapeHtml(d)}"></span><span class="subdomain-name">${escapeHtml(d.split('.')[0])}</span>`)
+      .map((d) => {
+        const h = healthByDomain.get(d);
+        const status = h ? h.status : 'unknown';
+        const checked = h && h.checkedAtMs
+          ? new Date(h.checkedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : 'never';
+        const httpInfo = h && h.httpStatus ? ` HTTP ${h.httpStatus}` : '';
+        const tip = `${d} · ${status}${httpInfo} · checked ${checked}`;
+        return `<span class="subdomain-dot subdomain-dot-${status}" title="${escapeHtml(tip)}"></span><span class="subdomain-name">${escapeHtml(d.split('.')[0])}</span>`;
+      })
       .join('');
     const principles = (p.principles || [])
       .slice(0, 12)
@@ -1380,10 +1392,60 @@
         </div>
         ${role}
         ${oneLiner}
+        ${pilotNowFlyingStrip(snap)}
         ${principles ? `<div class="pilot-principles-label">core principles</div><ol class="pilot-principles">${principles}</ol>` : ''}
         ${dotsBlock}
       </section>
     `;
+  }
+
+  function pilotNowFlyingStrip(snap) {
+    const s = snap.stats || {};
+    const cwd = snap.cwd;
+    if (!cwd) return '';
+    const cwdShort = cwd.split('/').filter(Boolean).pop() || cwd;
+    const branch = snap.gitBranch;
+    const model = s.modelFamily && s.modelFamily !== 'unknown'
+      ? s.modelFamily
+      : (s.lastModel || '—');
+    const ago = pilotFormatAgo(pilotSecondsSince(s.lastActivityAt));
+    const liveBadge = s.isActive
+      ? `<span class="pilot-live-badge"><span class="live-dot"></span>live</span>`
+      : `<span class="pilot-live-badge pilot-live-idle">idle · ${escapeHtml(ago)}</span>`;
+    const todoCount = (snap.plans || []).reduce((n, p) => n + (p.pendingCount || 0), 0);
+    const fillPct = s.contextFillPct != null ? Math.round(s.contextFillPct) : undefined;
+    const tone = fillPct == null ? '' : fillPct > 90 ? ' pilot-chip-danger' : fillPct > 70 ? ' pilot-chip-warn' : '';
+    const chips = [
+      `<span class="pilot-chip" title="${escapeHtml(cwd)}"><span class="pilot-chip-key">cwd</span><span class="pilot-chip-val">${escapeHtml(cwdShort)}</span></span>`,
+      branch ? `<span class="pilot-chip"><span class="pilot-chip-key">branch</span><span class="pilot-chip-val">${escapeHtml(branch)}</span></span>` : '',
+      `<span class="pilot-chip"><span class="pilot-chip-key">model</span><span class="pilot-chip-val">${escapeHtml(model)}</span></span>`,
+      fillPct != null ? `<span class="pilot-chip${tone}"><span class="pilot-chip-key">ctx</span><span class="pilot-chip-val">${fillPct}%</span></span>` : '',
+      todoCount > 0 ? `<span class="pilot-chip"><span class="pilot-chip-key">todos</span><span class="pilot-chip-val">${todoCount}</span></span>` : '',
+    ].filter(Boolean).join('');
+    return `
+      <div class="pilot-flying">
+        <div class="pilot-flying-head">
+          <span class="pilot-flying-label">now flying</span>
+          ${liveBadge}
+        </div>
+        <div class="pilot-chips">${chips}</div>
+      </div>
+    `;
+  }
+
+  function pilotSecondsSince(iso) {
+    if (!iso) return undefined;
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return undefined;
+    return Math.max(0, Math.floor((Date.now() - t) / 1000));
+  }
+
+  function pilotFormatAgo(seconds) {
+    if (seconds == null) return 'never';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
   }
 
   function sparklineSvg(points) {
@@ -2471,6 +2533,7 @@
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'projects') body = projectsSection(snap);
       else if (activeTab === 'help') body = helpSection();
+      else if (activeTab === 'self') body = selfTelemetrySection(snap);
       else if (activeTab === 'config') body = `${budgetSection(snap)}${rtkSection(snap)}${tunnelsSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
       else body = `
         ${greetingSection(snap)}
@@ -2607,6 +2670,8 @@
       body = macHealthSection(snap);
     } else if (activeTab === 'help') {
       body = helpSection();
+    } else if (activeTab === 'self') {
+      body = selfTelemetrySection(snap);
     } else if (activeTab === 'config') {
       body = `
         ${budgetSection(snap)}
