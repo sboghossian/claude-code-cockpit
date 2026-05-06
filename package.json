@@ -5,6 +5,7 @@
   "version": "0.20.0",
   "publisher": "dashable",
   "license": "MIT",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/sboghossian/claude-cockpit.git"
@@ -22,8 +23,33 @@
     "claude-code",
     "anthropic",
     "ai",
-    "cockpit"
+    "cockpit",
+    "hud",
+    "observability",
+    "tokens",
+    "obsidian",
+    "local-first"
   ],
+  "galleryBanner": {
+    "color": "#0b0d10",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://img.shields.io/github/v/release/sboghossian/claude-cockpit?label=release",
+      "href": "https://github.com/sboghossian/claude-cockpit/releases",
+      "description": "Latest GitHub release"
+    },
+    {
+      "url": "https://img.shields.io/badge/license-MIT-green",
+      "href": "https://github.com/sboghossian/claude-cockpit/blob/main/LICENSE",
+      "description": "MIT License"
+    }
+  ],
+  "qna": "https://github.com/sboghossian/claude-cockpit/issues",
+  "bugs": {
+    "url": "https://github.com/sboghossian/claude-cockpit/issues"
+  },
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished"

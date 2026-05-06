@@ -91,7 +91,16 @@ Then open the folder in VSCode and press `F5` to launch an Extension Development
 
 ### Marketplace
 
-Not published yet — coming once the icon is converted from SVG to PNG ≥128×128 (Marketplace requirement) and the publisher PAT is wired up. Until then, install via the `.vsix` route above.
+<!-- Uncomment once the first marketplace publish lands:
+[Install from the VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=dashable.claude-cockpit)
+-->
+
+For maintainers — publishing a new version:
+
+1. Generate a Personal Access Token (PAT) for the `dashable` publisher in Azure DevOps (Marketplace → Manage scope). See the [Microsoft publish guide](https://learn.microsoft.com/en-us/azure/devops/marketplace/publish-extension).
+2. Export it: `export VSCE_PAT="<your-pat>"`.
+3. Bump `version` in `package.json` and update `CHANGELOG.md`.
+4. Run: `bash scripts/publish-marketplace.sh`. The script compiles, verifies the PAT, packages the `.vsix`, and pushes to the marketplace.
 
 ## Architecture
 

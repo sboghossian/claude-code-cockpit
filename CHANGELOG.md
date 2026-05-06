@@ -151,6 +151,72 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 
 - **Recommendations tab**. Surfaces actionable suggestions (memory cleanup, skill usage, prompt library, budget caps) inferred from your session state.
 
-## Earlier versions
+## [0.8.0] — 2025-12-13
 
-Prior versions covered the foundational tabs: Now, Mac, Watchtower, Agents, Chat, Search, Obsidian, Memory, Prompts, Skills, Projects, Files, Config, and Help. See git history for details.
+### Added
+
+- **Personal OS HUD.** Mac tab — disk, memory pressure, battery, CPU load, Wi-Fi throughput, external drives, Bluetooth peripheral battery rings, application time today (per-app focus tracker with hourly bar chart, sampled while VSCode is running).
+- **Help tab.** Plain-language explanations of every tab, every metric, where each data point comes from, and the privacy model.
+- Greeting strip + at-a-glance stats grid (streak, active days, peak hour, favorite model, week cost).
+
+## [0.7.0] — 2025-12-12
+
+### Added
+
+- **Plans.** Reads `tasks/todo.md` (and any `tasks/*.md` plan files) and renders checkbox progress per project.
+- **Chat surface.** Surfaces Claude.ai conversations from a `claude-data-export/` folder, unifying Chat + Code in one view.
+- **Activity heatmap.** 24-hour × 7-day grid showing when you actually code with Claude.
+- **Usage dashboard launcher.** Detects whether [phuryn/claude-usage](https://github.com/phuryn/claude-usage) is installed/running and surfaces a one-click launch.
+
+## [0.6.0] — 2025-12-11
+
+### Added
+
+- **Watchtower.** Every Claude Code session touched in the last hour, color-coded green (live) → grey (stale). Click a session to inspect its JSONL.
+- **Obsidian integration.** Auto-detects vaults from `~/Library/Application Support/obsidian/obsidian.json`, lists recent notes, save-session-as-markdown action.
+- **Recent projects browser** + `~/.claude/` filesystem panel.
+- **Cost-by-tool table.** Approximate USD per tool call across the active session.
+- **Sub-agent listing** + sub-agent token totals.
+- **Pinned memory** with stale-entry flagging.
+
+## [0.5.0]
+
+Skipped — no shipped artifact under this version number.
+
+## [0.4.0] — 2025-12-09
+
+### Added
+
+- **Tabbed UI.** Replaces the single-scroll layout with proper tabs (Now / Watchtower / Memory / Skills / Projects / Files / Config / Help) plus per-tab body composition.
+- Five additional widgets: tool histogram, files-touched list, today's totals, MCP server panel, hooks inspector.
+
+## [0.3.0] — 2025-12-08
+
+### Added
+
+- **PILOT card** that auto-detects `<user>_claude.md`, extracts numbered principles, role from frontmatter, "one-liner" quote, plus always-live subdomain dots.
+- **Cost tracking.** Token → USD per model family (Opus / Sonnet / Haiku); rates centralized in `claudeData.ts:PRICING`.
+- **Live indicator.** Green pulsing dot when session mtime < 10s.
+- **Sub-agents view.** Scans `<sessionFile-dir>/<sessionId>/subagents/*.jsonl`.
+- **Skill palette.** Reads `~/.claude/skills/*/SKILL.md` + plugin cache; click copies `/<name>` to clipboard.
+- **Token sparkline.** Last 60 min bucketed by minute, inline SVG.
+- **Memory search.** Filter the memory list by title/hook + a server-side `searchMemory()` for deeper queries.
+
+## [0.2.0]
+
+Skipped — no shipped artifact under this version number.
+
+## [0.1.0] — 2025-12-06
+
+### Added
+
+- **Projects browser.** Cross-project session list (also fixes empty-state when no folder is open).
+- **MCP server panel.** Reads `~/.claude/settings.json` (no `~/.claude.json` to avoid credential exposure).
+- **Hooks inspector.** Event types + count + command bin names.
+- **Sessions are first-class, not workspace folders.** v0.2.0-style refactor for multi-session awareness.
+
+## [0.0.1] — 2025-12-05
+
+### Added
+
+- **Phase 1 — read-only sidebar.** Read active session JSONL from `~/.claude/projects/<encoded-cwd>/*.jsonl`, compute token burn from `usage` blocks, extract files touched from Edit/Write/MultiEdit blocks, parse `MEMORY.md` index. Sidebar webview in the Activity Bar; status bar items for cwd basename, total tokens, files touched. Live updates via `fs.watch`. First public release.
