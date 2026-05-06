@@ -499,6 +499,47 @@ test('classifyPrompt returns expected category for keyword-bearing bodies', () =
   assert.equal(classifyPrompt('hi there'), 'other');
 });
 
+test('parseRss extracts title/link/description from an RSS feed', () => {
+  const { parseRss } = require('../out/discover.js');
+  const xml = `<?xml version="1.0"?><rss><channel>
+    <item>
+      <title>Test story</title>
+      <link>https://example.com/a</link>
+      <description><![CDATA[<p>Hello world</p>]]></description>
+      <pubDate>Wed, 06 May 2026 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Another</title>
+      <link>https://example.com/b</link>
+      <description>Plain text</description>
+      <pubDate>Tue, 05 May 2026 10:00:00 +0000</pubDate>
+    </item>
+  </channel></rss>`;
+  const items = parseRss(xml);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].title, 'Test story');
+  assert.equal(items[0].link, 'https://example.com/a');
+  assert.equal(items[0].description, 'Hello world');
+  assert.ok(items[0].pubDate);
+});
+
+test('parseRss handles Atom <entry> with link href attribute', () => {
+  const { parseRss } = require('../out/discover.js');
+  const xml = `<?xml version="1.0"?><feed>
+    <entry>
+      <title>Atom story</title>
+      <link href="https://example.com/atom" />
+      <summary>An atom summary</summary>
+      <updated>2026-05-06T10:00:00Z</updated>
+    </entry>
+  </feed>`;
+  const items = parseRss(xml);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, 'Atom story');
+  assert.equal(items[0].link, 'https://example.com/atom');
+  assert.equal(items[0].description, 'An atom summary');
+});
+
 test('minePrompts dedupes recurring prompts and surfaces reuse signal', () => {
   // Build a fake project dir with a JSONL that contains the same prompt twice
   // and a one-shot. minePrompts should return the recurring one with

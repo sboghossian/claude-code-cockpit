@@ -802,85 +802,185 @@
     if (!d.enabled) {
       return `
         <h2>Discover</h2>
-        <p class="empty" style="font-size: 11px;">Discover surfaces top GitHub projects and RSS feeds. Both are <strong>off by default</strong> because Cockpit's privacy stance is local-first. Turning Discover on will allow Cockpit to fetch <code>api.github.com</code> when you click <strong>Refresh</strong>. RSS reads from your Obsidian vault — no network call.</p>
+        <p class="empty" style="font-size: 11px;">Discover surfaces top GitHub projects, Hacker News, Product Hunt, and your custom RSS feeds. <strong>Off by default</strong> — local-first stance. Turning Discover on lets Cockpit make outbound HTTPS calls only when you click <strong>Refresh</strong> on each source.</p>
         <button class="office-btn" data-action="enable-discover">Enable Discover (opt-in)</button>
       `;
     }
 
+    const state = vscode.getState() || {};
+    const view = state.discoverView || 'github';
+    const customFeeds = d.customFeeds || [];
+    const customCount = customFeeds.length;
+
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'github' ? 'sub-tab-active' : ''}" data-discover-view="github">GitHub</button>
+        <button class="sub-tab ${view === 'hn' ? 'sub-tab-active' : ''}" data-discover-view="hn">HN</button>
+        <button class="sub-tab ${view === 'producthunt' ? 'sub-tab-active' : ''}" data-discover-view="producthunt">Product Hunt</button>
+        <button class="sub-tab ${view === 'obsidian' ? 'sub-tab-active' : ''}" data-discover-view="obsidian">Obsidian RSS</button>
+        <button class="sub-tab ${view === 'custom' ? 'sub-tab-active' : ''}" data-discover-view="custom">Custom${customCount ? ' <span class="chip-count">' + customCount + '</span>' : ''}</button>
+      </div>
+    `;
+
+    let body = '';
+    if (view === 'github') body = discoverGithubBody(d);
+    else if (view === 'hn') body = discoverHNBody(d);
+    else if (view === 'producthunt') body = discoverPHBody(d);
+    else if (view === 'obsidian') body = discoverObsidianBody(d);
+    else if (view === 'custom') body = discoverCustomBody(d);
+
+    return `<h2>Discover</h2>${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function feedItemCard(item) {
+    const ageStr = item.publishedAt ? fmtAge(item.publishedAt) : '';
+    const score = item.score ? `<span class="tag tag-used">▲ ${item.score}</span>` : '';
+    const sourceTag = `<span class="tag">${escapeHtml(item.source)}</span>`;
+    return `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <a class="left link" data-open-url="${escapeHtml(item.url)}" title="${escapeHtml(item.title)}"><strong>${escapeHtml(item.title)}</strong></a>
+          <span class="right">${score}${sourceTag}</span>
+        </div>
+        ${item.description ? `<div class="note-excerpt">${escapeHtml(item.description)}</div>` : ''}
+        ${ageStr ? `<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">${escapeHtml(ageStr)}</div>` : ''}
+      </div>
+    </li>`;
+  }
+
+  function discoverGithubBody(d) {
     const win = (vscode.getState() || {}).discoverWindow || 'week';
     const ghCache = d.github;
     const ghError = ghCache && ghCache.error;
     const ghRepos = (ghCache && ghCache.repos) || [];
     const ghAge = ghCache ? fmtAge(ghCache.fetchedAt) : '';
-    const ghHeader = `
+    const header = `
       <div class="row">
         <h3 class="sub-h left">GitHub trending <span class="cost-rate">${ghRepos.length}</span></h3>
-        <span class="right">
-          <button class="office-btn" data-action="discover-refresh">Refresh</button>
-        </span>
+        <span class="right"><button class="office-btn" data-action="discover-refresh">Refresh</button></span>
       </div>
       <div class="filter-chips">
-        ${['day', 'week', 'month']
-          .map(
-            (w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-discover-window="${w}">${
-              w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
-            }</button>`,
-          )
-          .join('')}
+        ${['day', 'week', 'month'].map((w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-discover-window="${w}">${
+          w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
+        }</button>`).join('')}
       </div>
       ${ghCache ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(ghAge)} · window: ${escapeHtml(ghCache.window)}</p>` : '<p class="empty">Click Refresh to fetch top repos.</p>'}
     `;
-    const ghBody = ghError
+    const list = ghError
       ? `<p class="empty">${escapeHtml(ghError)}</p>`
       : !ghRepos.length
       ? ''
-      : `<ul class="list" style="list-style: none; padding: 0;">${ghRepos
-          .map(
-            (r) => `<li>
-              <div class="watch-card" style="display: block;">
-                <div class="row">
-                  <a class="left link" data-open-url="${escapeHtml(r.url)}" title="${escapeHtml(r.fullName)}"><strong>${escapeHtml(r.fullName)}</strong></a>
-                  <span class="right">
-                    ${r.language ? `<span class="tag">${escapeHtml(r.language)}</span>` : ''}
-                    <span class="tag">★ ${r.stars.toLocaleString()}</span>
-                  </span>
-                </div>
-                ${r.description ? `<div class="note-excerpt">${escapeHtml(r.description)}</div>` : ''}
-              </div>
-            </li>`,
-          )
-          .join('')}</ul>`;
+      : `<ul class="list" style="list-style: none; padding: 0;">${ghRepos.map((r) => `<li>
+          <div class="watch-card" style="display: block;">
+            <div class="row">
+              <a class="left link" data-open-url="${escapeHtml(r.url)}" title="${escapeHtml(r.fullName)}"><strong>${escapeHtml(r.fullName)}</strong></a>
+              <span class="right">${r.language ? `<span class="tag">${escapeHtml(r.language)}</span>` : ''}<span class="tag">★ ${r.stars.toLocaleString()}</span></span>
+            </div>
+            ${r.description ? `<div class="note-excerpt">${escapeHtml(r.description)}</div>` : ''}
+          </div>
+        </li>`).join('')}</ul>`;
+    return `${header}${list}`;
+  }
 
+  function discoverHNBody(d) {
+    const win = (vscode.getState() || {}).hnWindow || 'day';
+    const hn = d.hn;
+    const items = (hn && hn.items) || [];
+    const err = hn && hn.error;
+    const age = hn ? fmtAge(hn.fetchedAt) : '';
+    const header = `
+      <div class="row">
+        <h3 class="sub-h left">Hacker News <span class="cost-rate">${items.length}</span></h3>
+        <span class="right"><button class="office-btn" data-action="hn-refresh">Refresh</button></span>
+      </div>
+      <div class="filter-chips">
+        ${['day', 'week', 'month'].map((w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-hn-window="${w}">${
+          w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
+        }</button>`).join('')}
+      </div>
+      ${hn ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(age)}</p>` : '<p class="empty">Click Refresh to fetch front page stories.</p>'}
+    `;
+    const body = err
+      ? `<p class="empty">${escapeHtml(err)}</p>`
+      : !items.length
+      ? ''
+      : `<ul class="list" style="list-style: none; padding: 0;">${items.map(feedItemCard).join('')}</ul>`;
+    return `${header}${body}`;
+  }
+
+  function discoverPHBody(d) {
+    const ph = d.producthunt;
+    const items = (ph && ph.items) || [];
+    const err = ph && ph.error;
+    const age = ph ? fmtAge(ph.fetchedAt) : '';
+    const header = `
+      <div class="row">
+        <h3 class="sub-h left">Product Hunt <span class="cost-rate">${items.length}</span></h3>
+        <span class="right"><button class="office-btn" data-action="ph-refresh">Refresh</button></span>
+      </div>
+      ${ph ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(age)}</p>` : '<p class="empty">Click Refresh to fetch today\'s products.</p>'}
+    `;
+    const body = err
+      ? `<p class="empty">${escapeHtml(err)}</p>`
+      : !items.length
+      ? ''
+      : `<ul class="list" style="list-style: none; padding: 0;">${items.map(feedItemCard).join('')}</ul>`;
+    return `${header}${body}`;
+  }
+
+  function discoverObsidianBody(d) {
     const rss = d.rss || { entries: [] };
-    const rssBody = rss.error
+    const header = `<h3 class="sub-h">RSS from Obsidian ${rss.folder ? `<span class="cost-rate">${rss.entries.length}</span>` : ''}</h3>
+      ${rss.folder ? `<p class="empty" style="font-size: 10px;">Reading: <code>${escapeHtml(rss.folder)}</code></p>` : ''}`;
+    const body = rss.error
       ? `<p class="empty">${escapeHtml(rss.error)}</p>`
       : !rss.entries.length
       ? `<p class="empty">No RSS notes found yet. The <code>rss-feed-obsidian</code> routine should populate them.</p>`
-      : `<ul class="list" style="list-style: none; padding: 0;">${rss.entries
-          .slice(0, 30)
-          .map(
-            (e) => `<li>
-              <div class="watch-card" style="display: block;">
-                <div class="row">
-                  <a class="left link" data-open-file="${escapeHtml(e.filePath)}" title="${escapeHtml(e.filePath)}"><strong>${escapeHtml(e.title)}</strong></a>
-                  <span class="right"><span class="tag">${escapeHtml(e.vault)}</span></span>
-                </div>
-                <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">
-                  ${e.source ? escapeHtml(e.source) + ' · ' : ''}${escapeHtml(fmtAge(e.mtimeMs))}
-                </div>
-              </div>
-            </li>`,
-          )
-          .join('')}</ul>`;
+      : `<ul class="list" style="list-style: none; padding: 0;">${rss.entries.slice(0, 30).map((e) => `<li>
+          <div class="watch-card" style="display: block;">
+            <div class="row">
+              <a class="left link" data-open-file="${escapeHtml(e.filePath)}" title="${escapeHtml(e.filePath)}"><strong>${escapeHtml(e.title)}</strong></a>
+              <span class="right"><span class="tag">${escapeHtml(e.vault)}</span></span>
+            </div>
+            <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">${e.source ? escapeHtml(e.source) + ' · ' : ''}${escapeHtml(fmtAge(e.mtimeMs))}</div>
+          </div>
+        </li>`).join('')}</ul>`;
+    return `${header}${body}`;
+  }
 
-    return `
-      <h2>Discover</h2>
-      ${ghHeader}
-      ${ghBody}
-      <h3 class="sub-h">RSS from Obsidian ${rss.folder ? `<span class="cost-rate">${rss.entries.length}</span>` : ''}</h3>
-      ${rss.folder ? `<p class="empty" style="font-size: 10px;">Reading: <code>${escapeHtml(rss.folder)}</code></p>` : ''}
-      ${rssBody}
+  function discoverCustomBody(d) {
+    const feeds = d.customFeeds || [];
+    const cache = d.custom || {};
+    const addForm = `
+      <div class="custom-feed-form">
+        <input data-custom-feed-name placeholder="Feed name (e.g. 'My X via Nitter')" />
+        <input data-custom-feed-url placeholder="https://..." type="url" />
+        <button class="office-btn" data-add-custom-feed>+ Add feed</button>
+      </div>
+      <p class="empty" style="font-size: 10px;">X and LinkedIn don't expose RSS directly. Use a bridge: <code>https://nitter.net/{user}/rss</code> for X, or your own RSS-Bridge instance.</p>
     `;
+    if (!feeds.length) {
+      return `<h3 class="sub-h">Custom feeds</h3><p class="empty">No custom feeds yet. Add any RSS/Atom URL.</p>${addForm}`;
+    }
+    const cards = feeds.map((f) => {
+      const c = cache[f.name];
+      const items = (c && c.items) || [];
+      const err = c && c.error;
+      const age = c ? fmtAge(c.fetchedAt) : '';
+      return `<div class="custom-feed-block">
+        <div class="row">
+          <h4 class="sub-h left">${escapeHtml(f.name)} <span class="cost-rate">${items.length}</span></h4>
+          <span class="right">
+            <button class="watch-action" data-fetch-custom-feed="${escapeHtml(f.name)}" data-feed-url="${escapeHtml(f.url)}">Refresh</button>
+            <button class="watch-action" data-remove-custom-feed="${escapeHtml(f.name)}" style="color: var(--vscode-errorForeground);">Remove</button>
+          </span>
+        </div>
+        <p class="empty" style="font-size: 10px;"><code>${escapeHtml(f.url)}</code>${c ? ' · cached ' + escapeHtml(age) : ''}</p>
+        ${err ? `<p class="empty">${escapeHtml(err)}</p>` : ''}
+        ${items.length ? `<ul class="list" style="list-style: none; padding: 0;">${items.slice(0, 15).map(feedItemCard).join('')}</ul>` : ''}
+      </div>`;
+    }).join('');
+    return `<h3 class="sub-h">Custom feeds <span class="cost-rate">${feeds.length}</span></h3>${cards}${addForm}`;
   }
 
   function routinesSection(snap) {
@@ -3296,6 +3396,65 @@
     root.querySelectorAll('button[data-action="enable-discover"]').forEach((btn) => {
       btn.addEventListener('click', () => {
         persistUserPrefs({ discoverEnabled: true });
+      });
+    });
+
+    root.querySelectorAll('button[data-discover-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-discover-view');
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, discoverView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-hn-window]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const w = btn.getAttribute('data-hn-window');
+        if (!w) return;
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, hnWindow: w });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-action="hn-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cur = vscode.getState() || {};
+        const w = cur.hnWindow || 'day';
+        vscode.postMessage({ type: 'fetchHN', window: w });
+      });
+    });
+    root.querySelectorAll('button[data-action="ph-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'fetchProductHunt' });
+      });
+    });
+    root.querySelectorAll('button[data-fetch-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-fetch-custom-feed');
+        const url = btn.getAttribute('data-feed-url');
+        if (!name || !url) return;
+        vscode.postMessage({ type: 'fetchCustomFeed', feedName: name, feedUrl: url });
+      });
+    });
+    root.querySelectorAll('button[data-remove-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-remove-custom-feed');
+        if (!name) return;
+        vscode.postMessage({ type: 'removeCustomFeed', feedName: name });
+      });
+    });
+    root.querySelectorAll('button[data-add-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nameEl = root.querySelector('input[data-custom-feed-name]');
+        const urlEl = root.querySelector('input[data-custom-feed-url]');
+        if (!nameEl || !urlEl) return;
+        const name = nameEl.value.trim();
+        const url = urlEl.value.trim();
+        if (!name || !url) return;
+        vscode.postMessage({ type: 'addCustomFeed', feedName: name, feedUrl: url });
+        nameEl.value = '';
+        urlEl.value = '';
       });
     });
 

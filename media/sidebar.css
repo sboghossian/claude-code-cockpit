@@ -2067,3 +2067,27 @@ select[data-prompt-cat-new] {
 .sub-tab-panel {
   padding-top: 2px;
 }
+
+.custom-feed-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+.custom-feed-form input {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.custom-feed-block {
+  margin: 8px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.custom-feed-block:first-child { border-top: none; }

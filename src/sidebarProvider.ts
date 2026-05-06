@@ -23,8 +23,13 @@ import { logger } from './logger';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 import {
   createRoutineSkill,
+  CustomFeed,
   DiscoverWindow,
+  FeedItem,
+  fetchCustomFeed,
   fetchGithubTrending,
+  fetchHackerNews,
+  fetchProductHunt,
   GithubRepo,
   readRssFromObsidian,
   RssEntry,
@@ -80,6 +85,11 @@ interface InboundMessage {
     | 'createRoutine'
     | 'runRoutine'
     | 'fetchDiscover'
+    | 'fetchHN'
+    | 'fetchProductHunt'
+    | 'fetchCustomFeed'
+    | 'addCustomFeed'
+    | 'removeCustomFeed'
     | 'fetchRoadmap'
     | 'fetchJarvis'
     | 'jarvisApprove'
@@ -110,6 +120,8 @@ interface InboundMessage {
   patch?: UserPrefsPatch;
   routineName?: string;
   window?: DiscoverWindow;
+  feedName?: string;
+  feedUrl?: string;
   approvalId?: string;
   approvalReason?: string;
   peerText?: string;
@@ -147,6 +159,7 @@ interface PromptEntry {
 const PROMPTS_KEY = 'claudeCockpit.prompts';
 const PINS_KEY = 'claudeCockpit.pinnedMemory';
 const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
+const CUSTOM_FEEDS_KEY = 'claudeCockpit.customFeeds';
 
 function readUserPrefs(state: vscode.Memento): UserPrefs {
   const stored = state.get<Partial<UserPrefs>>(USER_PREFS_KEY, {});
@@ -174,6 +187,9 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private debounce: NodeJS.Timeout | undefined;
   private lastSearch: { query: string; hits: SessionSearchHit[] } | undefined;
   private discoverGithub: { window: DiscoverWindow; fetchedAt: number; repos: GithubRepo[]; error: string | undefined } | undefined;
+  private discoverHN: { window: DiscoverWindow; fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
+  private discoverPH: { fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
+  private discoverCustom: Record<string, { fetchedAt: number; items: FeedItem[]; error: string | undefined }> = {};
   private updateStatus: UpdateStatus | undefined;
   private updateCheckTimer: NodeJS.Timeout | undefined;
   private roadmap: RoadmapData | undefined = readCachedRoadmap();
@@ -397,6 +413,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       discover: {
         enabled: userPrefs.discoverEnabled,
         github: this.discoverGithub,
+        hn: this.discoverHN,
+        producthunt: this.discoverPH,
+        custom: this.discoverCustom,
+        customFeeds: this.globalState.get<CustomFeed[]>(CUSTOM_FEEDS_KEY, []),
         rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
       },
       roadmap: this.roadmap,
@@ -775,6 +795,65 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
             error: String(err instanceof Error ? err.message : err),
           };
         }
+        this.refresh();
+        return;
+      }
+      case 'fetchHN': {
+        const win = msg.window ?? 'day';
+        try {
+          const items = await fetchHackerNews(win);
+          this.discoverHN = { window: win, fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverHN = { window: win, fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'fetchProductHunt': {
+        try {
+          const items = await fetchProductHunt();
+          this.discoverPH = { fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverPH = { fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'fetchCustomFeed': {
+        if (!msg.feedName || !msg.feedUrl) return;
+        const feed: CustomFeed = { name: msg.feedName, url: msg.feedUrl };
+        try {
+          const items = await fetchCustomFeed(feed);
+          this.discoverCustom[feed.name] = { fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverCustom[feed.name] = { fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'addCustomFeed': {
+        if (!msg.feedName || !msg.feedUrl) return;
+        if (!/^https?:\/\//i.test(msg.feedUrl)) {
+          void vscode.window.showErrorMessage('Custom feed URL must start with http:// or https://');
+          return;
+        }
+        const feeds = this.globalState.get<CustomFeed[]>(CUSTOM_FEEDS_KEY, []);
+        if (feeds.some((f) => f.name === msg.feedName)) {
+          void vscode.window.showErrorMessage(`A custom feed named "${msg.feedName}" already exists.`);
+          return;
+        }
+        feeds.push({ name: msg.feedName.slice(0, 60), url: msg.feedUrl });
+        await this.globalState.update(CUSTOM_FEEDS_KEY, feeds);
+        this.refresh();
+        return;
+      }
+      case 'removeCustomFeed': {
+        if (!msg.feedName) return;
+        const feeds = this.globalState
+          .get<CustomFeed[]>(CUSTOM_FEEDS_KEY, [])
+          .filter((f) => f.name !== msg.feedName);
+        await this.globalState.update(CUSTOM_FEEDS_KEY, feeds);
+        delete this.discoverCustom[msg.feedName];
         this.refresh();
         return;
       }
