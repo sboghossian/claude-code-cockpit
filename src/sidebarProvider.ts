@@ -12,7 +12,9 @@ import {
   SessionSearchHit,
   snapshot,
 } from './claudeData';
-import { detectUsageDashboard } from './integrations';
+import { readAppUsage } from './appUsage';
+import { detectUsageDashboard, readRTKSavings } from './integrations';
+import { readMacHealth } from './macHealth';
 import { logger } from './logger';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 
@@ -99,6 +101,14 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     });
     this.refresh();
     this.watchActive();
+    // Kick off RTK probe (may take 0-4s); refresh when done so cache is populated.
+    void readRTKSavings().then(() => this.refresh());
+    // Async Mac Health probe; system_profiler is slow (~1s). Refresh every
+    // 30s to keep CPU/memory pressure / network throughput live.
+    const refreshMac = () => void readMacHealth().then(() => this.refresh());
+    refreshMac();
+    const macTimer = setInterval(refreshMac, 30_000);
+    view.onDidDispose(() => clearInterval(macTimer));
   }
 
   refresh(): void {
@@ -187,6 +197,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         dailyCapFormatted: formatUsd(snap.budget.dailyCapUsd),
         sessionCapFormatted: formatUsd(snap.budget.sessionCapUsd),
       },
+      cockpitStats: {
+        ...snap.cockpitStats,
+        weekUsdFormatted: formatUsd(snap.cockpitStats.weekUsdRaw),
+      },
+      appUsage: readAppUsage(this.globalState),
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
   }

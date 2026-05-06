@@ -803,3 +803,251 @@ h3.sub-h {
 .pinned-row {
   background: rgba(124, 58, 237, 0.08);
 }
+
+/* === v0.8.0 — Personal OS HUD === */
+
+.greeting {
+  margin: -4px 0 12px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, var(--vscode-editorWidget-background) 0%, transparent 100%);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 6px;
+}
+
+.greeting-line {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.greeting-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.stat-card {
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+}
+
+.stat-card.stat-ok {
+  border-color: rgba(106, 212, 143, 0.4);
+}
+
+.stat-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.stat-value {
+  margin-top: 4px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* === Inbox cards === */
+
+.inbox-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 3px;
+  margin-bottom: 4px;
+}
+
+.inbox-card.inbox-warn {
+  border-left: 3px solid #ffa05a;
+}
+
+.inbox-card.inbox-danger {
+  border-left: 3px solid #e36161;
+}
+
+.inbox-card.inbox-info {
+  border-left: 3px solid #6ad48f;
+}
+
+.inbox-icon {
+  font-size: 14px;
+  line-height: 1.4;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.inbox-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-title {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-detail {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-action {
+  background: transparent;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 2px;
+  color: var(--vscode-textLink-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.inbox-action:hover {
+  border-color: var(--vscode-textLink-foreground);
+}
+
+/* === Mac Health === */
+
+.health-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 8px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.health-badge.health-excellent {
+  background: rgba(106, 212, 143, 0.18);
+  color: #6ad48f;
+}
+
+.health-badge.health-good {
+  background: rgba(255, 160, 90, 0.18);
+  color: #ffa05a;
+}
+
+.health-badge.health-attention {
+  background: rgba(227, 97, 97, 0.18);
+  color: #e36161;
+}
+
+.mac-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.mac-card {
+  padding: 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+}
+
+.mac-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vscode-descriptionForeground);
+}
+
+.mac-card-value {
+  margin-top: 4px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.mac-card-sub {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.mac-card .bar {
+  margin-top: 6px;
+}
+
+/* Bluetooth peripheral rings */
+
+.bt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bt-device {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.bt-ring {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background:
+    conic-gradient(var(--ring) calc(var(--pct) * 1%), var(--vscode-editorWidget-border) 0);
+  position: relative;
+}
+
+.bt-ring::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--vscode-editorWidget-background);
+}
+
+.bt-name {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bt-meta {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+}

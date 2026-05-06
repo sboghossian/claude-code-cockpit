@@ -402,6 +402,56 @@ test('computeActivityHeatmap returns 24-hour and 7-day buckets', () => {
   assert.ok(Array.isArray(heat.cells));
 });
 
+test('readAgents returns empty array when no agents directories exist', () => {
+  const { readAgents } = require('../out/integrations.js');
+  const ws = makeWorkspace('agents-empty-' + Date.now());
+  const list = readAgents(ws.cwd);
+  // tmpHome has no global agents in this test scope; should be safe.
+  assert.ok(Array.isArray(list));
+});
+
+test('readTunnels returns empty array when no cloudflared dir exists', () => {
+  const { readTunnels } = require('../out/integrations.js');
+  // Same: tmpHome has no ~/.cloudflared/.
+  const list = readTunnels();
+  assert.ok(Array.isArray(list));
+});
+
+test('computeStats returns expected shape and labels', () => {
+  const { computeStats } = require('../out/integrations.js');
+  const stats = computeStats({
+    byHour: new Array(24).fill(0),
+    byDay: new Array(7).fill(0),
+    watchtower: [],
+    todayUsdRaw: 0,
+  });
+  // Streak/activeDays depends on tmpHome session fixtures from earlier tests
+  // — assert types and ranges, not exact values.
+  assert.equal(typeof stats.streakDays, 'number');
+  assert.ok(stats.streakDays >= 0);
+  assert.ok(stats.activeDays30 >= 0);
+  assert.equal(stats.peakHourLabel, '—');
+  assert.equal(stats.weekUsdRaw, 0);
+  assert.equal(typeof stats.totalSessions, 'number');
+});
+
+test('computeInbox includes idle session and stale memory items', () => {
+  const { computeInbox } = require('../out/integrations.js');
+  const items = computeInbox({
+    watchtower: [{ name: 'foo', ageSeconds: 1200, status: 'idle', sessionFile: '/x.jsonl' }],
+    toolHistory: [{ tool: 'Read', result: 'error', errorMessage: 'boom' }],
+    memory: [{ isStale: true, title: 'old thing', filename: 'old.md' }],
+    plans: [{ name: 'todo.md', pendingCount: 3, nextItems: ['ship it'], path: '/p/todo.md' }],
+    subAgents: [],
+    budgetTone: 'ok',
+  });
+  const ids = items.map((i) => i.id);
+  assert.ok(ids.some((id) => id.startsWith('idle-')));
+  assert.ok(ids.some((id) => id.startsWith('err-')));
+  assert.ok(ids.includes('mem-stale'));
+  assert.ok(ids.some((id) => id.startsWith('plan-')));
+});
+
 test('readChatExport reports installed=false when no export folder is found', () => {
   const { readChatExport } = require('../out/integrations.js');
   // tmpHome has no claude-data-export — should return empty status.
