@@ -26,6 +26,14 @@ import {
   readRssFromObsidian,
   RssEntry,
 } from './discover';
+import { ChangelogStatus, readChangelog } from './changelog';
+import {
+  checkForUpdate,
+  disabledStatus as disabledUpdateStatus,
+  getCachedUpdateStatus,
+  UpdateStatus,
+} from './updateCheck';
+import { readManageState } from './manage';
 
 interface InboundMessage {
   type:
@@ -57,7 +65,9 @@ interface InboundMessage {
     | 'setUserPrefs'
     | 'createRoutine'
     | 'runRoutine'
-    | 'fetchDiscover';
+    | 'fetchDiscover'
+    | 'checkForUpdate'
+    | 'openReleasePage';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -131,6 +141,8 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private debounce: NodeJS.Timeout | undefined;
   private lastSearch: { query: string; hits: SessionSearchHit[] } | undefined;
   private discoverGithub: { window: DiscoverWindow; fetchedAt: number; repos: GithubRepo[]; error: string | undefined } | undefined;
+  private updateStatus: UpdateStatus | undefined;
+  private updateCheckTimer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -161,6 +173,73 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     refreshMac();
     const macTimer = setInterval(refreshMac, 30_000);
     view.onDidDispose(() => clearInterval(macTimer));
+
+    // Self-update check — opt-out, runs once on activation and every 6 hours
+    // while the view is mounted. Network call goes out only when enabled.
+    this.scheduleUpdateCheck();
+  }
+
+  private scheduleUpdateCheck(): void {
+    const enabled = vscode.workspace
+      .getConfiguration('claudeCockpit')
+      .get<boolean>('updateCheck.enabled', true);
+    if (!enabled) {
+      this.updateStatus = disabledUpdateStatus(this.currentVersion());
+      return;
+    }
+    void this.runUpdateCheck();
+    if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
+    this.updateCheckTimer = setInterval(() => void this.runUpdateCheck(), 6 * 60 * 60 * 1000);
+    this.view?.onDidDispose(() => {
+      if (this.updateCheckTimer) clearInterval(this.updateCheckTimer);
+      this.updateCheckTimer = undefined;
+    });
+  }
+
+  private async runUpdateCheck(): Promise<void> {
+    try {
+      this.updateStatus = await checkForUpdate(this.currentVersion());
+    } catch (err) {
+      logger.warn(`update check failed: ${String(err)}`);
+    }
+    this.refresh();
+  }
+
+  private currentVersion(): string {
+    try {
+      const pkg = JSON.parse(
+        fs.readFileSync(path.join(this.extensionUri.fsPath, 'package.json'), 'utf8'),
+      ) as { version?: string };
+      return pkg.version ?? '0.0.0';
+    } catch {
+      return '0.0.0';
+    }
+  }
+
+  private readChangelogPayload(): ChangelogStatus {
+    return readChangelog(this.extensionUri.fsPath, this.currentVersion());
+  }
+
+  private readUpdateStatusPayload(): UpdateStatus {
+    if (this.updateStatus) return this.updateStatus;
+    const cached = getCachedUpdateStatus();
+    if (cached) return cached;
+    const enabled = vscode.workspace
+      .getConfiguration('claudeCockpit')
+      .get<boolean>('updateCheck.enabled', true);
+    if (!enabled) return disabledUpdateStatus(this.currentVersion());
+    // First snapshot before the async check returns — show "checking" via empty state.
+    return {
+      enabled: true,
+      currentVersion: this.currentVersion(),
+      latestVersion: undefined,
+      hasUpdate: false,
+      releaseUrl: 'https://github.com/sboghossian/claude-cockpit/releases',
+      releaseTitle: undefined,
+      publishedAt: undefined,
+      fetchedAt: undefined,
+      error: undefined,
+    };
   }
 
   refresh(): void {
@@ -203,6 +282,9 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         github: this.discoverGithub,
         rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
       },
+      changelog: this.readChangelogPayload(),
+      updateStatus: this.readUpdateStatusPayload(),
+      manage: readManageState(),
       lastSearch: this.lastSearch,
       stats: {
         ...snap.stats,
@@ -493,6 +575,16 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         // executes on demand. The user reviews the trailing prompt before
         // hitting enter (the terminal remains interactive).
         term.sendText(`cat ${shellQuote(skill)} | claude`);
+        return;
+      }
+      case 'checkForUpdate': {
+        await this.runUpdateCheck();
+        return;
+      }
+      case 'openReleasePage': {
+        const url = (this.updateStatus && this.updateStatus.releaseUrl)
+          || 'https://github.com/sboghossian/claude-cockpit/releases';
+        void vscode.env.openExternal(vscode.Uri.parse(url));
         return;
       }
       case 'fetchDiscover': {

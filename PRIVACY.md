@@ -4,7 +4,10 @@ Claude Cockpit is **100% local**. The extension runs entirely on your machine. N
 
 ## Guarantees
 
-- **No background network requests.** The extension makes zero spontaneous outbound calls. No `fetch`, no telemetry, no analytics. The only network call the extension can make is `https.get('api.github.com/...')` from `src/discover.ts`, and only when you have explicitly enabled the Discover tab (`claudeCockpit.discover.enabled = true`) **and** clicked the Refresh button on that tab. Disabled by default. RSS reads from your local Obsidian vault and makes no network call.
+- **Network calls are bounded and disclosed.** The only outbound calls the extension can make are:
+  1. `api.github.com/repos/sboghossian/claude-cockpit/releases/latest` — the update check, **on by default** (controlled by `claudeCockpit.updateCheck.enabled`). Runs once on activation and every 6 hours while the sidebar is mounted. Sends only a default `User-Agent` header; receives only the GitHub release JSON. Set the setting to `false` to disable entirely.
+  2. `api.github.com/search/repositories` — the Discover tab's GitHub trending fetch, **off by default** (controlled by `claudeCockpit.discover.enabled`), only when you click Refresh.
+  No telemetry, no analytics, no third-party services. RSS reads from your local Obsidian vault and makes no network call.
 - **No telemetry, no analytics, no crash reporting.** Ever.
 - **Bounded writes — user-initiated only.** The default mode is read-only. The only writes are: (a) creating new routine files at `~/.claude/scheduled-tasks/<slug>/SKILL.md` when you click **+ New routine**, and (b) `globalState` for your preferences (custom widgets, visible tabs, theme). No file outside `~/.claude/scheduled-tasks/` is ever written. Verify in `src/discover.ts` (`createRoutineSkill`) and `src/sidebarProvider.ts`.
 - **Bounded reads.** The extension reads only from `~/.claude/projects/<encoded-cwd>/` (Claude Code's own per-project session directory), its `memory/MEMORY.md` index, `~/.claude/agents/`, `~/.claude/scheduled-tasks/<name>/SKILL.md` (for the Routines tab), the configured Obsidian vault (specifically the `rss/` or `Inbox/RSS/` folder for the Discover tab's RSS view), and a few system-info commands on macOS for the Mac tab. Nothing else on disk is touched.

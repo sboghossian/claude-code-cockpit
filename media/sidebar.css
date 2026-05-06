@@ -1590,3 +1590,150 @@ body[data-theme="light"] .search-hit:hover {
   border-color: var(--cockpit-link);
   background: var(--cockpit-hover);
 }
+
+/* ===========================================================================
+ * Update pill in the header — shows when a new release is available.
+ * =========================================================================== */
+.update-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 9px;
+  background: rgba(106, 212, 143, 0.18);
+  color: #6ad48f;
+  border: 1px solid #6ad48f;
+  border-radius: 999px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+
+.update-pill:hover {
+  background: rgba(106, 212, 143, 0.32);
+}
+
+.update-pill .update-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6ad48f;
+  animation: cockpit-pulse 2s infinite;
+}
+
+/* ===========================================================================
+ * Changelog tab — version blocks + rendered markdown.
+ * =========================================================================== */
+.changelog-version {
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.changelog-version.is-current {
+  border-color: #6ad48f;
+}
+
+.changelog-h4 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground);
+  margin: 8px 0 4px;
+}
+
+.changelog-list {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 4px 0 6px;
+}
+
+.changelog-list li {
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 3px;
+}
+
+.changelog-p {
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 4px 0;
+}
+
+.changelog-pre {
+  font-size: 10px;
+  white-space: pre-wrap;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 600px;
+  overflow: auto;
+}
+
+.update-banner {
+  border-color: #6ad48f !important;
+  background: rgba(106, 212, 143, 0.06);
+}
+
+body[data-theme="light"] .changelog-version,
+body[data-theme="light"] .changelog-pre {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+}
+
+/* ===========================================================================
+ * Manage Settings tab — collapsible groups + per-row edit buttons.
+ * =========================================================================== */
+.manage-group {
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.manage-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--vscode-editorWidget-background);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.manage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-top: 1px solid var(--vscode-editorWidget-border);
+  gap: 8px;
+}
+
+.manage-row .left-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.manage-row .v {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body[data-theme="light"] .manage-group,
+body[data-theme="light"] .manage-group-head {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+}
