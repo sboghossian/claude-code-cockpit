@@ -8,3 +8,8 @@ tsconfig.json
 landing/**
 tasks/**
 node_modules/**
+test/**
+scripts/**
+preview-render.js
+STEAL_FROM_SUPERSET.md
+*.vsix
