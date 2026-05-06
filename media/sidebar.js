@@ -2748,31 +2748,7 @@
     return 'Security ✓';
   }
 
-  function emptyTabBar(snap) {
-    const chatLabel = snap.chatExport && snap.chatExport.installed
-      ? `Chat (${snap.chatExport.conversationCount})`
-      : 'Chat ◌';
-    const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
-    return [
-      { id: 'now', label: 'Now' },
-      { id: 'recs', label: recsLabel(snap) },
-      { id: 'mac', label: macLabel },
-      { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
-      { id: 'office', label: `Office (${(snap.officeFloor || []).length})` },
-      { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
-      { id: 'routines', label: `Routines (${((snap.routines || {}).local || []).length})` },
-      { id: 'chat', label: chatLabel },
-      { id: 'search', label: 'Search' },
-      { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
-      { id: 'skills', label: `Skills (${snap.skills.length})` },
-      { id: 'projects', label: `Projects (${snap.projects.length})` },
-      { id: 'config', label: 'Config' },
-      { id: 'self', label: 'Self' },
-      { id: 'help', label: '? Help' },
-    ];
-  }
-
-  // ===========================================================================
+// ===========================================================================
   // Component registry — every reusable widget is addressable by id so the
   // Custom tab can compose any combination of them. category groups them in
   // the picker UI; requiresCwd hides components that need an active session.

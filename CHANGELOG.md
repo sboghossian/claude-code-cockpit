@@ -2,6 +2,25 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — 2026-05-06
+
+### Added
+
+- **Prompt mining + categories.** The Prompts library was always 0 because nothing populated it. New "Mine recent prompts" button walks `~/.claude/projects/*.jsonl` to surface user prompts that recur across sessions or are substantial one-shots, dedupes by 80-char fingerprint, and lets you bulk-save selected ones. Each prompt now carries a category (legal / build / review / plan / research / infra / other), auto-classified on save by keyword heuristics with per-prompt manual override. Filter chips on the Library tab narrow the list by category.
+- **Library tab.** Memory and Prompts merged into one tab with sub-views — both surfaced "reusable text Claude pulls from" and the split was making the user track them separately. Default sub-view is Prompts.
+- **Settings tab.** Manage and Config merged into one tab with 8 sub-views: Budget / RTK / Tunnels / Office / Manage / Usage / Disk / Hooks. Both prior tabs were "all the settings" — the split was arbitrary.
+- **Timeline tab.** Roadmap (planned) and Changelog (shipped) merged into one tab with two sub-views.
+- **History tab.** Search (grep across session JSONL) and Chat (claude.ai exports) merged. Default sub-view is Session search.
+- **Browse tab.** Projects (recent project list) and Files (`~/.claude/` browser) merged.
+- **Discover expansion.** Discover added Hacker News (Algolia API with day/week/month windowing, hnrss fallback), Product Hunt (Atom feed), and Custom RSS feeds. Custom feeds let the user wire X/LinkedIn via Nitter or RSS-Bridge. All sources stay opt-in — Discover must be enabled before any HTTP call goes out.
+- **Security tab.** Local-only audit for tracked `.env` files, hardcoded API keys/tokens in source (14 patterns: AWS, GitHub PAT/OAuth, Stripe, Anthropic, OpenAI, Slack, Google, Cloudflare, Bearer, private keys), MCP servers with inline secrets, and git remote exposure. Findings always show redacted excerpts (first 6 + last 4 chars), never full secrets. "/cso" button launches the gstack `/cso` skill in a terminal for deeper audits (deps CVEs, repo settings, OWASP Top 10).
+- **Talk tab.** Voice + text → Claude. 420-particle Fibonacci-distributed sphere on canvas, audio-reactive (radius / hue / rotation respond to mic level). Web Audio API for level capture, Web Speech API for transcription (when available in your VSCode build). Send button pipes the message to a fresh Claude session in a terminal — three modes: new session, --continue, --print background. Optional Wispr Flow handoff via `claudeCockpit.wisprShortcut` config (macOS osascript). Voice never leaves your machine.
+
+### Changed
+
+- Tab count: 23 → 18 (with the two new tabs added). Persisted `enabledTabs` prefs are migrated transparently — old IDs (`memory`, `prompts`, `manage`, `config`, `roadmap`, `changelog`, `chat`, `search`, `projects`, `files`) all route to their merged equivalents. Search index entries now carry `librarySubview` / `settingsSubview` so search hits jump to the right sub-view.
+- Webview CSP now allows `media-src 'self' blob:` to enable mic access for the Talk tab. `connect-src 'none'` unchanged — no telemetry path opens.
+
 ## [0.16.0] — 2026-05-06
 
 ### Added
