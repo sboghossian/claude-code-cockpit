@@ -200,6 +200,7 @@ export interface CockpitSnapshot {
   obsidian: ObsidianStatus;
   costByTool: CostByToolEntry[];
   notifications: Notification[];
+  recommendations: Recommendation[];
   budget: BudgetStatus;
   plans: PlanFile[];
   chatExport: ChatExportStatus;
@@ -243,6 +244,39 @@ export interface Notification {
   title: string;
   detail: string;
   action: 'openMemory' | 'openSession' | 'openSettings' | 'openVault' | 'none';
+  actionPayload: string | undefined;
+}
+
+export type RecommendationCategory =
+  | 'memory'
+  | 'skills'
+  | 'prompts'
+  | 'agents'
+  | 'session'
+  | 'budget'
+  | 'health'
+  | 'workflow';
+
+export type RecommendationImpact = 'high' | 'med' | 'low';
+
+export type RecommendationAction =
+  | 'gotoTab'
+  | 'openMemory'
+  | 'openSession'
+  | 'openFile'
+  | 'copySkill'
+  | 'openExternal'
+  | 'setDailyCap'
+  | 'none';
+
+export interface Recommendation {
+  id: string;
+  category: RecommendationCategory;
+  impact: RecommendationImpact;
+  title: string;
+  why: string;
+  action: RecommendationAction;
+  actionLabel: string | undefined;
   actionPayload: string | undefined;
 }
 
@@ -1634,6 +1668,7 @@ export function snapshot(
   if (!active) {
     const stats = emptyStatsFor(undefined);
     const budget = computeBudget(budgetConfig, today.totalUsd, 0);
+    const skillsEmpty = listSkills();
     return {
       cwd: undefined,
       projectDir: undefined,
@@ -1641,7 +1676,7 @@ export function snapshot(
       memory: [],
       projects,
       settings,
-      skills: listSkills(),
+      skills: skillsEmpty,
       pilot: undefined,
       today,
       diskUsageBytes,
@@ -1657,6 +1692,20 @@ export function snapshot(
         watchtower,
         obsidian,
         budget,
+      }),
+      recommendations: computeRecommendations({
+        stats,
+        memory: [],
+        skills: skillsEmpty,
+        prompts: [],
+        agents,
+        watchtower,
+        budget,
+        settings,
+        rtk,
+        obsidian,
+        diskUsageBytes,
+        cwd: undefined,
       }),
       budget,
       plans,
@@ -1699,6 +1748,20 @@ export function snapshot(
     obsidian,
     budget,
   });
+  const recommendations = computeRecommendations({
+    stats,
+    memory,
+    skills,
+    prompts: [],
+    agents,
+    watchtower,
+    budget,
+    settings,
+    rtk,
+    obsidian,
+    diskUsageBytes,
+    cwd: active.decodedPath,
+  });
   return {
     cwd: active.decodedPath,
     projectDir: active.projectDir,
@@ -1717,6 +1780,7 @@ export function snapshot(
     obsidian,
     costByTool,
     notifications,
+    recommendations,
     budget,
     plans,
     chatExport,
@@ -2040,6 +2104,299 @@ export function computeNotifications(ctx: NotificationContext): Notification[] {
       });
     }
   }
+  return out;
+}
+
+interface RecommendationContext {
+  stats: SessionStats;
+  memory: MemoryEntry[];
+  skills: SkillEntry[];
+  prompts: { id: string; title: string; body: string }[];
+  agents: AgentDef[];
+  watchtower: WatchtowerSession[];
+  budget: BudgetStatus;
+  settings: SettingsSummary;
+  rtk: RtkStatus;
+  obsidian: ObsidianStatus;
+  diskUsageBytes: number;
+  cwd: string | undefined;
+}
+
+const SKILL_PICKS = [
+  'office-hours',
+  'plan-ceo-review',
+  'investigate',
+  'retro',
+  'codex',
+  'review',
+];
+
+export function computeRecommendations(ctx: RecommendationContext): Recommendation[] {
+  const out: Recommendation[] = [];
+  const {
+    stats,
+    memory,
+    skills,
+    prompts,
+    agents,
+    watchtower,
+    budget,
+    settings,
+    rtk,
+    obsidian,
+    diskUsageBytes,
+    cwd,
+  } = ctx;
+
+  // ---- Session / context health -------------------------------------------
+  if (stats.contextWindowMax > 0 && stats.contextFillPct > 75) {
+    out.push({
+      id: 'rec-context-compact',
+      category: 'session',
+      impact: stats.contextFillPct > 90 ? 'high' : 'med',
+      title: 'Compact the context window',
+      why: `Working set is ${stats.contextFillPct.toFixed(0)}% full — Claude starts dropping reasoning quality past 80%. Run /compact or start a fresh session before continuing on tricky work.`,
+      action: 'openSession',
+      actionLabel: 'Open session',
+      actionPayload: undefined,
+    });
+  }
+  if (stats.totalTokens > 50_000 && stats.cacheHitRate > 0 && stats.cacheHitRate < 0.3) {
+    out.push({
+      id: 'rec-cache-cold',
+      category: 'session',
+      impact: 'med',
+      title: 'Cache hit rate is cold',
+      why: `Only ${(stats.cacheHitRate * 100).toFixed(0)}% of tokens hit cache. Each turn is paying full input cost — check that CLAUDE.md / system prompt isn't being rotated, and avoid randomized preambles.`,
+      action: 'gotoTab',
+      actionLabel: 'See cost breakdown',
+      actionPayload: 'now',
+    });
+  }
+
+  // ---- Memory -------------------------------------------------------------
+  const stale = memory.filter((m) => m.isStale);
+  if (stale.length >= 5) {
+    out.push({
+      id: 'rec-memory-prune',
+      category: 'memory',
+      impact: 'med',
+      title: `Prune ${stale.length} stale memory entries`,
+      why: 'Entries older than 30 days drift from current truth. Pruning keeps recall sharp and stops Claude from acting on outdated facts.',
+      action: 'gotoTab',
+      actionLabel: 'Review memory',
+      actionPayload: 'memory',
+    });
+  }
+  if (memory.length === 0 && cwd) {
+    out.push({
+      id: 'rec-memory-empty',
+      category: 'memory',
+      impact: 'med',
+      title: 'Memory is empty — start saving facts',
+      why: 'Auto-memory persists across sessions. Tell Claude things like "remember that we deploy via Pages project X" and they stay available next time.',
+      action: 'openMemory',
+      actionLabel: 'Open MEMORY.md',
+      actionPayload: undefined,
+    });
+  }
+  if (memory.length >= 50) {
+    out.push({
+      id: 'rec-memory-large',
+      category: 'memory',
+      impact: 'low',
+      title: `Memory has grown to ${memory.length} entries`,
+      why: 'Past ~40 entries, the index gets noisy and lookups blur together. Consider archiving project-finished memories to your Obsidian vault.',
+      action: 'gotoTab',
+      actionLabel: 'Review memory',
+      actionPayload: 'memory',
+    });
+  }
+
+  // ---- Skills -------------------------------------------------------------
+  const unusedSkills = skills.filter((s) => s.useCount === 0);
+  if (skills.length > 20 && unusedSkills.length > skills.length * 0.7) {
+    out.push({
+      id: 'rec-skills-untried',
+      category: 'skills',
+      impact: 'low',
+      title: `${unusedSkills.length} of ${skills.length} skills never used this session`,
+      why: 'Skills only help if you remember they exist. Try one of the high-leverage ones below the next time it fits — even one new skill per week compounds.',
+      action: 'gotoTab',
+      actionLabel: 'Browse skills',
+      actionPayload: 'skills',
+    });
+  }
+  // Suggest a useful skill the user hasn't invoked this session.
+  const haveNames = new Set(skills.map((s) => s.name.toLowerCase()));
+  const candidates = SKILL_PICKS.filter(
+    (n) => haveNames.has(n) && skills.find((s) => s.name.toLowerCase() === n)?.useCount === 0,
+  );
+  if (candidates.length > 0 && stats.messageCount > 30) {
+    const pick = candidates[0];
+    out.push({
+      id: `rec-skill-try-${pick}`,
+      category: 'skills',
+      impact: 'low',
+      title: `Try /${pick}`,
+      why: `You've sent ${stats.messageCount} messages this session without invoking /${pick}. It's one of the most leveraged skills you have installed — copy it, paste it next time it fits.`,
+      action: 'copySkill',
+      actionLabel: `Copy /${pick}`,
+      actionPayload: pick,
+    });
+  }
+
+  // ---- Prompts ------------------------------------------------------------
+  if (prompts.length === 0) {
+    out.push({
+      id: 'rec-prompts-empty',
+      category: 'prompts',
+      impact: 'low',
+      title: 'Save your most-used prompts',
+      why: 'Cockpit\'s Prompts tab stores reusable prompts (review checklists, "ship it" prompts, daily standup templates). One click copies them for paste into Claude.',
+      action: 'gotoTab',
+      actionLabel: 'Open Prompts tab',
+      actionPayload: 'prompts',
+    });
+  } else if (prompts.length >= 25) {
+    out.push({
+      id: 'rec-prompts-prune',
+      category: 'prompts',
+      impact: 'low',
+      title: `${prompts.length} saved prompts — prune unused ones`,
+      why: 'Long lists make the right prompt slower to find. Delete prompts you haven\'t reused in the last few weeks.',
+      action: 'gotoTab',
+      actionLabel: 'Open Prompts tab',
+      actionPayload: 'prompts',
+    });
+  }
+
+  // ---- Agents -------------------------------------------------------------
+  if (agents.length === 0) {
+    out.push({
+      id: 'rec-agents-empty',
+      category: 'agents',
+      impact: 'med',
+      title: 'No custom subagents defined',
+      why: 'Custom agents in ~/.claude/agents/ encode role-specific behavior (code-reviewer, requirement-parser, ux-designer). They run on Haiku/Sonnet by default — cheaper than Opus for routine work.',
+      action: 'gotoTab',
+      actionLabel: 'See Agents tab',
+      actionPayload: 'agents',
+    });
+  } else if (agents.length > 15) {
+    out.push({
+      id: 'rec-agents-many',
+      category: 'agents',
+      impact: 'low',
+      title: `${agents.length} custom agents — consider consolidating`,
+      why: 'Past ~10 agents, names start blurring and you forget which to invoke. Merge near-duplicates and delete ones you haven\'t used in a month.',
+      action: 'gotoTab',
+      actionLabel: 'Review agents',
+      actionPayload: 'agents',
+    });
+  }
+
+  // ---- Budget -------------------------------------------------------------
+  if (!budget.enabled) {
+    out.push({
+      id: 'rec-budget-set',
+      category: 'budget',
+      impact: 'med',
+      title: 'No daily spend cap set',
+      why: 'Without a cap, an Opus runaway loop can burn $50+ before you notice. A soft daily cap surfaces a notification — it doesn\'t block work.',
+      action: 'setDailyCap',
+      actionLabel: 'Set daily cap',
+      actionPayload: undefined,
+    });
+  }
+
+  // ---- Idle sessions ------------------------------------------------------
+  const idle = watchtower.filter((s) => s.status === 'idle' || s.status === 'stale');
+  if (idle.length >= 3) {
+    out.push({
+      id: 'rec-idle-sessions',
+      category: 'workflow',
+      impact: 'low',
+      title: `${idle.length} idle sessions across projects`,
+      why: 'Each idle session is a parallel train of thought you abandoned. Pick the most valuable one to resume, or close the rest so the watchtower stays signal.',
+      action: 'gotoTab',
+      actionLabel: 'Open Watchtower',
+      actionPayload: 'watchtower',
+    });
+  }
+
+  // ---- Settings / hooks ---------------------------------------------------
+  if (settings.settingsExists && settings.hooks.length === 0) {
+    out.push({
+      id: 'rec-hooks-none',
+      category: 'workflow',
+      impact: 'low',
+      title: 'No hooks configured',
+      why: 'Hooks (UserPromptSubmit, PostToolUse, Stop) let you wire automatic behavior — skill router, lint-on-save, notify-on-done. Most cockpit users have at least UserPromptSubmit.',
+      action: 'gotoTab',
+      actionLabel: 'Open Config',
+      actionPayload: 'config',
+    });
+  }
+  if (!settings.settingsExists) {
+    out.push({
+      id: 'rec-settings-missing',
+      category: 'workflow',
+      impact: 'med',
+      title: 'No ~/.claude/settings.json',
+      why: 'Without settings.json you can\'t configure permissions, env vars, MCP servers, or hooks. Cockpit reads from it — running without one means flying blind.',
+      action: 'gotoTab',
+      actionLabel: 'Open Config',
+      actionPayload: 'config',
+    });
+  }
+
+  // ---- RTK / token saver --------------------------------------------------
+  if (!rtk.installed) {
+    out.push({
+      id: 'rec-rtk-install',
+      category: 'health',
+      impact: 'low',
+      title: 'Install RTK to cut dev tokens 60–90%',
+      why: 'RTK is a CLI proxy that filters noisy command output (git diff, npm install) before it reaches Claude. Pure savings, zero behavior change.',
+      action: 'openExternal',
+      actionLabel: 'See RTK',
+      actionPayload: 'https://github.com/anthropics/rust-token-killer',
+    });
+  }
+
+  // ---- Obsidian -----------------------------------------------------------
+  if (!obsidian.installed) {
+    out.push({
+      id: 'rec-obsidian-install',
+      category: 'workflow',
+      impact: 'low',
+      title: 'Connect an Obsidian vault',
+      why: 'Save sessions, decisions, and learnings to a vault as a long-term brain. Cockpit can index them and surface them when relevant. Auto-capture every 15min keeps it current.',
+      action: 'gotoTab',
+      actionLabel: 'Open Obsidian tab',
+      actionPayload: 'obsidian',
+    });
+  }
+
+  // ---- Disk hygiene -------------------------------------------------------
+  const fiveGb = 5 * 1024 * 1024 * 1024;
+  if (diskUsageBytes > fiveGb) {
+    out.push({
+      id: 'rec-disk-prune',
+      category: 'health',
+      impact: 'low',
+      title: `Session archive is ${formatBytes(diskUsageBytes)}`,
+      why: 'Old .jsonl session logs accumulate. They\'re searchable via the Search tab, but past a few GB you\'re just storing dead context. Archive sessions older than 30 days.',
+      action: 'gotoTab',
+      actionLabel: 'Open Config',
+      actionPayload: 'config',
+    });
+  }
+
+  // Sort: high → med → low; within impact, keep insertion order.
+  const rank: Record<RecommendationImpact, number> = { high: 0, med: 1, low: 2 };
+  out.sort((a, b) => rank[a.impact] - rank[b.impact]);
   return out;
 }
 

@@ -1204,6 +1204,84 @@
     `;
   }
 
+  function recommendationsSection(snap) {
+    const recs = snap.recommendations || [];
+    if (!recs.length) {
+      return `
+        <h2>Recommendations</h2>
+        <p class="empty">Nothing to recommend — your cockpit looks clean. Recommendations surface when memory drifts, skills go unused, budgets aren't set, or session context fills up.</p>
+      `;
+    }
+    const groups = new Map();
+    for (const r of recs) {
+      if (!groups.has(r.category)) groups.set(r.category, []);
+      groups.get(r.category).push(r);
+    }
+    const catLabel = {
+      memory: 'Memory',
+      skills: 'Skills',
+      prompts: 'Prompts',
+      agents: 'Agents',
+      session: 'Session',
+      budget: 'Budget',
+      health: 'Health',
+      workflow: 'Workflow',
+    };
+    const order = ['session', 'memory', 'skills', 'agents', 'prompts', 'budget', 'workflow', 'health'];
+    const high = recs.filter((r) => r.impact === 'high').length;
+    const med = recs.filter((r) => r.impact === 'med').length;
+    const low = recs.filter((r) => r.impact === 'low').length;
+    const summary = `
+      ${high ? `<span class="rec-pill rec-high">${high} high</span>` : ''}
+      ${med ? `<span class="rec-pill rec-med">${med} medium</span>` : ''}
+      ${low ? `<span class="rec-pill rec-low">${low} low</span>` : ''}
+    `;
+    let body = '';
+    for (const cat of order) {
+      const list = groups.get(cat);
+      if (!list || !list.length) continue;
+      body += `
+        <h3 class="sub-h">${escapeHtml(catLabel[cat] || cat)}</h3>
+        <ul class="rec-list">
+          ${list.map((r) => recCard(r)).join('')}
+        </ul>
+      `;
+    }
+    return `
+      <h2>Recommendations <span class="rec-summary">${summary}</span></h2>
+      <p class="rec-intro">Actionable suggestions surfaced from across your cockpit — memory, skills, agents, prompts, budgets, and session health.</p>
+      ${body}
+    `;
+  }
+
+  function recCard(r) {
+    const actionBtn = r.action && r.action !== 'none'
+      ? `<button class="rec-action"
+            data-rec-action="${escapeHtml(r.action)}"
+            data-rec-payload="${escapeHtml(r.actionPayload || '')}">
+            ${escapeHtml(r.actionLabel || 'Open')}
+          </button>`
+      : '';
+    return `
+      <li class="rec-card rec-impact-${escapeHtml(r.impact)}">
+        <div class="rec-head">
+          <span class="rec-impact-dot rec-dot-${escapeHtml(r.impact)}"></span>
+          <span class="rec-title">${escapeHtml(r.title)}</span>
+        </div>
+        <div class="rec-why">${escapeHtml(r.why)}</div>
+        ${actionBtn ? `<div class="rec-foot">${actionBtn}</div>` : ''}
+      </li>
+    `;
+  }
+
+  function recsLabel(snap) {
+    const recs = snap.recommendations || [];
+    if (!recs.length) return 'Recs';
+    const high = recs.filter((r) => r.impact === 'high').length;
+    if (high > 0) return `Recs (${high}!)`;
+    return `Recs (${recs.length})`;
+  }
+
   function emptyTabBar(snap) {
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
@@ -1211,6 +1289,7 @@
     const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
     return [
       { id: 'now', label: 'Now' },
+      { id: 'recs', label: recsLabel(snap) },
       { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
       { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
@@ -1231,6 +1310,7 @@
     const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
     return [
       { id: 'now', label: 'Now' },
+      { id: 'recs', label: recsLabel(snap) },
       { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
       { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
@@ -1269,7 +1349,8 @@
       const activeTab = getActiveTab();
       const tabBar = renderTabBar(tabs, activeTab);
       let body = '';
-      if (activeTab === 'watchtower') body = watchtowerSection(snap);
+      if (activeTab === 'recs') body = recommendationsSection(snap);
+      else if (activeTab === 'watchtower') body = watchtowerSection(snap);
       else if (activeTab === 'mac') body = macHealthSection(snap);
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
@@ -1375,6 +1456,8 @@
         ${filesTouchedHtml}
         ${todaySection(snap)}
       `;
+    } else if (activeTab === 'recs') {
+      body = recommendationsSection(snap);
     } else if (activeTab === 'watchtower') {
       body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
     } else if (activeTab === 'chat') {
@@ -1478,6 +1561,29 @@
         const a = btn.getAttribute('data-notif-action');
         if (a === 'openMemory') vscode.postMessage({ type: 'openMemory' });
         else if (a === 'openSession') vscode.postMessage({ type: 'openSessionFile' });
+      });
+    });
+
+    root.querySelectorAll('button[data-rec-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const a = btn.getAttribute('data-rec-action');
+        const payload = btn.getAttribute('data-rec-payload') || '';
+        if (a === 'gotoTab' && payload) {
+          setActiveTab(payload);
+          if (lastSnapshot) render(lastSnapshot);
+        } else if (a === 'openMemory') {
+          vscode.postMessage({ type: 'openMemory' });
+        } else if (a === 'openSession') {
+          vscode.postMessage({ type: 'openSessionFile' });
+        } else if (a === 'openFile' && payload) {
+          vscode.postMessage({ type: 'openFile', filePath: payload });
+        } else if (a === 'copySkill' && payload) {
+          vscode.postMessage({ type: 'copySkill', skillName: payload });
+        } else if (a === 'openExternal' && payload) {
+          vscode.postMessage({ type: 'openExternal', url: payload });
+        } else if (a === 'setDailyCap') {
+          vscode.postMessage({ type: 'setDailyCap' });
+        }
       });
     });
 

@@ -22,6 +22,7 @@ const {
   computeWatchtower,
   computeBudget,
   computeNotifications,
+  computeRecommendations,
   computeCostByTool,
   globalSessionSearch,
 } = require('../out/claudeData.js');
@@ -312,6 +313,93 @@ test('computeNotifications surfaces context, cache, and budget alerts', () => {
   assert.ok(ids.includes('memory-stale'));
   assert.ok(ids.includes('idle-sessions'));
   assert.ok(ids.includes('budget-day'));
+});
+
+test('computeRecommendations surfaces actionable suggestions across categories', () => {
+  const stats = {
+    totalTokens: 100_000,
+    contextWindowMax: 200_000,
+    contextFillPct: 95,
+    cacheHitRate: 0.1,
+    messageCount: 60,
+  };
+  const memory = Array.from({ length: 6 }, (_, i) => ({
+    isStale: true,
+    title: `m${i}`,
+    filename: `m${i}.md`,
+    hook: '',
+    lastModifiedAt: undefined,
+    lastModifiedMs: 0,
+  }));
+  const watchtower = [
+    { name: 'a', status: 'idle', ageSeconds: 1200 },
+    { name: 'b', status: 'idle', ageSeconds: 1500 },
+    { name: 'c', status: 'stale', ageSeconds: 3000 },
+  ];
+  const budget = computeBudget(
+    { enabled: false, dailyCapUsd: 0, sessionCapUsd: 0 },
+    0,
+    0,
+  );
+  const recs = computeRecommendations({
+    stats,
+    memory,
+    skills: [],
+    prompts: [],
+    agents: [],
+    watchtower,
+    budget,
+    settings: { settingsExists: true, mcpServerNames: [], hooks: [], enabledPlugins: [] },
+    rtk: { installed: false, version: undefined, totalSavingsTokens: 0, totalSavingsUsd: 0 },
+    obsidian: { installed: false, vaults: [], primaryVault: undefined, recentNotes: [] },
+    diskUsageBytes: 0,
+    cwd: '/tmp/x',
+  });
+  const ids = recs.map((r) => r.id);
+  assert.ok(ids.includes('rec-context-compact'));
+  assert.ok(ids.includes('rec-cache-cold'));
+  assert.ok(ids.includes('rec-memory-prune'));
+  assert.ok(ids.includes('rec-idle-sessions'));
+  assert.ok(ids.includes('rec-budget-set'));
+  assert.ok(ids.includes('rec-prompts-empty'));
+  assert.ok(ids.includes('rec-agents-empty'));
+  assert.ok(ids.includes('rec-hooks-none'));
+  // High-impact recs sort first.
+  const firstHigh = recs.findIndex((r) => r.impact === 'high');
+  const firstLow = recs.findIndex((r) => r.impact === 'low');
+  if (firstHigh >= 0 && firstLow >= 0) {
+    assert.ok(firstHigh < firstLow);
+  }
+});
+
+test('computeRecommendations returns empty when cockpit is clean', () => {
+  const stats = {
+    totalTokens: 1_000,
+    contextWindowMax: 200_000,
+    contextFillPct: 5,
+    cacheHitRate: 0.95,
+    messageCount: 5,
+  };
+  const budget = computeBudget(
+    { enabled: true, dailyCapUsd: 50, sessionCapUsd: 0 },
+    1,
+    0,
+  );
+  const recs = computeRecommendations({
+    stats,
+    memory: [{ isStale: false, title: 'm', filename: 'm.md', hook: '', lastModifiedAt: undefined, lastModifiedMs: 0 }],
+    skills: [{ name: 'foo', description: '', source: 'user', pluginName: undefined, useCount: 1 }],
+    prompts: [{ id: 'p1', title: 't', body: 'b' }],
+    agents: [{ name: 'a', description: '', scope: 'global', filePath: '/x', model: undefined, color: undefined, tools: undefined }],
+    watchtower: [],
+    budget,
+    settings: { settingsExists: true, mcpServerNames: [], hooks: [{ event: 'UserPromptSubmit', count: 1, commands: [] }], enabledPlugins: [] },
+    rtk: { installed: true, version: '1.0', totalSavingsTokens: 0, totalSavingsUsd: 0 },
+    obsidian: { installed: true, vaults: [], primaryVault: undefined, recentNotes: [] },
+    diskUsageBytes: 1024,
+    cwd: '/tmp/clean',
+  });
+  assert.equal(recs.length, 0);
 });
 
 test('computeCostByTool returns proportional approximations', () => {
