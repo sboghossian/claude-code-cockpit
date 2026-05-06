@@ -2091,6 +2091,298 @@
     `;
   }
 
+  // ===========================================================================
+  // Talk tab — particle viz + mic level + send-to-claude. Self-contained
+  // module that owns its canvas, AudioContext, and SpeechRecognition state.
+  // ===========================================================================
+  const Talk = (() => {
+    let audioCtx = null;
+    let analyser = null;
+    let micStream = null;
+    let level = 0;          // smoothed RMS, 0..1
+    let levelTarget = 0;
+    let listening = false;
+    let recognition = null;
+    let canvas = null;
+    let ctx2d = null;
+    let rafHandle = null;
+    let particles = null;
+    let rotation = 0;
+    let interimText = '';
+
+    // Fibonacci sphere — produces N evenly-distributed unit vectors. Used
+    // once on first paint; particles are rotated each frame, not regenerated.
+    function buildParticles(n) {
+      const out = new Array(n);
+      const phi = Math.PI * (3 - Math.sqrt(5));
+      for (let i = 0; i < n; i++) {
+        const y = 1 - (i / (n - 1)) * 2;
+        const radius = Math.sqrt(1 - y * y);
+        const theta = phi * i;
+        out[i] = {
+          x: Math.cos(theta) * radius,
+          y,
+          z: Math.sin(theta) * radius,
+          // Per-particle jitter so motion isn't uniform.
+          jitter: Math.random() * 0.15,
+        };
+      }
+      return out;
+    }
+
+    function ensureCanvas() {
+      const c = document.querySelector('canvas[data-talk-canvas]');
+      if (c && c !== canvas) {
+        canvas = c;
+        ctx2d = c.getContext('2d');
+        // Track size in case sidebar resizes.
+        const resize = () => {
+          if (!canvas) return;
+          const dpr = window.devicePixelRatio || 1;
+          const w = canvas.clientWidth;
+          const h = canvas.clientHeight;
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+        };
+        resize();
+        // Re-resize when the panel is resized.
+        new ResizeObserver(resize).observe(canvas);
+      }
+      if (!particles) particles = buildParticles(420);
+    }
+
+    function startAnimation() {
+      if (rafHandle) return;
+      const tick = () => {
+        rafHandle = requestAnimationFrame(tick);
+        sampleMic();
+        draw();
+      };
+      tick();
+    }
+
+    function stopAnimation() {
+      if (rafHandle) cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+
+    function sampleMic() {
+      // Smooth toward levelTarget. Without active mic, decay to 0.
+      level += (levelTarget - level) * 0.18;
+      if (!analyser) {
+        levelTarget *= 0.92;
+        return;
+      }
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      // Boost so quiet speech still moves the viz.
+      levelTarget = Math.min(1, rms * 4);
+    }
+
+    function draw() {
+      if (!ctx2d || !canvas) return;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      // Trail effect — fade prior frame instead of clearing.
+      ctx2d.fillStyle = 'rgba(8, 12, 24, 0.18)';
+      ctx2d.fillRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const baseR = Math.min(w, h) * 0.32;
+      const expand = baseR * (1 + level * 0.6);
+      rotation += 0.0035 + level * 0.012;
+
+      const cosR = Math.cos(rotation);
+      const sinR = Math.sin(rotation);
+      const cosT = Math.cos(rotation * 0.6);
+      const sinT = Math.sin(rotation * 0.6);
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        // Rotate around Y then X.
+        const x1 = p.x * cosR + p.z * sinR;
+        const z1 = -p.x * sinR + p.z * cosR;
+        const y1 = p.y * cosT - z1 * sinT;
+        const z2 = p.y * sinT + z1 * cosT;
+        // Project (perspective).
+        const persp = 1 / (1.4 - z2 * 0.4);
+        const r = expand * (1 + p.jitter * level);
+        const px = cx + x1 * r * persp;
+        const py = cy + y1 * r * persp;
+        // Particles further away dim + shrink.
+        const depth = (z2 + 1) / 2; // 0..1
+        const size = (0.6 + depth * 1.6) * (1 + level * 0.5);
+        const alpha = 0.25 + depth * 0.7;
+        // Hot core when audio level is high; cool blue when quiet.
+        const hue = 200 + level * 60;
+        ctx2d.fillStyle = `hsla(${hue}, 80%, ${50 + depth * 30}%, ${alpha})`;
+        ctx2d.beginPath();
+        ctx2d.arc(px, py, size, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+      // Soft center glow.
+      const grad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, expand);
+      grad.addColorStop(0, `rgba(140, 180, 255, ${0.05 + level * 0.15})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx2d.fillStyle = grad;
+      ctx2d.fillRect(0, 0, w, h);
+    }
+
+    async function startListening() {
+      if (listening) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = audioCtx.createMediaStreamSource(micStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        listening = true;
+        // Try to start speech recognition (Chromium-based VSCode supports it).
+        startRecognition();
+        updateButtons();
+      } catch (err) {
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'Mic access denied or unavailable: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    function stopListening() {
+      if (!listening) return;
+      if (micStream) {
+        for (const t of micStream.getTracks()) t.stop();
+        micStream = null;
+      }
+      analyser = null;
+      stopRecognition();
+      listening = false;
+      levelTarget = 0;
+      updateButtons();
+    }
+
+    function startRecognition() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'Listening (no transcription — Speech API unavailable in this VSCode build)';
+        return;
+      }
+      try {
+        recognition = new SR();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.onresult = (e) => {
+          let finalText = '';
+          let interim = '';
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i];
+            if (r.isFinal) finalText += r[0].transcript;
+            else interim += r[0].transcript;
+          }
+          const ta = document.querySelector('textarea[data-talk-text]');
+          if (finalText && ta) {
+            ta.value = (ta.value ? ta.value + ' ' : '') + finalText.trim();
+          }
+          interimText = interim;
+          const out = document.querySelector('[data-talk-status]');
+          if (out) out.textContent = interim ? 'hearing: "' + interim + '"' : 'listening…';
+        };
+        recognition.onerror = (e) => {
+          const out = document.querySelector('[data-talk-status]');
+          if (out) out.textContent = 'Recognition error: ' + (e.error || 'unknown');
+        };
+        recognition.onend = () => {
+          // Auto-restart while still listening (continuous mode drops out periodically).
+          if (listening && recognition) {
+            try { recognition.start(); } catch (_) { /* ignore */ }
+          }
+        };
+        recognition.start();
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'listening…';
+      } catch (err) {
+        recognition = null;
+      }
+    }
+
+    function stopRecognition() {
+      if (recognition) {
+        try { recognition.stop(); } catch (_) { /* ignore */ }
+        recognition = null;
+      }
+      const out = document.querySelector('[data-talk-status]');
+      if (out) out.textContent = '';
+      interimText = '';
+    }
+
+    function updateButtons() {
+      const startBtn = document.querySelector('button[data-talk-start]');
+      const stopBtn = document.querySelector('button[data-talk-stop]');
+      if (startBtn) startBtn.style.display = listening ? 'none' : '';
+      if (stopBtn) stopBtn.style.display = listening ? '' : 'none';
+    }
+
+    function send(mode) {
+      const ta = document.querySelector('textarea[data-talk-text]');
+      if (!ta) return;
+      const text = ta.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'talkToClaude', talkText: text, talkMode: mode });
+      ta.value = '';
+      const out = document.querySelector('[data-talk-status]');
+      if (out) out.textContent = 'Sent → terminal opened. Review & press Enter.';
+    }
+
+    function init() {
+      ensureCanvas();
+      startAnimation();
+    }
+
+    function teardown() {
+      stopListening();
+      stopAnimation();
+      // Don't close audioCtx — re-opening one is expensive and the user
+      // may flip back to the tab.
+    }
+
+    return { init, teardown, startListening, stopListening, send };
+  })();
+
+  function talkSection(snap) {
+    return `
+      <div class="talk-shell">
+        <div class="talk-canvas-wrap">
+          <canvas data-talk-canvas></canvas>
+          <div class="talk-status" data-talk-status></div>
+        </div>
+        <div class="talk-controls">
+          <button class="office-btn" data-talk-start>🎙 Start listening</button>
+          <button class="office-btn" data-talk-stop style="display: none;">■ Stop</button>
+          <button class="watch-action" data-talk-wispr title="Trigger Wispr Flow shortcut (configure in settings)">Wispr</button>
+        </div>
+        <textarea class="talk-text" data-talk-text rows="4" placeholder="Type or dictate. Speech recognition fills this in as you talk."></textarea>
+        <div class="talk-send-row">
+          <button class="office-btn" data-talk-send="new-session">Send → new session</button>
+          <button class="watch-action" data-talk-send="resume">Resume last</button>
+          <button class="watch-action" data-talk-send="background">Background (--print)</button>
+        </div>
+        <p class="empty" style="font-size: 11px;">
+          The particle sphere reacts to your voice in real time. Speech is transcribed via your browser's Web Speech API (works in Chromium/VSCode). When you hit Send, Cockpit pipes the message into a fresh <code>claude</code> session in a terminal — review and press Enter to confirm. Voice never leaves your machine.
+        </p>
+      </div>
+    `;
+  }
+
   function securitySection(snap) {
     const sec = snap.security;
     const summary = sec && sec.summary;
@@ -2622,6 +2914,7 @@
       { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
       { id: 'browse',     label: `Browse (${snap.projects.length})`,                                  pinned: false, requiresCwd: false, hint: 'Recent projects + ~/.claude/ filesystem' },
+      { id: 'talk',       label: 'Talk',                                                              pinned: false, requiresCwd: false, hint: 'Voice + text → Claude. Particle visualization reacts to your voice.' },
       { id: 'security',   label: secLabel(snap),                                                      pinned: false, requiresCwd: false, hint: 'Local secret scan, .env audit, MCP credential check, /cso launcher' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
@@ -3172,6 +3465,7 @@
       else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
       else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') body = browseSection(snap);
       else if (activeTab === 'security') body = securitySection(snap);
+      else if (activeTab === 'talk') body = talkSection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
       else body = `
@@ -3187,6 +3481,8 @@
       `;
       root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
       bindEvents();
+      if (activeTab === 'talk') Talk.init();
+      else Talk.teardown();
       return;
     }
     const s = snap.stats;
@@ -3293,6 +3589,8 @@
       body = browseSection(snap);
     } else if (activeTab === 'security') {
       body = securitySection(snap);
+    } else if (activeTab === 'talk') {
+      body = talkSection(snap);
     } else if (activeTab === 'agents') {
       body = agentsSection(snap);
     } else if (activeTab === 'routines') {
@@ -3313,6 +3611,9 @@
 
     root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
     bindEvents();
+    // Talk tab lifecycle: init the canvas/raf when active, tear down otherwise.
+    if (activeTab === 'talk') Talk.init();
+    else Talk.teardown();
   }
 
   function ensureValidActiveTab(active, tabs) {
@@ -3970,6 +4271,18 @@
         vscode.postMessage({ type: 'launchCsoSkill' });
       });
     });
+
+    // Talk tab — wire mic / send / wispr buttons. Lifecycle is managed
+    // separately in the post-render hook below so the canvas keeps painting.
+    const startBtn = root.querySelector('button[data-talk-start]');
+    if (startBtn) startBtn.addEventListener('click', () => Talk.startListening());
+    const stopBtn = root.querySelector('button[data-talk-stop]');
+    if (stopBtn) stopBtn.addEventListener('click', () => Talk.stopListening());
+    root.querySelectorAll('button[data-talk-send]').forEach((btn) => {
+      btn.addEventListener('click', () => Talk.send(btn.getAttribute('data-talk-send')));
+    });
+    const wisprBtn = root.querySelector('button[data-talk-wispr]');
+    if (wisprBtn) wisprBtn.addEventListener('click', () => vscode.postMessage({ type: 'triggerWisprFlow' }));
 
     root.querySelectorAll('select[data-prompt-cat-id]').forEach((sel) => {
       sel.addEventListener('change', () => {

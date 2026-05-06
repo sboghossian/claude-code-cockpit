@@ -118,6 +118,11 @@
           "default": false,
           "description": "Enable the Discover tab (top GitHub projects + RSS from Obsidian). Off by default — turning it on lets Cockpit fetch api.github.com on demand (when you click Refresh). RSS reads from your Obsidian vault and makes no network calls."
         },
+        "claudeCockpit.wisprShortcut": {
+          "type": "string",
+          "default": "",
+          "description": "Optional. Your Wispr Flow keyboard shortcut so Cockpit's Talk tab can trigger dictation. Format: 'control+option+space'. Empty = no synthetic trigger; you press the shortcut yourself. macOS only."
+        },
         "claudeCockpit.updateCheck.enabled": {
           "type": "boolean",
           "default": true,

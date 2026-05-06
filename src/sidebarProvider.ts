@@ -93,6 +93,8 @@ interface InboundMessage {
     | 'removeCustomFeed'
     | 'runSecurityScan'
     | 'launchCsoSkill'
+    | 'talkToClaude'
+    | 'triggerWisprFlow'
     | 'fetchRoadmap'
     | 'fetchJarvis'
     | 'jarvisApprove'
@@ -125,6 +127,8 @@ interface InboundMessage {
   window?: DiscoverWindow;
   feedName?: string;
   feedUrl?: string;
+  talkText?: string;
+  talkMode?: 'new-session' | 'resume' | 'background';
   approvalId?: string;
   approvalReason?: string;
   peerText?: string;
@@ -932,6 +936,57 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         term.sendText('claude /cso');
         return;
       }
+      case 'talkToClaude': {
+        const text = (msg.talkText || '').trim();
+        if (!text) return;
+        const mode = msg.talkMode || 'new-session';
+        // Pipe the message into a fresh `claude` invocation in a terminal.
+        // Using a heredoc keeps quoting safe even when the message contains
+        // special characters. Mode controls flag args.
+        const flag = mode === 'resume' ? ' --continue' : mode === 'background' ? ' --print' : '';
+        const term = vscode.window.createTerminal({ name: `talk: ${text.slice(0, 40)}` });
+        term.show();
+        // We send the message via stdin so quoting is bulletproof.
+        const heredoc = `claude${flag} <<'COCKPIT_EOF'\n${text}\nCOCKPIT_EOF`;
+        term.sendText(heredoc);
+        return;
+      }
+      case 'triggerWisprFlow': {
+        // Wispr Flow on macOS uses a global shortcut. We can't directly hook
+        // into Wispr's IPC, but we can fire its default shortcut via
+        // AppleScript (Fn-Fn double-tap by default — varies by user). Most
+        // users will just press the shortcut themselves, but this surfaces
+        // the option for one-click activation when they've remapped to a
+        // synthesizable key.
+        if (process.platform !== 'darwin') {
+          void vscode.window.showInformationMessage('Wispr Flow handoff is macOS-only.');
+          return;
+        }
+        const userShortcut = vscode.workspace
+          .getConfiguration('claudeCockpit')
+          .get<string>('wisprShortcut', '');
+        if (!userShortcut) {
+          void vscode.window.showInformationMessage(
+            'Set claudeCockpit.wisprShortcut in settings to your Wispr key combo (e.g. "control+option+space"). Or just press your Wispr shortcut directly — Cockpit will pick up the dictated text from the active text input.',
+          );
+          return;
+        }
+        // Translate "control+option+space" → AppleScript form. Keep it
+        // narrow — we only support common modifiers + a single key.
+        const parts = userShortcut.toLowerCase().split('+').map((s) => s.trim());
+        const keyPart = parts.pop();
+        if (!keyPart) return;
+        const mods: string[] = [];
+        if (parts.includes('control') || parts.includes('ctrl')) mods.push('control down');
+        if (parts.includes('option') || parts.includes('alt')) mods.push('option down');
+        if (parts.includes('command') || parts.includes('cmd')) mods.push('command down');
+        if (parts.includes('shift')) mods.push('shift down');
+        const using = mods.length ? ` using {${mods.join(', ')}}` : '';
+        const ascript = `tell application "System Events" to keystroke "${keyPart}"${using}`;
+        const term = vscode.window.createTerminal({ name: 'wispr trigger' });
+        term.sendText(`osascript -e '${ascript.replace(/'/g, "'\\''")}'`);
+        return;
+      }
       case 'startUsageDashboard': {
         const installed = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         void installed;
@@ -1009,7 +1064,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; connect-src 'none'; form-action 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; media-src 'self' blob:; connect-src 'none'; form-action 'none';" />
   <link rel="stylesheet" href="${cssUri}" />
   <title>Claude Cockpit</title>
 </head>
