@@ -4,13 +4,17 @@ Claude Cockpit is **100% local**. The extension runs entirely on your machine. N
 
 ## Guarantees
 
-- **No network requests.** The extension makes zero outbound calls. No `fetch`, no `http`, no `XMLHttpRequest`, no `axios`, no telemetry SDK. Verify with `grep -rE "fetch|XMLHttpRequest|https?://" src/ media/`.
+- **No background network requests.** The extension makes zero spontaneous outbound calls. No `fetch`, no telemetry, no analytics. The only network call the extension can make is `https.get('api.github.com/...')` from `src/discover.ts`, and only when you have explicitly enabled the Discover tab (`claudeCockpit.discover.enabled = true`) **and** clicked the Refresh button on that tab. Disabled by default. RSS reads from your local Obsidian vault and makes no network call.
 - **No telemetry, no analytics, no crash reporting.** Ever.
-- **Read-only.** Phase 1 never writes to `~/.claude/`. The only filesystem APIs used are `fs.readFileSync`, `fs.readdirSync`, `fs.statSync`, `fs.existsSync`, and `fs.watch` — all read-only. Verify with `grep -rE "writeFile|appendFile|unlink|rmdir|mkdir|rename" src/`.
-- **Bounded reads.** The extension reads only from `~/.claude/projects/<encoded-cwd>/` (Claude Code's own per-project session directory) and its `memory/MEMORY.md` index. Nothing else on disk is touched.
+- **Bounded writes — user-initiated only.** The default mode is read-only. The only writes are: (a) creating new routine files at `~/.claude/scheduled-tasks/<slug>/SKILL.md` when you click **+ New routine**, and (b) `globalState` for your preferences (custom widgets, visible tabs, theme). No file outside `~/.claude/scheduled-tasks/` is ever written. Verify in `src/discover.ts` (`createRoutineSkill`) and `src/sidebarProvider.ts`.
+- **Bounded reads.** The extension reads only from `~/.claude/projects/<encoded-cwd>/` (Claude Code's own per-project session directory), its `memory/MEMORY.md` index, `~/.claude/agents/`, `~/.claude/scheduled-tasks/<name>/SKILL.md` (for the Routines tab), the configured Obsidian vault (specifically the `rss/` or `Inbox/RSS/` folder for the Discover tab's RSS view), and a few system-info commands on macOS for the Mac tab. Nothing else on disk is touched.
 - **Webview is sandboxed.** The sidebar webview runs under a strict CSP: `default-src 'none'; connect-src 'none'; form-action 'none'`. It cannot make XHR/fetch calls, submit forms, or load remote resources.
 - **Logging is path-only.** The logger writes to a VSCode `OutputChannel`. It logs file paths and error messages — never file contents or session bodies. See `src/logger.ts`.
 - **Zero runtime dependencies.** Only `@types/vscode` and `typescript` (devDeps). No supply chain to audit at runtime. See `package.json`.
+
+## Cloud routines opt-in
+
+The Routines tab has a "Cloud" section behind `claudeCockpit.cloudRoutines.enabled` (default: **off**). Turning it on does **not** make Cockpit issue any network calls — it simply unhides a button that, when clicked, opens `claude.ai/settings/automations` in your browser via VSCode's standard external-URL handler. Cockpit itself reads zero cloud-routine state.
 
 ## Where to verify
 

@@ -238,6 +238,7 @@
       ['Mac', 'Mac system health: disk, memory, battery, CPU, Wi-Fi, external drives, Bluetooth peripheral battery levels. Plus application time tracked today.'],
       ['Watchtower', 'Every Claude Code session touched in the last hour, color-coded green (live) → orange (idle) → grey (stale). Click any session to inspect.'],
       ['Agents', 'Your specialist council — agent definitions found in <code>~/.claude/agents/</code> (global) and <code>.claude/agents/</code> (per-workspace).'],
+      ['Routines', 'Scheduled Claude Code runs. Local routines = <code>~/.claude/scheduled-tasks/&lt;name&gt;/SKILL.md</code> (read directly). Cloud routines = scheduled remote agents managed in the desktop app / claude.ai (opt-in deep-link, no API state).'],
       ['Chat', 'Conversations from claude.ai (the web Chat surface) parsed from a <code>claude-data-export</code> folder. Cockpit unifies Chat + Code in one view.'],
       ['Search', 'Grep across every Claude session JSONL on this machine. Min 2 chars. Click a hit to open the source session.'],
       ['Obsidian', 'Auto-detects your Obsidian vaults, lists recent notes, lets you save the active session as a markdown digest with one click.'],
@@ -299,6 +300,7 @@
         <li><strong>Memory:</strong> <code>~/.claude/projects/&lt;encoded-cwd&gt;/memory/MEMORY.md</code> + linked files</li>
         <li><strong>Skills:</strong> <code>~/.claude/skills/&lt;name&gt;/SKILL.md</code></li>
         <li><strong>Agents:</strong> <code>~/.claude/agents/&lt;name&gt;.md</code> + <code>.claude/agents/</code></li>
+        <li><strong>Routines:</strong> <code>~/.claude/scheduled-tasks/&lt;name&gt;/SKILL.md</code></li>
         <li><strong>Hooks/MCP:</strong> <code>~/.claude/settings.json</code></li>
         <li><strong>Obsidian:</strong> <code>~/Library/Application Support/obsidian/obsidian.json</code></li>
         <li><strong>Tunnels:</strong> <code>~/.cloudflared/*.yml</code></li>
@@ -423,6 +425,173 @@
       )
       .join('');
     return `<h2>Tunnels <span class="cost-rate">${list.length}</span></h2><ul class="list">${items}</ul>`;
+  }
+
+  function fmtAge(ms) {
+    if (!ms) return '—';
+    const seconds = Math.max(0, (Date.now() - ms) / 1000);
+    if (seconds < 60) return 'just now';
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    if (d < 30) return `${d}d ago`;
+    const mo = Math.floor(d / 30);
+    return `${mo}mo ago`;
+  }
+
+  function discoverSection(snap) {
+    const d = snap.discover || { enabled: false, github: undefined, rss: { entries: [] } };
+    if (!d.enabled) {
+      return `
+        <h2>Discover</h2>
+        <p class="empty" style="font-size: 11px;">Discover surfaces top GitHub projects and RSS feeds. Both are <strong>off by default</strong> because Cockpit's privacy stance is local-first. Turning Discover on will allow Cockpit to fetch <code>api.github.com</code> when you click <strong>Refresh</strong>. RSS reads from your Obsidian vault — no network call.</p>
+        <button class="office-btn" data-action="enable-discover">Enable Discover (opt-in)</button>
+      `;
+    }
+
+    const win = (vscode.getState() || {}).discoverWindow || 'week';
+    const ghCache = d.github;
+    const ghError = ghCache && ghCache.error;
+    const ghRepos = (ghCache && ghCache.repos) || [];
+    const ghAge = ghCache ? fmtAge(ghCache.fetchedAt) : '';
+    const ghHeader = `
+      <div class="row">
+        <h3 class="sub-h left">GitHub trending <span class="cost-rate">${ghRepos.length}</span></h3>
+        <span class="right">
+          <button class="office-btn" data-action="discover-refresh">Refresh</button>
+        </span>
+      </div>
+      <div class="filter-chips">
+        ${['day', 'week', 'month']
+          .map(
+            (w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-discover-window="${w}">${
+              w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
+            }</button>`,
+          )
+          .join('')}
+      </div>
+      ${ghCache ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(ghAge)} · window: ${escapeHtml(ghCache.window)}</p>` : '<p class="empty">Click Refresh to fetch top repos.</p>'}
+    `;
+    const ghBody = ghError
+      ? `<p class="empty">${escapeHtml(ghError)}</p>`
+      : !ghRepos.length
+      ? ''
+      : `<ul class="list" style="list-style: none; padding: 0;">${ghRepos
+          .map(
+            (r) => `<li>
+              <div class="watch-card" style="display: block;">
+                <div class="row">
+                  <a class="left link" data-open-url="${escapeHtml(r.url)}" title="${escapeHtml(r.fullName)}"><strong>${escapeHtml(r.fullName)}</strong></a>
+                  <span class="right">
+                    ${r.language ? `<span class="tag">${escapeHtml(r.language)}</span>` : ''}
+                    <span class="tag">★ ${r.stars.toLocaleString()}</span>
+                  </span>
+                </div>
+                ${r.description ? `<div class="note-excerpt">${escapeHtml(r.description)}</div>` : ''}
+              </div>
+            </li>`,
+          )
+          .join('')}</ul>`;
+
+    const rss = d.rss || { entries: [] };
+    const rssBody = rss.error
+      ? `<p class="empty">${escapeHtml(rss.error)}</p>`
+      : !rss.entries.length
+      ? `<p class="empty">No RSS notes found yet. The <code>rss-feed-obsidian</code> routine should populate them.</p>`
+      : `<ul class="list" style="list-style: none; padding: 0;">${rss.entries
+          .slice(0, 30)
+          .map(
+            (e) => `<li>
+              <div class="watch-card" style="display: block;">
+                <div class="row">
+                  <a class="left link" data-open-file="${escapeHtml(e.filePath)}" title="${escapeHtml(e.filePath)}"><strong>${escapeHtml(e.title)}</strong></a>
+                  <span class="right"><span class="tag">${escapeHtml(e.vault)}</span></span>
+                </div>
+                <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">
+                  ${e.source ? escapeHtml(e.source) + ' · ' : ''}${escapeHtml(fmtAge(e.mtimeMs))}
+                </div>
+              </div>
+            </li>`,
+          )
+          .join('')}</ul>`;
+
+    return `
+      <h2>Discover</h2>
+      ${ghHeader}
+      ${ghBody}
+      <h3 class="sub-h">RSS from Obsidian ${rss.folder ? `<span class="cost-rate">${rss.entries.length}</span>` : ''}</h3>
+      ${rss.folder ? `<p class="empty" style="font-size: 10px;">Reading: <code>${escapeHtml(rss.folder)}</code></p>` : ''}
+      ${rssBody}
+    `;
+  }
+
+  function routinesSection(snap) {
+    const r = snap.routines || { local: [], cloudEnabled: false, cloudUrl: '', scheduledTasksDir: '', scheduledTasksDirExists: false };
+    const local = r.local || [];
+
+    const newRoutineBtn = `<button class="office-btn" data-action="new-routine" title="Create a new routine SKILL.md">+ New routine</button>`;
+
+    const localBlock = !r.scheduledTasksDirExists
+      ? `<p class="empty">No <code>~/.claude/scheduled-tasks/</code> directory yet. Click <strong>+ New routine</strong> to create one.</p>`
+      : !local.length
+      ? `<p class="empty">Directory exists but no routines yet. Click <strong>+ New routine</strong> or create <code>~/.claude/scheduled-tasks/&lt;name&gt;/SKILL.md</code> manually.</p>`
+      : `<ul class="list" data-search-target="routines" style="list-style: none; padding: 0;">${local
+          .map((rt) => {
+            const cad = rt.cadenceHint ? `<span class="tag">${escapeHtml(rt.cadenceHint)}</span>` : '';
+            const sizeKb = (rt.bodyBytes / 1024).toFixed(1);
+            return `<li data-search-text="${escapeHtml((rt.name + ' ' + rt.description).toLowerCase())}">
+              <div class="watch-card" style="display: block;">
+                <div class="row">
+                  <a class="left link" data-open-file="${escapeHtml(rt.filePath)}" title="${escapeHtml(rt.filePath)}"><strong>${escapeHtml(rt.name)}</strong></a>
+                  <span class="right">${cad}<span class="tag">${sizeKb} KB</span></span>
+                </div>
+                <div class="note-excerpt">${escapeHtml(rt.description || 'No description.')}</div>
+                <div style="margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 10px;">
+                  edited ${fmtAge(rt.mtimeMs)} ·
+                  <a class="link" data-open-file="${escapeHtml(rt.filePath)}">open SKILL.md</a> ·
+                  <a class="link" data-reveal="${escapeHtml(rt.dirPath)}">reveal in OS</a> ·
+                  <button class="rec-action" data-run-routine="${escapeHtml(rt.name)}" title="Open a terminal that pipes the SKILL.md into a fresh claude session">▶ Run now</button>
+                </div>
+              </div>
+            </li>`;
+          })
+          .join('')}</ul>`;
+
+    const cloudBlock = r.cloudEnabled
+      ? `<div class="watch-card" style="display: block;">
+          <div class="row">
+            <span class="left"><strong>Cloud routines</strong></span>
+            <span class="right"><span class="tag tag-used">opt-in enabled</span></span>
+          </div>
+          <div class="note-excerpt">Cloud routines (scheduled remote agents) are managed in the Claude desktop app and on claude.ai. Cockpit can't read their state — Anthropic doesn't expose a routines API to extensions yet. Manage them directly:</div>
+          <div style="margin-top: 6px;">
+            <button class="office-btn" data-open-url="${escapeHtml(r.cloudUrl)}">Open Routines in Claude.ai ↗</button>
+          </div>
+        </div>`
+      : `<div class="watch-card" style="display: block;">
+          <div class="row">
+            <span class="left"><strong>Cloud routines</strong></span>
+            <span class="right"><span class="tag">opt-in disabled</span></span>
+          </div>
+          <div class="note-excerpt">Scheduled remote agents that run on Anthropic infrastructure (managed via the Claude desktop app and claude.ai). Cockpit's privacy stance is local-only by default — enable <code>claudeCockpit.cloudRoutines.enabled</code> in settings to surface a deep-link to manage them.</div>
+        </div>`;
+
+    return `
+      <div class="row">
+        <h2 class="left">Routines <span class="cost-rate">${local.length} local</span></h2>
+        <span class="right">${newRoutineBtn}</span>
+      </div>
+      <p class="empty" style="font-size: 11px; margin-bottom: 8px;">Routines = scheduled Claude Code runs. Local routines live as <code>SKILL.md</code> files under <code>~/.claude/scheduled-tasks/</code>. Cloud routines live in your Anthropic account.</p>
+
+      <h3 class="sub-h">Local <span class="cost-rate">${local.length}</span></h3>
+      ${local.length ? `<input type="search" class="search" data-search="routines" placeholder="Filter routines…" />` : ''}
+      ${localBlock}
+
+      <h3 class="sub-h">Cloud</h3>
+      ${cloudBlock}
+    `;
   }
 
   function rtkSection(snap) {
@@ -1293,6 +1462,7 @@
       { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
       { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
+      { id: 'routines', label: `Routines (${((snap.routines || {}).local || []).length})` },
       { id: 'chat', label: chatLabel },
       { id: 'search', label: 'Search' },
       { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
@@ -1303,40 +1473,600 @@
     ];
   }
 
-  function fullTabBar(snap) {
+  // ===========================================================================
+  // Component registry — every reusable widget is addressable by id so the
+  // Custom tab can compose any combination of them. category groups them in
+  // the picker UI; requiresCwd hides components that need an active session.
+  // ===========================================================================
+  const COMPONENTS = {
+    greeting:        { label: 'Greeting',           category: 'Now',      requiresCwd: false, render: (s) => greetingSection(s) },
+    notifications:   { label: 'Notifications',      category: 'Now',      requiresCwd: false, render: (s) => notificationsSection(s) },
+    inbox:           { label: 'Inbox',              category: 'Now',      requiresCwd: false, render: (s) => inboxSection(s) },
+    statsGrid:       { label: 'Stats grid',         category: 'Now',      requiresCwd: false, render: (s) => statsGridSection(s) },
+    pilot:           { label: 'PILOT card',         category: 'Now',      requiresCwd: true,  render: (s) => pilotSection(s) },
+    quickActions:    { label: 'Quick actions',      category: 'Now',      requiresCwd: false, render: (s) => quickActionsSection(s) },
+    plans:           { label: 'Plans',              category: 'Now',      requiresCwd: true,  render: (s) => plansSection(s) },
+    tokens:          { label: 'Tokens',             category: 'Session',  requiresCwd: true,  render: (s) => sessionTokensFragment(s) },
+    heatmap:         { label: 'Activity heatmap',   category: 'Session',  requiresCwd: false, render: (s) => heatmapSection(s) },
+    contextFill:     { label: 'Context fill',       category: 'Session',  requiresCwd: true,  render: (s) => contextFillSection(s.stats) },
+    cost:            { label: 'Cost',               category: 'Session',  requiresCwd: true,  render: (s) => costSection(s.stats) },
+    costByTool:      { label: 'Cost by tool',       category: 'Session',  requiresCwd: true,  render: (s) => costByToolSection(s) },
+    budget:          { label: 'Budget caps',        category: 'Session',  requiresCwd: false, render: (s) => budgetSection(s) },
+    sessionMeta:     { label: 'Session metadata',   category: 'Session',  requiresCwd: true,  render: (s) => sessionMetaFragment(s) },
+    claudeMd:        { label: 'CLAUDE.md stack',    category: 'Session',  requiresCwd: true,  render: (s) => claudeMdSection(s) },
+    toolHistogram:   { label: 'Tool histogram',     category: 'Session',  requiresCwd: true,  render: (s) => toolHistogramSection(s.stats) },
+    subAgents:       { label: 'Sub-agents',         category: 'Session',  requiresCwd: true,  render: (s) => subAgentsSection(s.stats) },
+    toolHistory:     { label: 'Tool decisions',     category: 'Session',  requiresCwd: true,  render: (s) => toolHistorySection(s.stats) },
+    activityFeed:    { label: 'Activity feed',      category: 'Session',  requiresCwd: true,  render: (s) => activityFeedSection(s.stats) },
+    filesTouched:    { label: 'Files touched',      category: 'Session',  requiresCwd: true,  render: (s) => filesTouchedFragment(s) },
+    today:           { label: 'Today',              category: 'Now',      requiresCwd: false, render: (s) => todaySection(s) },
+    recommendations: { label: 'Recommendations',    category: 'Now',      requiresCwd: false, render: (s) => recommendationsSection(s) },
+    watchtower:      { label: 'Watchtower',         category: 'Cross',    requiresCwd: false, render: (s) => watchtowerSection(s) },
+    macHealth:       { label: 'Mac health',         category: 'System',   requiresCwd: false, render: (s) => macHealthSection(s) },
+    appUsage:        { label: 'App usage',          category: 'System',   requiresCwd: false, render: (s) => appUsageSection(s) },
+    agents:          { label: 'Agents',             category: 'Cross',    requiresCwd: false, render: (s) => agentsSection(s) },
+    routines:        { label: 'Routines',           category: 'Cross',    requiresCwd: false, render: (s) => routinesSection(s) },
+    discover:        { label: 'Discover (GH+RSS)',  category: 'Cross',    requiresCwd: false, render: (s) => discoverSection(s) },
+    chatExport:      { label: 'Chat export',        category: 'Cross',    requiresCwd: false, render: (s) => chatExportSection(s) },
+    obsidian:        { label: 'Obsidian',           category: 'Cross',    requiresCwd: false, render: (s) => obsidianSection(s) },
+    memory:          { label: 'Memory',             category: 'Memory',   requiresCwd: true,  render: (s) => memorySection(s) },
+    prompts:         { label: 'Prompts',            category: 'Memory',   requiresCwd: false, render: (s) => promptsSection(s) },
+    skills:          { label: 'Skills',             category: 'Memory',   requiresCwd: false, render: (s) => skillsSection(s) },
+    projects:        { label: 'Projects',           category: 'Cross',    requiresCwd: false, render: (s) => projectsSection(s) },
+    files:           { label: 'Files',              category: 'Memory',   requiresCwd: true,  render: (s) => filesSection(s) },
+    rtk:             { label: 'RTK token killer',   category: 'Config',   requiresCwd: false, render: (s) => rtkSection(s) },
+    tunnels:         { label: 'Tunnels',            category: 'Config',   requiresCwd: false, render: (s) => tunnelsSection(s) },
+    usageDashboard:  { label: 'Usage dashboard',    category: 'Config',   requiresCwd: false, render: (s) => usageDashboardSection(s) },
+    office:          { label: 'Office visualizer',  category: 'Config',   requiresCwd: false, render: (s) => officeSection(s) },
+    settings:        { label: 'Global settings',    category: 'Config',   requiresCwd: false, render: (s) => settingsSection(s) },
+    diskUsage:       { label: 'Disk usage',         category: 'Config',   requiresCwd: false, render: (s) => diskUsageSection(s) },
+  };
+
+  // Fragments used as components but not standalone sections — they get
+  // rendered as HTML snippets stitched into the active session view.
+  function sessionTokensFragment(snap) {
+    const s = snap.stats;
+    return `
+      <div class="tokens-header">
+        <h2>Tokens</h2>
+        ${sparklineSvg(s.sparkline)}
+      </div>
+      <div class="tokens">
+        <div class="token-card"><div class="label">Total</div><div class="value">${escapeHtml(s.totalTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Output</div><div class="value">${escapeHtml(s.outputTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Cache read</div><div class="value">${escapeHtml(s.cacheReadTokensFormatted)}</div></div>
+        <div class="token-card"><div class="label">Cache write</div><div class="value">${escapeHtml(s.cacheCreationTokensFormatted)}</div></div>
+      </div>
+    `;
+  }
+
+  function sessionMetaFragment(snap) {
+    const s = snap.stats;
+    const sessionShort = s.sessionId ? s.sessionId.slice(0, 8) : '—';
+    return `
+      <h2>Session</h2>
+      <div class="kv">
+        <span class="k">ID</span><span class="v">${escapeHtml(sessionShort)}</span>
+        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>
+        <span class="k">Messages</span><span class="v">${s.messageCount}</span>
+        <span class="k">Tool calls</span><span class="v">${s.toolCallCount}</span>
+        <span class="k">Last activity</span><span class="v">${escapeHtml(s.lastActivityAt ?? '—')}</span>
+      </div>
+    `;
+  }
+
+  function filesTouchedFragment(snap) {
+    const s = snap.stats;
+    const items = s.filesTouched.length
+      ? s.filesTouched
+          .slice(0, 50)
+          .map(
+            (f) => `<li>
+              <div class="row">
+                <a class="left link" data-file="${escapeHtml(f.filePath)}" title="${escapeHtml(f.filePath)}">${escapeHtml(basename(f.filePath))}</a>
+                <span class="right"><span class="tag">${escapeHtml(f.tool)}</span>${f.count}×</span>
+              </div>
+            </li>`,
+          )
+          .join('')
+      : '<li><span class="empty">No file edits yet.</span></li>';
+    return `
+      <h2>Files touched (${s.filesTouched.length})</h2>
+      <ul class="list">${items}</ul>
+    `;
+  }
+
+  // ===========================================================================
+  // Tab catalogue — maps tab id to label-fn + body composer. The user can
+  // hide any non-pinned tab via the customize panel.
+  // ===========================================================================
+  const PINNED_TABS = ['custom', 'now', 'help'];
+  const DEFAULT_CUSTOM_COMPONENTS = ['greeting', 'inbox', 'statsGrid', 'quickActions', 'tokens', 'cost', 'routines'];
+
+  function tabCatalogue(snap) {
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
       : 'Chat ◌';
     const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
+    // requiresCwd: tab is most useful (or only useful) when an active Claude
+    // Code session exists for the open folder. Surface this so users can
+    // filter / understand at a glance.
     return [
-      { id: 'now', label: 'Now' },
-      { id: 'recs', label: recsLabel(snap) },
-      { id: 'mac', label: macLabel },
-      { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
-      { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
-      { id: 'chat', label: chatLabel },
-      { id: 'search', label: 'Search' },
-      { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
-      { id: 'memory', label: `Memory (${snap.memory.length})` },
-      { id: 'prompts', label: `Prompts (${(snap.prompts || []).length})` },
-      { id: 'skills', label: `Skills (${snap.skills.length})` },
-      { id: 'projects', label: `Projects (${snap.projects.length})` },
-      { id: 'files', label: 'Files' },
-      { id: 'config', label: 'Config' },
-      { id: 'help', label: '? Help' },
+      { id: 'custom',     label: 'Custom',                                                            pinned: true,  requiresCwd: false, hint: 'User-composed dashboard' },
+      { id: 'now',        label: 'Now',                                                               pinned: true,  requiresCwd: true,  hint: 'Active session — tokens, cost, files, tools' },
+      { id: 'recs',       label: recsLabel(snap),                                                     pinned: false, requiresCwd: false, hint: 'Recommendations across your setup' },
+      { id: 'mac',        label: macLabel,                                                            pinned: false, requiresCwd: false, hint: 'macOS system health' },
+      { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})`,                            pinned: false, requiresCwd: false, hint: 'Every Claude session in the last hour' },
+      { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
+      { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
+      { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
+      { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
+      { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
+      { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
+      { id: 'memory',     label: `Memory (${snap.memory.length})`,                                    pinned: false, requiresCwd: true,  hint: 'Per-project memory entries' },
+      { id: 'prompts',    label: `Prompts (${(snap.prompts || []).length})`,                          pinned: false, requiresCwd: false, hint: 'Personal prompt library' },
+      { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
+      { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
+      { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
+      { id: 'config',     label: 'Config',                                                            pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins' },
+      { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
+  }
+
+  function getEnabledTabIds(snap) {
+    const prefs = (snap && snap.userPrefs) || {};
+    const cat = tabCatalogue(snap);
+    if (Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length) {
+      const set = new Set(prefs.enabledTabs);
+      return cat.filter((t) => t.pinned || set.has(t.id));
+    }
+    // First-launch default: every tab visible (preserves prior UX).
+    return cat;
+  }
+
+  function visibleTabBar(snap) {
+    const hasCwd = !!snap.cwd;
+    return getEnabledTabIds(snap).map(({ id, label, requiresCwd, hint }) => ({
+      id,
+      label,
+      requiresCwd: !!requiresCwd,
+      dim: !!requiresCwd && !hasCwd,
+      hint,
+    }));
+  }
+
+  function getCustomComponentIds(snap) {
+    const prefs = (snap && snap.userPrefs) || {};
+    if (Array.isArray(prefs.customComponents) && prefs.customComponents.length) {
+      return prefs.customComponents.filter((id) => COMPONENTS[id]);
+    }
+    return DEFAULT_CUSTOM_COMPONENTS.filter((id) => COMPONENTS[id]);
+  }
+
+  function customTabBody(snap) {
+    const ids = getCustomComponentIds(snap);
+    const hasCwd = !!snap.cwd;
+    const blocked = [];
+    const rendered = ids
+      .map((id) => {
+        const c = COMPONENTS[id];
+        if (!c) return '';
+        if (c.requiresCwd && !hasCwd) {
+          blocked.push(c.label);
+          return '';
+        }
+        try {
+          return c.render(snap) || '';
+        } catch (err) {
+          return `<p class="empty">Failed to render <code>${escapeHtml(id)}</code>: ${escapeHtml(String(err))}</p>`;
+        }
+      })
+      .join('\n');
+    const blockedNote = blocked.length
+      ? `<p class="empty" style="font-size: 11px;">Hidden until a Claude Code session is active in this folder: ${blocked.map((b) => escapeHtml(b)).join(', ')}.</p>`
+      : '';
+    const empty = !rendered.trim()
+      ? `<p class="empty">No components selected. Click <strong>Customize</strong> in the header to pick widgets for this tab.</p>`
+      : '';
+    return `${customizeHint(snap)}${empty}${rendered}${blockedNote}`;
+  }
+
+  function customizeHint(snap) {
+    const ids = getCustomComponentIds(snap);
+    return `
+      <div class="customize-hint">
+        <span><strong>Custom</strong> · ${ids.length} widget${ids.length === 1 ? '' : 's'}</span>
+        <button class="office-btn" data-action="open-customize">Customize ⚙</button>
+      </div>
+    `;
+  }
+
+  function customizePanel(snap) {
+    const customSet = new Set(getCustomComponentIds(snap));
+    const tabSet = new Set(getEnabledTabIds(snap).map((t) => t.id));
+    const cat = tabCatalogue(snap);
+    const themePref = ((snap.userPrefs || {}).theme) || 'auto';
+
+    const compsByCat = {};
+    for (const [id, c] of Object.entries(COMPONENTS)) {
+      if (!compsByCat[c.category]) compsByCat[c.category] = [];
+      compsByCat[c.category].push({ id, ...c });
+    }
+    const compHtml = Object.entries(compsByCat)
+      .map(
+        ([catName, items]) => `
+        <h3 class="sub-h">${escapeHtml(catName)}</h3>
+        <div class="comp-grid">
+          ${items
+            .map(
+              (c) => `<label class="comp-toggle ${customSet.has(c.id) ? 'on' : ''}">
+                <input type="checkbox" data-component-toggle="${escapeHtml(c.id)}" ${customSet.has(c.id) ? 'checked' : ''} />
+                <span class="comp-label">${escapeHtml(c.label)}</span>
+                ${c.requiresCwd ? '<span class="tag" title="Requires active session">cwd</span>' : ''}
+              </label>`,
+            )
+            .join('')}
+        </div>
+      `,
+      )
+      .join('');
+
+    const sessionFilter = ((snap.userPrefs || {}).tabFilter) || 'all';
+    const filteredCat = cat.filter((t) => {
+      if (sessionFilter === 'requires') return t.requiresCwd;
+      if (sessionFilter === 'standalone') return !t.requiresCwd;
+      return true;
+    });
+    const filterChips = `
+      <div class="filter-chips">
+        ${['all', 'requires', 'standalone']
+          .map(
+            (f) => `<button class="filter-chip ${sessionFilter === f ? 'on' : ''}" data-tab-filter="${f}">${
+              f === 'all' ? 'All tabs' : f === 'requires' ? 'Needs session' : 'Standalone'
+            }</button>`,
+          )
+          .join('')}
+      </div>
+    `;
+    const tabHtml = filteredCat
+      .map(
+        (t) => `<label class="comp-toggle ${tabSet.has(t.id) ? 'on' : ''} ${t.pinned ? 'pinned' : ''}" title="${escapeHtml(t.hint || '')}">
+          <input type="checkbox" data-tab-toggle="${escapeHtml(t.id)}" ${tabSet.has(t.id) ? 'checked' : ''} ${t.pinned ? 'disabled' : ''} />
+          <span class="comp-label">${escapeHtml(stripCount(t.label))}</span>
+          ${t.requiresCwd ? '<span class="tag tag-needs-cwd" title="Most useful with an active session">●</span>' : ''}
+          ${t.pinned ? '<span class="tag tag-used">pinned</span>' : ''}
+        </label>`,
+      )
+      .join('');
+
+    return `
+      <div class="customize-panel">
+        <div class="row">
+          <h2 class="left">Customize Cockpit</h2>
+          <button class="office-btn right" data-action="close-customize">Done</button>
+        </div>
+        <p class="empty" style="font-size: 11px;">Pick widgets for the <strong>Custom</strong> tab and choose which tabs are visible. Pinned tabs (Custom, Now, Help) can't be hidden.</p>
+
+        <h3 class="sub-h">Theme</h3>
+        <div class="theme-toggle">
+          ${['auto', 'dark', 'light']
+            .map(
+              (t) => `<label class="comp-toggle ${themePref === t ? 'on' : ''}">
+                <input type="radio" name="theme" data-theme-set="${t}" ${themePref === t ? 'checked' : ''} />
+                <span class="comp-label">${t === 'auto' ? 'Auto (follow VSCode)' : t.charAt(0).toUpperCase() + t.slice(1)}</span>
+              </label>`,
+            )
+            .join('')}
+        </div>
+
+        <h3 class="sub-h">Visible tabs</h3>
+        ${filterChips}
+        <div class="comp-grid">${tabHtml}</div>
+
+        <h3 class="sub-h">Custom-tab widgets</h3>
+        ${compHtml}
+      </div>
+    `;
+  }
+
+  function stripCount(label) {
+    return String(label).replace(/\s*\(\d+\)\s*$/, '').replace(/\s*◌\s*$/, '');
+  }
+
+  // ===========================================================================
+  // Global search — builds a flat index from the current snapshot so the user
+  // can find anything without knowing which tab it lives in.
+  // ===========================================================================
+  const SEARCH_TYPES = [
+    { id: 'all',      label: 'All' },
+    { id: 'tab',      label: 'Tabs' },
+    { id: 'widget',   label: 'Widgets' },
+    { id: 'memory',   label: 'Memory' },
+    { id: 'skill',    label: 'Skills' },
+    { id: 'prompt',   label: 'Prompts' },
+    { id: 'agent',    label: 'Agents' },
+    { id: 'routine',  label: 'Routines' },
+    { id: 'project',  label: 'Projects' },
+    { id: 'plan',     label: 'Plans' },
+    { id: 'tunnel',   label: 'Tunnels' },
+    { id: 'setting',  label: 'Settings' },
+  ];
+
+  // Each entry: { type, title, subtitle, tab, action, payload, keywords }
+  function buildSearchIndex(snap) {
+    const out = [];
+    if (!snap) return out;
+
+    for (const t of tabCatalogue(snap)) {
+      out.push({
+        type: 'tab',
+        title: stripCount(t.label),
+        subtitle: t.hint || '',
+        tab: t.id,
+        action: 'goto-tab',
+        payload: t.id,
+        keywords: `${t.id} ${t.label} ${t.hint || ''}`.toLowerCase(),
+        requiresCwd: t.requiresCwd,
+      });
+    }
+
+    for (const [id, c] of Object.entries(COMPONENTS)) {
+      out.push({
+        type: 'widget',
+        title: c.label,
+        subtitle: `Category: ${c.category}${c.requiresCwd ? ' · needs session' : ''}`,
+        tab: 'custom',
+        action: 'goto-customize',
+        payload: id,
+        keywords: `${id} ${c.label} ${c.category}`.toLowerCase(),
+        requiresCwd: c.requiresCwd,
+      });
+    }
+
+    for (const m of (snap.memory || [])) {
+      out.push({
+        type: 'memory',
+        title: m.title || m.filename,
+        subtitle: `${m.filename}${m.isStale ? ' · stale' : ''}`,
+        tab: 'memory',
+        action: 'open-memory-file',
+        payload: m.filename,
+        keywords: `${m.title || ''} ${m.filename} ${(m.preview || '').slice(0, 200)}`.toLowerCase(),
+      });
+    }
+
+    for (const s of (snap.skills || [])) {
+      out.push({
+        type: 'skill',
+        title: `/${s.name}`,
+        subtitle: s.description || '',
+        tab: 'skills',
+        action: 'copy-skill',
+        payload: s.name,
+        keywords: `${s.name} ${s.description || ''}`.toLowerCase(),
+      });
+    }
+
+    for (const p of (snap.prompts || [])) {
+      out.push({
+        type: 'prompt',
+        title: p.title,
+        subtitle: (p.body || '').slice(0, 120),
+        tab: 'prompts',
+        action: 'use-prompt',
+        payload: p.id,
+        promptBody: p.body,
+        keywords: `${p.title} ${(p.body || '').slice(0, 200)}`.toLowerCase(),
+      });
+    }
+
+    for (const a of (snap.agents || [])) {
+      out.push({
+        type: 'agent',
+        title: a.name,
+        subtitle: `${a.scope}${a.model ? ' · ' + a.model : ''} — ${a.description || ''}`,
+        tab: 'agents',
+        action: 'open-file',
+        payload: a.filePath,
+        keywords: `${a.name} ${a.description || ''} ${a.scope} ${a.model || ''}`.toLowerCase(),
+      });
+    }
+
+    for (const rt of ((snap.routines || {}).local || [])) {
+      out.push({
+        type: 'routine',
+        title: rt.name,
+        subtitle: `${rt.cadenceHint ? rt.cadenceHint + ' · ' : ''}${rt.description || ''}`,
+        tab: 'routines',
+        action: 'open-file',
+        payload: rt.filePath,
+        keywords: `${rt.name} ${rt.description || ''} ${rt.cadenceHint || ''}`.toLowerCase(),
+      });
+    }
+
+    for (const p of (snap.projects || [])) {
+      out.push({
+        type: 'project',
+        title: p.decodedPath ? p.decodedPath.split('/').slice(-1)[0] : p.dirName,
+        subtitle: p.decodedPath || p.dirName,
+        tab: 'projects',
+        action: 'open-project',
+        payload: p.decodedPath,
+        keywords: `${p.decodedPath || ''} ${p.dirName || ''}`.toLowerCase(),
+      });
+    }
+
+    for (const pl of (snap.plans || [])) {
+      out.push({
+        type: 'plan',
+        title: pl.name,
+        subtitle: `${pl.path}${typeof pl.checkedCount === 'number' ? ` · ${pl.checkedCount}/${pl.totalCount} done` : ''}`,
+        tab: 'now',
+        action: 'open-file',
+        payload: pl.path,
+        keywords: `${pl.name} ${pl.path}`.toLowerCase(),
+      });
+    }
+
+    for (const t of (snap.tunnels || [])) {
+      out.push({
+        type: 'tunnel',
+        title: t.name,
+        subtitle: `${t.hostname || '—'} → ${t.service || '—'}`,
+        tab: 'config',
+        action: 'open-file',
+        payload: t.configPath,
+        keywords: `${t.name} ${t.hostname || ''} ${t.service || ''}`.toLowerCase(),
+      });
+    }
+
+    const settings = snap.settings || {};
+    if (settings.hooksCount) {
+      out.push({ type: 'setting', title: `${settings.hooksCount} hooks configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'hooks settings.json' });
+    }
+    if (settings.mcpServerCount) {
+      out.push({ type: 'setting', title: `${settings.mcpServerCount} MCP servers configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'mcp servers settings' });
+    }
+    if (settings.pluginCount) {
+      out.push({ type: 'setting', title: `${settings.pluginCount} plugins enabled`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'plugins settings' });
+    }
+
+    return out;
+  }
+
+  function searchSnapshot(snap, query, typeFilter) {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return [];
+    const idx = buildSearchIndex(snap);
+    const filtered = idx.filter((entry) => {
+      if (typeFilter && typeFilter !== 'all' && entry.type !== typeFilter) return false;
+      return entry.keywords.includes(q);
+    });
+    // Stable rank: title-prefix match first, then anywhere.
+    filtered.sort((a, b) => {
+      const ap = a.title.toLowerCase().startsWith(q) ? 0 : 1;
+      const bp = b.title.toLowerCase().startsWith(q) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return a.title.localeCompare(b.title);
+    });
+    return filtered.slice(0, 100);
+  }
+
+  function getSearchState() {
+    const s = vscode.getState() || {};
+    return {
+      query: s.searchQuery || '',
+      typeFilter: s.searchTypeFilter || 'all',
+      open: !!s.searchOpen,
+    };
+  }
+
+  function setSearchState(patch) {
+    const cur = vscode.getState() || {};
+    vscode.setState({ ...cur, ...patch });
+  }
+
+  function searchOverlay(snap) {
+    const { query, typeFilter } = getSearchState();
+    const results = searchSnapshot(snap, query, typeFilter);
+    const counts = {};
+    for (const r of results) counts[r.type] = (counts[r.type] || 0) + 1;
+
+    const chips = SEARCH_TYPES.map((t) => {
+      const n = t.id === 'all' ? results.length : counts[t.id] || 0;
+      return `<button class="filter-chip ${typeFilter === t.id ? 'on' : ''}" data-search-type="${t.id}">${escapeHtml(t.label)}${
+        t.id === 'all' || n ? ` <span class="chip-count">${n}</span>` : ''
+      }</button>`;
+    }).join('');
+
+    const renderHit = (r) => {
+      const typeBadge = `<span class="tag">${escapeHtml(r.type)}</span>`;
+      const cwdBadge = r.requiresCwd ? '<span class="tag tag-needs-cwd" title="Most useful with active session">●</span>' : '';
+      return `<li>
+        <button class="search-hit"
+          data-search-action="${escapeHtml(r.action)}"
+          data-search-payload="${escapeHtml(r.payload || '')}"
+          data-search-tab="${escapeHtml(r.tab || '')}"
+          data-search-prompt-body="${escapeHtml(r.promptBody || '')}"
+          title="${escapeHtml((r.subtitle || '') + ' — opens ' + (r.tab || ''))}">
+          <div class="row">
+            <span class="left"><strong>${highlight(r.title, query)}</strong></span>
+            <span class="right">${cwdBadge}${typeBadge}</span>
+          </div>
+          ${r.subtitle ? `<div class="note-excerpt">${highlight(r.subtitle, query)}</div>` : ''}
+          ${r.tab ? `<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">→ ${escapeHtml(stripCount((tabCatalogue(snap).find((t) => t.id === r.tab) || {}).label || r.tab))}</div>` : ''}
+        </button>
+      </li>`;
+    };
+
+    const body = !query.trim()
+      ? `<p class="empty">Type to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings.</p>`
+      : !results.length
+      ? `<p class="empty">No matches for <strong>${escapeHtml(query)}</strong>.</p>`
+      : `<ul class="list search-results">${results.map(renderHit).join('')}</ul>`;
+
+    return `
+      <div class="search-overlay">
+        <div class="row">
+          <h2 class="left">Search</h2>
+          <button class="office-btn right" data-action="close-search">Close</button>
+        </div>
+        <p class="empty" style="font-size: 11px;">${results.length ? results.length + ' result' + (results.length === 1 ? '' : 's') : ''}${query.trim() ? ' for "' + escapeHtml(query) + '"' : ''}</p>
+        <div class="filter-chips">${chips}</div>
+        ${body}
+      </div>
+    `;
+  }
+
+  function headerStrip(snap) {
+    const themePref = ((snap.userPrefs || {}).theme) || 'auto';
+    const { query } = getSearchState();
+    return `
+      <header class="cockpit-header" data-theme-pref="${escapeHtml(themePref)}">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">◐</span>
+          <div class="brand-text">
+            <strong class="brand-title">Claude Cockpit</strong>
+            <span class="brand-tagline">Personal-OS HUD for Claude Code · 100% local</span>
+          </div>
+        </div>
+        <div class="header-search">
+          <input type="search" class="global-search-input" placeholder="Search anything…" value="${escapeHtml(query)}" data-global-search />
+          ${query ? '<button class="header-btn header-btn-x" data-action="clear-search" title="Clear search">✕</button>' : ''}
+        </div>
+        <div class="header-actions">
+          <button class="header-btn" data-action="open-customize" title="Customize widgets, tabs, theme">⚙</button>
+          <button class="header-btn" data-action="goto-help" title="Help">?</button>
+        </div>
+      </header>
+    `;
   }
 
   function renderTabBar(tabs, activeTab) {
     return `
       <nav class="tabs" role="tablist">
         ${tabs
-          .map(
-            (t) => `<button class="tab ${t.id === activeTab ? 'tab-active' : ''}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}">${escapeHtml(t.label)}</button>`,
-          )
+          .map((t) => {
+            const cls = ['tab'];
+            if (t.id === activeTab) cls.push('tab-active');
+            if (t.dim) cls.push('tab-dim');
+            if (t.requiresCwd) cls.push('tab-needs-cwd');
+            const cwdMark = t.requiresCwd
+              ? '<span class="tab-cwd-mark" title="Most useful with an active Claude Code session">●</span>'
+              : '';
+            const title = t.hint
+              ? `title="${escapeHtml(t.hint + (t.requiresCwd ? ' — needs an active session' : ''))}"`
+              : '';
+            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" ${title}>${cwdMark}${escapeHtml(t.label)}</button>`;
+          })
           .join('')}
       </nav>
     `;
+  }
+
+  function applyTheme(snap) {
+    const themePref = ((snap && snap.userPrefs && snap.userPrefs.theme) || 'auto');
+    document.body.setAttribute('data-theme', themePref);
   }
 
   function render(snap) {
@@ -1344,15 +2074,38 @@
       root.innerHTML = '<p class="empty">Loading…</p>';
       return;
     }
+    applyTheme(snap);
+    const header = headerStrip(snap);
+    const state = vscode.getState() || {};
+    if (state.searchOpen || (state.searchQuery || '').trim()) {
+      root.innerHTML = `${header}<div class="tab-panel">${searchOverlay(snap)}</div>`;
+      bindEvents();
+      const inp = root.querySelector('input[data-global-search]');
+      if (inp) {
+        inp.focus();
+        const v = inp.value;
+        inp.setSelectionRange(v.length, v.length);
+      }
+      return;
+    }
+    const customizeOpen = !!state.customizeOpen;
+    if (customizeOpen) {
+      root.innerHTML = `${header}<div class="tab-panel">${customizePanel(snap)}</div>`;
+      bindEvents();
+      return;
+    }
     if (!snap.cwd) {
-      const tabs = emptyTabBar(snap);
-      const activeTab = getActiveTab();
+      const tabs = visibleTabBar(snap);
+      const activeTab = ensureValidActiveTab(getActiveTab(), tabs);
       const tabBar = renderTabBar(tabs, activeTab);
       let body = '';
-      if (activeTab === 'recs') body = recommendationsSection(snap);
+      if (activeTab === 'custom') body = customTabBody(snap);
+      else if (activeTab === 'recs') body = recommendationsSection(snap);
       else if (activeTab === 'watchtower') body = watchtowerSection(snap);
       else if (activeTab === 'mac') body = macHealthSection(snap);
       else if (activeTab === 'agents') body = agentsSection(snap);
+      else if (activeTab === 'routines') body = routinesSection(snap);
+      else if (activeTab === 'discover') body = discoverSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
@@ -1371,7 +2124,7 @@
         ${snap.watchtower.length ? watchtowerSection(snap) : ''}
         ${snap.today.sessions ? todaySection(snap) : ''}
       `;
-      root.innerHTML = `${tabBar}<div class="tab-panel">${body}</div>`;
+      root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
       bindEvents();
       return;
     }
@@ -1423,12 +2176,14 @@
       <ul class="list">${fileItems}</ul>
     `;
 
-    const tabs = fullTabBar(snap);
-    const activeTab = getActiveTab();
+    const tabs = visibleTabBar(snap);
+    const activeTab = ensureValidActiveTab(getActiveTab(), tabs);
     const tabBar = renderTabBar(tabs, activeTab);
 
     let body = '';
-    if (activeTab === 'now') {
+    if (activeTab === 'custom') {
+      body = customTabBody(snap);
+    } else if (activeTab === 'now') {
       body = `
         ${greetingSection(snap)}
         ${notificationsSection(snap)}
@@ -1478,6 +2233,10 @@
       body = filesSection(snap);
     } else if (activeTab === 'agents') {
       body = agentsSection(snap);
+    } else if (activeTab === 'routines') {
+      body = routinesSection(snap);
+    } else if (activeTab === 'discover') {
+      body = discoverSection(snap);
     } else if (activeTab === 'mac') {
       body = macHealthSection(snap);
     } else if (activeTab === 'help') {
@@ -1494,17 +2253,37 @@
       `;
     }
 
-    root.innerHTML = `${tabBar}<div class="tab-panel">${body}</div>`;
+    root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
     bindEvents();
+  }
+
+  function ensureValidActiveTab(active, tabs) {
+    if (tabs.some((t) => t.id === active)) return active;
+    return (tabs[0] && tabs[0].id) || 'custom';
   }
 
   function getActiveTab() {
     const state = vscode.getState() || {};
-    return state.activeTab || 'now';
+    return state.activeTab || 'custom';
   }
 
   function setActiveTab(id) {
-    vscode.setState({ ...(vscode.getState() || {}), activeTab: id });
+    const next = { ...(vscode.getState() || {}), activeTab: id };
+    delete next.customizeOpen;
+    vscode.setState(next);
+  }
+
+  function openCustomize() {
+    vscode.setState({ ...(vscode.getState() || {}), customizeOpen: true });
+  }
+
+  function closeCustomize() {
+    const next = { ...(vscode.getState() || {}), customizeOpen: false };
+    vscode.setState(next);
+  }
+
+  function persistUserPrefs(patch) {
+    vscode.postMessage({ type: 'setUserPrefs', patch });
   }
 
   function bindEvents() {
@@ -1523,6 +2302,182 @@
         if (action === 'refresh') vscode.postMessage({ type: 'refresh' });
         if (action === 'memory') vscode.postMessage({ type: 'openMemory' });
         if (action === 'session') vscode.postMessage({ type: 'openSessionFile' });
+        if (action === 'open-customize') {
+          openCustomize();
+          if (lastSnapshot) render(lastSnapshot);
+        }
+        if (action === 'close-customize') {
+          closeCustomize();
+          if (lastSnapshot) render(lastSnapshot);
+        }
+        if (action === 'goto-help') {
+          setActiveTab('help');
+          if (lastSnapshot) render(lastSnapshot);
+        }
+      });
+    });
+
+    // Customize panel — component picker checkboxes
+    root.querySelectorAll('input[data-component-toggle]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const id = input.getAttribute('data-component-toggle');
+        if (!id || !lastSnapshot) return;
+        const current = getCustomComponentIds(lastSnapshot);
+        let next;
+        if (input.checked) {
+          next = current.includes(id) ? current : [...current, id];
+        } else {
+          next = current.filter((x) => x !== id);
+        }
+        persistUserPrefs({ customComponents: next });
+      });
+    });
+
+    // Customize panel — tab visibility checkboxes
+    root.querySelectorAll('input[data-tab-toggle]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const id = input.getAttribute('data-tab-toggle');
+        if (!id || !lastSnapshot) return;
+        const allTabIds = tabCatalogue(lastSnapshot).map((t) => t.id);
+        const enabledNow = getEnabledTabIds(lastSnapshot).map((t) => t.id);
+        let next;
+        if (input.checked) {
+          next = enabledNow.includes(id) ? enabledNow : [...enabledNow, id];
+        } else {
+          next = enabledNow.filter((x) => x !== id);
+        }
+        // Always ensure pinned ids remain present.
+        for (const t of tabCatalogue(lastSnapshot)) {
+          if (t.pinned && !next.includes(t.id)) next.push(t.id);
+        }
+        // Preserve catalogue order.
+        const ordered = allTabIds.filter((x) => next.includes(x));
+        persistUserPrefs({ enabledTabs: ordered });
+      });
+    });
+
+    // Customize panel — theme radios
+    root.querySelectorAll('input[data-theme-set]').forEach((input) => {
+      input.addEventListener('change', () => {
+        if (!input.checked) return;
+        const v = input.getAttribute('data-theme-set');
+        if (v !== 'auto' && v !== 'dark' && v !== 'light') return;
+        document.body.setAttribute('data-theme', v);
+        persistUserPrefs({ theme: v });
+      });
+    });
+
+    // Customize panel — tab filter chips ("All / Needs session / Standalone")
+    root.querySelectorAll('button[data-tab-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-tab-filter');
+        if (!v) return;
+        persistUserPrefs({ tabFilter: v });
+      });
+    });
+
+    // Global search input — type-to-search with debounce
+    const globalSearchInput = root.querySelector('input[data-global-search]');
+    if (globalSearchInput) {
+      let globalSearchTimer;
+      globalSearchInput.addEventListener('input', () => {
+        clearTimeout(globalSearchTimer);
+        const q = globalSearchInput.value;
+        globalSearchTimer = setTimeout(() => {
+          setSearchState({ searchQuery: q, searchOpen: !!q });
+          if (lastSnapshot) render(lastSnapshot);
+        }, 150);
+      });
+      globalSearchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          setSearchState({ searchQuery: '', searchOpen: false });
+          if (lastSnapshot) render(lastSnapshot);
+        }
+      });
+    }
+
+    // Search-overlay type-filter chips
+    root.querySelectorAll('button[data-search-type]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const t = btn.getAttribute('data-search-type');
+        if (!t) return;
+        setSearchState({ searchTypeFilter: t });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    // Search-result hit handlers
+    root.querySelectorAll('button[data-search-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-search-action');
+        const payload = btn.getAttribute('data-search-payload') || '';
+        const targetTab = btn.getAttribute('data-search-tab') || '';
+        const promptBody = btn.getAttribute('data-search-prompt-body') || '';
+        // Always close the overlay first.
+        setSearchState({ searchOpen: false, searchQuery: '' });
+        if (action === 'goto-tab') {
+          setActiveTab(payload || targetTab);
+        } else if (action === 'goto-customize') {
+          setActiveTab('custom');
+          openCustomize();
+        } else if (action === 'open-memory-file' && payload) {
+          vscode.postMessage({ type: 'openMemoryFile', filename: payload });
+        } else if (action === 'copy-skill' && payload) {
+          vscode.postMessage({ type: 'copySkill', skillName: payload });
+        } else if (action === 'use-prompt' && promptBody) {
+          vscode.postMessage({ type: 'usePrompt', promptBody });
+        } else if (action === 'open-file' && payload) {
+          vscode.postMessage({ type: 'openFile', filePath: payload });
+        } else if (action === 'open-project' && payload) {
+          vscode.postMessage({ type: 'openProject', decodedPath: payload });
+        } else if (targetTab) {
+          setActiveTab(targetTab);
+        }
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    // close-search action (also handled in data-action loop)
+    root.querySelectorAll('button[data-action="clear-search"], button[data-action="close-search"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        setSearchState({ searchQuery: '', searchOpen: false });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    // Routines: new + run
+    root.querySelectorAll('button[data-action="new-routine"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'createRoutine' });
+      });
+    });
+    root.querySelectorAll('button[data-run-routine]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-run-routine');
+        if (name) vscode.postMessage({ type: 'runRoutine', routineName: name });
+      });
+    });
+
+    // Discover: refresh + filter
+    root.querySelectorAll('button[data-discover-window]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const w = btn.getAttribute('data-discover-window');
+        if (!w) return;
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, discoverWindow: w });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-action="discover-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cur = vscode.getState() || {};
+        const w = cur.discoverWindow || 'week';
+        vscode.postMessage({ type: 'fetchDiscover', window: w });
+      });
+    });
+    root.querySelectorAll('button[data-action="enable-discover"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        persistUserPrefs({ discoverEnabled: true });
       });
     });
 

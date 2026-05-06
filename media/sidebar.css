@@ -1175,3 +1175,418 @@ h3.sub-h {
   border-color: var(--vscode-textLink-foreground);
   background: var(--vscode-list-hoverBackground);
 }
+
+/* ===========================================================================
+ * Header strip — logo + tagline + actions, sits above the tab bar.
+ * =========================================================================== */
+.cockpit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px 10px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  margin-bottom: 8px;
+}
+
+.cockpit-header .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cockpit-header .brand-mark {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--vscode-textLink-foreground);
+}
+
+.cockpit-header .brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cockpit-header .brand-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-foreground);
+  letter-spacing: 0.02em;
+}
+
+.cockpit-header .brand-tagline {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.header-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.header-btn:hover {
+  border-color: var(--vscode-textLink-foreground);
+  background: var(--vscode-list-hoverBackground);
+  color: var(--vscode-textLink-foreground);
+}
+
+/* ===========================================================================
+ * Customize panel — picks widgets for Custom tab, toggles tab visibility,
+ * picks theme.
+ * =========================================================================== */
+.customize-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px dashed var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.customize-panel {
+  padding: 4px 0;
+}
+
+.customize-panel .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customize-panel h2 {
+  margin-top: 4px;
+}
+
+.comp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px 6px;
+  margin-bottom: 12px;
+}
+
+.comp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.1s ease, background 0.1s ease;
+}
+
+.comp-toggle:hover {
+  border-color: var(--vscode-textLink-foreground);
+}
+
+.comp-toggle.on {
+  border-color: var(--vscode-textLink-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+
+.comp-toggle.pinned {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.comp-toggle input[type="checkbox"],
+.comp-toggle input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.comp-toggle .comp-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.theme-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+/* ===========================================================================
+ * Theme overrides — applied via [data-theme="light"] / [data-theme="dark"].
+ * "auto" inherits VSCode's theme via --vscode-* vars (the default).
+ * =========================================================================== */
+body[data-theme="light"] {
+  --cockpit-bg: #ffffff;
+  --cockpit-fg: #1f2328;
+  --cockpit-fg-muted: #57606a;
+  --cockpit-border: #d0d7de;
+  --cockpit-card: #f6f8fa;
+  --cockpit-hover: #eaeef2;
+  --cockpit-link: #0969da;
+  background: var(--cockpit-bg);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="light"] h2,
+body[data-theme="light"] .empty,
+body[data-theme="light"] .kv .k {
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="light"] .token-card,
+body[data-theme="light"] .watch-card,
+body[data-theme="light"] .comp-toggle,
+body[data-theme="light"] .customize-hint {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+}
+
+body[data-theme="light"] .header-btn,
+body[data-theme="light"] .office-btn,
+body[data-theme="light"] .rec-action {
+  border-color: var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="light"] .header-btn:hover,
+body[data-theme="light"] .office-btn:hover,
+body[data-theme="light"] .rec-action:hover,
+body[data-theme="light"] .comp-toggle:hover,
+body[data-theme="light"] .comp-toggle.on {
+  background: var(--cockpit-hover);
+  border-color: var(--cockpit-link);
+  color: var(--cockpit-link);
+}
+
+body[data-theme="light"] .cockpit-header {
+  border-bottom-color: var(--cockpit-border);
+}
+
+body[data-theme="light"] .brand-title { color: var(--cockpit-fg); }
+body[data-theme="light"] .brand-tagline { color: var(--cockpit-fg-muted); }
+body[data-theme="light"] .link,
+body[data-theme="light"] a.link { color: var(--cockpit-link); }
+
+body[data-theme="light"] .tab {
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="light"] .tab.tab-active {
+  color: var(--cockpit-link);
+  border-bottom-color: var(--cockpit-link);
+}
+
+body[data-theme="dark"] {
+  --cockpit-bg: #0d1117;
+  --cockpit-fg: #e6edf3;
+  --cockpit-fg-muted: #8d96a0;
+  --cockpit-border: #30363d;
+  --cockpit-card: #161b22;
+  --cockpit-hover: #1f242c;
+  --cockpit-link: #58a6ff;
+  background: var(--cockpit-bg);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="dark"] h2,
+body[data-theme="dark"] .empty,
+body[data-theme="dark"] .kv .k,
+body[data-theme="dark"] .brand-tagline {
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="dark"] .token-card,
+body[data-theme="dark"] .watch-card,
+body[data-theme="dark"] .comp-toggle,
+body[data-theme="dark"] .customize-hint {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+}
+
+/* ===========================================================================
+ * Header search input — sits in the header strip between brand and actions.
+ * =========================================================================== */
+.header-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 60px;
+  max-width: 220px;
+  margin: 0 8px;
+}
+
+.global-search-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+  border-radius: 4px;
+  outline: none;
+}
+
+.global-search-input:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+.header-btn-x {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+/* ===========================================================================
+ * Search overlay — full-tab pane with filter chips + result list.
+ * =========================================================================== */
+.search-overlay {
+  padding: 4px 0;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 10px;
+}
+
+.filter-chip {
+  font: inherit;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 999px;
+  color: var(--vscode-foreground);
+  padding: 3px 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-chip:hover {
+  border-color: var(--vscode-textLink-foreground);
+}
+
+.filter-chip.on {
+  border-color: var(--vscode-textLink-foreground);
+  color: var(--vscode-textLink-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+
+.filter-chip .chip-count {
+  font-size: 9px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.search-results {
+  list-style: none;
+  padding: 0;
+}
+
+.search-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  color: var(--vscode-foreground);
+}
+
+.search-hit:hover {
+  border-color: var(--vscode-textLink-foreground);
+  background: var(--vscode-list-hoverBackground);
+}
+
+.search-hit mark {
+  background: var(--vscode-editor-findMatchHighlightBackground, rgba(255, 200, 0, 0.35));
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ===========================================================================
+ * Tab badges — requiresCwd indicator. Small dot before the label.
+ * =========================================================================== */
+.tab-cwd-mark {
+  font-size: 7px;
+  margin-right: 4px;
+  vertical-align: middle;
+  color: var(--vscode-charts-orange, #ffa05a);
+  opacity: 0.8;
+}
+
+.tab-dim {
+  opacity: 0.55;
+}
+
+.tag-needs-cwd {
+  background: rgba(255, 160, 90, 0.18);
+  color: #ffa05a;
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+body[data-theme="light"] .global-search-input {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="light"] .filter-chip {
+  border-color: var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="light"] .filter-chip:hover,
+body[data-theme="light"] .filter-chip.on {
+  border-color: var(--cockpit-link);
+  color: var(--cockpit-link);
+  background: var(--cockpit-hover);
+}
+
+body[data-theme="light"] .search-hit {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="light"] .search-hit:hover {
+  border-color: var(--cockpit-link);
+  background: var(--cockpit-hover);
+}
