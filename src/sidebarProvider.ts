@@ -506,7 +506,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     const hits = globalSessionSearch(query, 30);
     this.lastSearch = { query, hits };
     this.refresh();
-    this.setActiveTabFromHost('search');
+    // 'search' is a sub-view of the new 'history' tab; the webview migrates
+    // legacy 'search' to 'history' but we set history+sub-view explicitly so
+    // the user lands on Session search, not Chat exports.
+    this.view?.webview.postMessage({ type: 'setHistorySubview', subview: 'search' });
+    this.setActiveTabFromHost('history');
   }
 
   private watchActive(): void {

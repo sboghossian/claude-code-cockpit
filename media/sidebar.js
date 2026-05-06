@@ -1991,6 +1991,19 @@
     `;
   }
 
+  function historySection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.historyView === 'chat' ? 'chat' : 'search';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'search' ? 'sub-tab-active' : ''}" data-history-view="search">Session search</button>
+        <button class="sub-tab ${view === 'chat' ? 'sub-tab-active' : ''}" data-history-view="chat">claude.ai exports</button>
+      </div>
+    `;
+    const body = view === 'chat' ? chatExportSection(snap) : searchSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function timelineSection(snap) {
     const state = vscode.getState() || {};
     const view = state.timelineView === 'changelog' ? 'changelog' : 'roadmap';
@@ -2328,8 +2341,7 @@
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
       { id: 'timeline',   label: `Timeline${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Roadmap (planned) + Changelog (shipped) — what happened and what is next' },
       { id: 'settings',   label: 'Settings',                                                          pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins, dashboards' },
-      { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
-      { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
+      { id: 'history',    label: chatLabel.replace('Chat', 'History'),                                pinned: false, requiresCwd: false, hint: 'Search every Claude session + browse claude.ai chat exports' },
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
       { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
@@ -2349,6 +2361,8 @@
     config: 'settings',
     roadmap: 'timeline',
     changelog: 'timeline',
+    chat: 'history',
+    search: 'history',
   };
 
   function migrateEnabledTabIds(ids) {
@@ -2874,8 +2888,7 @@
       else if (activeTab === 'discover') body = discoverSection(snap);
       else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') body = timelineSection(snap);
       else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') body = unifiedSettingsSection(snap);
-      else if (activeTab === 'chat') body = chatExportSection(snap);
-      else if (activeTab === 'search') body = searchSection(snap);
+      else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') body = historySection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
@@ -2989,10 +3002,8 @@
       body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
     } else if (activeTab === 'office') {
       body = `${officeFloorSection(snap)}${officeSection(snap)}`;
-    } else if (activeTab === 'chat') {
-      body = chatExportSection(snap);
-    } else if (activeTab === 'search') {
-      body = searchSection(snap);
+    } else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') {
+      body = historySection(snap);
     } else if (activeTab === 'obsidian') {
       body = obsidianSection(snap);
     } else if (activeTab === 'memory' || activeTab === 'prompts' || activeTab === 'library') {
@@ -3583,6 +3594,15 @@
       });
     });
 
+    root.querySelectorAll('button[data-history-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-history-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, historyView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
     root.querySelectorAll('select[data-prompt-cat-id]').forEach((sel) => {
       sel.addEventListener('change', () => {
         const id = sel.getAttribute('data-prompt-cat-id');
@@ -3689,6 +3709,9 @@
         selected: new Set((msg.prompts || []).filter((p) => p.occurrences >= 2).map((p) => p.fingerprint)),
       };
       if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'setHistorySubview') {
+      const cur = vscode.getState() || {};
+      vscode.setState({ ...cur, historyView: msg.subview });
     }
   });
 
