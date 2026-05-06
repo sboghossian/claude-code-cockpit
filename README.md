@@ -6,7 +6,7 @@
 
 Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **Customizable**: a header strip with logo + actions sits above a tab bar you control — pick which tabs are visible, build a **Custom** tab from any of 30+ widgets, and switch between auto / dark / light theme.
 
-**Available tabs**: Custom · Now · Mac · Watchtower · Agents · Routines · Discover · Changelog · Manage · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help. The Custom, Now, and Help tabs are pinned; the rest can be hidden via the Customize panel.
+**Available tabs**: Custom · Now · Mac · Watchtower · Agents · Routines · Discover · Roadmap · Changelog · Manage · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help. The Custom, Now, and Help tabs are pinned; the rest can be hidden via the Customize panel.
 
 **Global search** (in the header): type any string to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings — with type-filter chips to narrow results. Click any hit to jump to the right tab.
 
@@ -26,6 +26,7 @@ Read-only. Watches `~/.claude/projects/<your-cwd>/` and renders:
   - **Agents**: your specialist council — agent definitions from `~/.claude/agents/` (global) and `.claude/agents/` (workspace) with description, model, tools
   - **Routines**: scheduled Claude Code runs. Local section reads `~/.claude/scheduled-tasks/<name>/SKILL.md` (name, description, cadence hint inferred from description, last edit, size, click to open or reveal). Each routine gets a **▶ Run now** button that opens a terminal piping the SKILL.md into a fresh `claude` session for on-demand execution. The header **+ New routine** button prompts for a name + description and writes a starter `SKILL.md`. Cloud section is opt-in (`claudeCockpit.cloudRoutines.enabled`) and surfaces a deep-link to manage scheduled remote agents on claude.ai — Cockpit doesn't read cloud-routine state because Anthropic doesn't expose a routines API to extensions yet.
   - **Discover** (opt-in): top trending GitHub projects (filterable by today / this week / this month) and recent RSS notes pulled from your Obsidian vault's `rss/` folder. GitHub fetches `api.github.com` only when you click Refresh; RSS is purely local. Disabled by default — toggle `claudeCockpit.discover.enabled` or click "Enable Discover (opt-in)" inside the tab.
+  - **Roadmap**: mirrors [`roadmap.dashable.dev`](https://roadmap.dashable.dev) inside Cockpit. Lists every project (HAQQ, AI Frameworks, AI Visualization, AI Simulation, Developer Tools, Knowledge Management, Fintech, Meta, etc.) with category filter, stage filter, and live search across name + description + tech stack. Each project card shows emoji, stage badge, description, top tech, next steps, and Open / GitHub buttons. Auto-fetches from `roadmap.dashable.dev` (or `localhost:3777` if you run the roadmap server locally), with a 10-minute disk cache at `~/.claude/.cache/cockpit-roadmap.json`. On by default; opt-out via `claudeCockpit.roadmap.enabled = false` for fully local operation.
   - **Changelog**: renders `CHANGELOG.md` bundled with the extension (per-version dates, notes, deep-link to the matching GitHub release) plus an in-tab update banner if a newer release exists. The header also shows a green **Update available** pill when one is detected.
   - **Manage**: surfaces every key in `~/.claude/settings.json` and `~/.claude/settings.local.json` — hooks, MCP servers, plugins, and any other top-level keys — with **edit** buttons that open the JSON file directly in VSCode. Cockpit never writes settings programmatically; every change goes through the editor so you can review before saving.
   - **Chat**: conversations + memory from claude.ai (parsed from `claude-data-export/`)
@@ -39,7 +40,13 @@ Updates live as Claude works (filesystem watcher + 400ms debounce).
 
 ## Privacy
 
-100% local. No network calls, no telemetry, no analytics. Read-only against `~/.claude/projects/<encoded-cwd>/`. Zero runtime dependencies. Webview runs under a strict CSP that blocks `connect-src` and `form-action`. See [`PRIVACY.md`](./PRIVACY.md).
+Local-first. No telemetry, no analytics, no third-party services. The webview itself runs under a strict CSP that blocks `connect-src` and `form-action`. The extension host makes only **three** bounded outbound calls, all disclosed and configurable:
+
+1. `api.github.com/repos/sboghossian/claude-cockpit/releases/latest` — update check, **on by default** (`claudeCockpit.updateCheck.enabled`).
+2. `api.github.com/search/repositories` — Discover tab's GitHub trending fetch, **off by default** (`claudeCockpit.discover.enabled`), only on Refresh.
+3. `roadmap.dashable.dev/api/projects` (or `localhost:3777` locally) — Roadmap tab's project metadata, **on by default** (`claudeCockpit.roadmap.enabled`).
+
+Set any flag to `false` for fully local operation with zero outbound traffic. Zero runtime dependencies. See [`PRIVACY.md`](./PRIVACY.md) for the full audit trail.
 
 ## Why
 
@@ -60,7 +67,17 @@ Then open the folder in VSCode and press `F5` to launch an Extension Development
 
 - `src/extension.ts` — activation, command registration
 - `src/claudeData.ts` — reads `~/.claude/projects/<encoded-cwd>/*.jsonl`, parses tokens + tool calls
-- `src/sidebarProvider.ts` — webview view provider, fs watcher
+- `src/sidebarProvider.ts` — webview view provider, fs watcher, message router, snapshot composer
+- `src/integrations.ts` — agents, plans, RTK, tunnels, usage dashboard, chat export, activity heatmap
+- `src/macHealth.ts` + `src/appUsage.ts` — Mac tab data sources
+- `src/obsidian.ts` — vault detection + URI builders
+- `src/routines.ts` — `~/.claude/scheduled-tasks/*` reader for the Routines tab
+- `src/discover.ts` — opt-in GitHub trending fetch + Obsidian RSS reader
+- `src/roadmap.ts` — Roadmap tab fetcher (remote / local fallback / disk cache)
+- `src/changelog.ts` — bundled `CHANGELOG.md` parser
+- `src/updateCheck.ts` — `api.github.com/releases/latest` poller for the update pill
+- `src/manage.ts` — `~/.claude/settings*.json` reader for the Manage tab
+- `src/jarvis.ts` — boo-mesh approval queue / chat reader (in-progress)
 - `src/statusBar.ts` — three status bar items
 - `src/logger.ts` — OutputChannel-backed logger (no `console.log`)
 - `media/` — webview HTML/CSS/JS (vanilla, no build step)
@@ -87,6 +104,7 @@ No runtime dependencies. Just `@types/vscode` and `typescript`.
 - `claudeCockpit.theme` — initial theme: `auto` (default; follows VSCode), `dark`, or `light`. Can also be changed at runtime in the Customize panel.
 - `claudeCockpit.discover.enabled` — enable the Discover tab (off by default; allows opt-in `api.github.com` fetches when you click Refresh).
 - `claudeCockpit.updateCheck.enabled` — periodically check `api.github.com` for new Cockpit releases (on by default). Set to `false` for fully local operation.
+- `claudeCockpit.roadmap.enabled` — let the Roadmap tab fetch `roadmap.dashable.dev/api/projects` (on by default). Set to `false` to render the tab from the disk cache only with no outbound traffic.
 
 User preferences (which widgets appear in the Custom tab, which tabs are visible, runtime theme override) are stored per-machine in VSCode `globalState` (key `claudeCockpit.userPrefs`). They never leave the machine.
 
