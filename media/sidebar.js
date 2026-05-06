@@ -245,6 +245,117 @@
     `;
   }
 
+  function welcomeBannerSection(snap) {
+    // Heuristic system status: do we see any Claude data on disk, and do we
+    // have an active session for this folder?
+    const hasProjects = (snap.projects || []).length > 0;
+    const hasWatch = (snap.watchtower || []).length > 0;
+    const hasActive = !!snap.cwd;
+    const usage = snap.usage;
+    const hasUsage = !!(usage && usage.allTime && usage.allTime.totalTokens > 0);
+    const budget = snap.budget;
+    const capsConfigured = !!(budget && (budget.dailyCapUsd > 0 || budget.sessionCapUsd > 0));
+    const userPrefs = snap.userPrefs || {};
+    const themeChosen = userPrefs.theme && userPrefs.theme !== 'auto';
+
+    const ok = '<span class="tag tag-used">✓</span>';
+    const warn = '<span class="tag tag-warn">!</span>';
+    const off = '<span class="tag">○</span>';
+
+    const checks = [
+      {
+        icon: hasProjects ? ok : warn,
+        title: 'Claude Code data',
+        detail: hasProjects
+          ? `Found ${snap.projects.length} project folder${snap.projects.length === 1 ? '' : 's'} under <code>~/.claude/projects/</code>.`
+          : 'No data found at <code>~/.claude/projects/</code>. Run <code>claude</code> in any folder to bootstrap.',
+      },
+      {
+        icon: hasActive ? ok : (hasWatch ? warn : off),
+        title: 'Active session',
+        detail: hasActive
+          ? `This window is attached to <code>${escapeHtml(snap.cwd)}</code>.`
+          : (hasWatch
+              ? `No active session for the open folder, but ${snap.watchtower.length} other session${snap.watchtower.length === 1 ? '' : 's'} ${snap.watchtower.length === 1 ? 'is' : 'are'} live elsewhere — see Watchtower.`
+              : 'Open a folder in VSCode and run <code>claude</code> in its terminal to see live session data.'),
+      },
+      {
+        icon: hasUsage ? ok : off,
+        title: 'Usage rollups',
+        detail: hasUsage
+          ? `${usage.scannedFiles} JSONL file${usage.scannedFiles === 1 ? '' : 's'} scanned · all-time spend $${usage.allTime.totalUsd.toFixed(2)}.`
+          : 'No usage history yet — Cockpit will tally token+cost rollups as your sessions accumulate.',
+      },
+      {
+        icon: capsConfigured ? ok : off,
+        title: 'Budget caps',
+        detail: capsConfigured
+          ? `Daily ${budget.dailyCapUsd > 0 ? '$' + budget.dailyCapUsd : '—'} · session ${budget.sessionCapUsd > 0 ? '$' + budget.sessionCapUsd : '—'}.`
+          : 'Optional. Set caps to get progress bars on the Usage rollups widget.',
+      },
+      {
+        icon: themeChosen ? ok : off,
+        title: 'Theme',
+        detail: themeChosen
+          ? `Locked to <strong>${escapeHtml(userPrefs.theme)}</strong>.`
+          : 'Auto (follows VSCode). Override in the Customize panel.',
+      },
+    ];
+
+    const checksHtml = checks.map((c) => `
+      <li class="welcome-row">
+        <span class="welcome-row-icon">${c.icon}</span>
+        <div class="welcome-row-body">
+          <div class="welcome-row-title"><strong>${escapeHtml(c.title)}</strong></div>
+          <div class="welcome-row-detail">${c.detail}</div>
+        </div>
+      </li>
+    `).join('');
+
+    const next = snap.firstRunCompleted
+      ? `<button class="office-btn" data-action="reset-first-run" title="Show this welcome again on next reload">Reset welcome</button>`
+      : `<button class="office-btn" data-action="dismiss-welcome">Got it — take me to the cockpit →</button>`;
+
+    return `
+      <div class="welcome-banner">
+        <h2 style="margin-top: 4px;">Welcome to Claude Cockpit</h2>
+        <p class="empty" style="font-size: 12px; margin-top: 0;">
+          Read-only HUD for Claude Code. <strong>100% local</strong> — no telemetry,
+          no network calls without an explicit opt-in. Cockpit watches
+          <code>~/.claude/projects/</code> and surfaces what's already on your disk.
+        </p>
+
+        <h3 class="sub-h">System check</h3>
+        <ul class="welcome-list">${checksHtml}</ul>
+
+        <h3 class="sub-h">Next steps</h3>
+        <div class="actions" style="gap: 6px; flex-wrap: wrap;">
+          <button class="office-btn" data-action="open-customize" title="Pick widgets per tab, choose visible tabs, theme">Customize widgets ⚙</button>
+          <button class="office-btn" data-action="open-settings" title="Edit budget caps + opt-in toggles in VSCode settings">Open settings</button>
+          <button class="office-btn" data-action="goto-tab" data-tab="now" title="See live session data">Go to Now</button>
+          <button class="office-btn" data-action="goto-tab" data-tab="help" title="Read the full feature reference">Read the docs</button>
+        </div>
+
+        <h3 class="sub-h">What's where</h3>
+        <p class="empty" style="font-size: 11px;">
+          <strong>Now</strong> = your live session ·
+          <strong>Watchtower</strong> = every recent Claude session ·
+          <strong>History</strong> = search every JSONL ·
+          <strong>Mac</strong> = system health ·
+          <strong>Settings</strong> = caps, MCP, hooks, plugins ·
+          <strong>Custom</strong> = any widgets you want, anywhere.
+        </p>
+
+        <p class="empty" style="font-size: 11px; margin-top: 12px;">
+          Tip: every tab is now a composition of widgets you choose. Click
+          <strong>Customize ⚙</strong> on any tab to pick what shows up there.
+        </p>
+
+        <div class="actions" style="margin-top: 16px;">${next}</div>
+      </div>
+    `;
+  }
+
   function helpSection() {
     const tabs = [
       ['Now', 'Your live cockpit. Greeting, alerts that need attention (Inbox), at-a-glance stats, your active Claude session details (tokens, cost, files, tools).'],
@@ -3170,6 +3281,7 @@
     securityFull:    { label: 'Security (full)',    category: 'System',   requiresCwd: false, render: (s) => securitySection(s) },
     helpDoc:         { label: 'Help',               category: 'Config',   requiresCwd: false, render: () => helpSection() },
     selfTelemetry:   { label: 'Self · telemetry',   category: 'System',   requiresCwd: false, render: (s) => selfTelemetrySection(s) },
+    welcomeBanner:   { label: 'Welcome / setup',    category: 'Config',   requiresCwd: false, render: (s) => welcomeBannerSection(s) },
   };
 
   // Fragments used as components but not standalone sections — they get
@@ -3252,6 +3364,7 @@
   // the user can override any tab via the Customize panel. Empty array =
   // "user wants this tab empty" — never falls back to defaults silently.
   const DEFAULT_TAB_COMPOSITIONS = {
+    welcome:    ['welcomeBanner'],
     custom:     DEFAULT_CUSTOM_COMPONENTS,
     now: [
       'greeting', 'notifications', 'inbox', 'statsGrid', 'pilot',
@@ -3289,6 +3402,7 @@
     // Code session exists for the open folder. Surface this so users can
     // filter / understand at a glance.
     return [
+      { id: 'welcome',    label: 'Welcome',                                                           pinned: false, requiresCwd: false, hint: 'First-run setup + system check' },
       { id: 'custom',     label: 'Custom',                                                            pinned: true,  requiresCwd: false, hint: 'User-composed dashboard' },
       { id: 'now',        label: 'Now',                                                               pinned: true,  requiresCwd: true,  hint: 'Active session — tokens, cost, files, tools' },
       { id: 'recs',       label: recsLabel(snap),                                                     pinned: false, requiresCwd: false, hint: 'Recommendations across your setup' },
@@ -3339,15 +3453,24 @@
     const prefs = (snap && snap.userPrefs) || {};
     const cat = tabCatalogue(snap);
     const surfaces = (snap && snap.surfaces) || {};
+    const enabledExplicit = Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length;
+    const explicitSet = enabledExplicit ? migrateEnabledTabIds(prefs.enabledTabs) : null;
     // Hide tabs whose underlying surface has been disabled in settings,
     // regardless of user prefs — the data isn't being collected anyway.
     const filtered = cat.filter((t) => {
       if (t.id === 'mac' && surfaces.macHealth === false) return false;
+      // Welcome tab: visible by default ONLY until first-run is dismissed.
+      // After dismissal it's hidden unless the user explicitly added it back.
+      if (t.id === 'welcome') {
+        if (snap.firstRunCompleted) {
+          return enabledExplicit && explicitSet.has('welcome');
+        }
+        return true;
+      }
       return true;
     });
-    if (Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length) {
-      const set = migrateEnabledTabIds(prefs.enabledTabs);
-      return filtered.filter((t) => t.pinned || set.has(t.id));
+    if (enabledExplicit) {
+      return filtered.filter((t) => t.pinned || explicitSet.has(t.id) || t.id === 'welcome');
     }
     // First-launch default: every tab visible (preserves prior UX).
     return filtered;
@@ -3895,7 +4018,7 @@
       return;
     }
     const tabs = visibleTabBar(snap);
-    const activeTab = ensureValidActiveTab(getActiveTab(), tabs);
+    const activeTab = ensureValidActiveTab(getActiveTab(snap), tabs);
     const tabBar = renderTabBar(tabs, activeTab);
     // Map any legacy tab id (e.g. 'memory' → 'library') to the modern one
     // before composing, so prefs and defaults line up.
@@ -3916,9 +4039,12 @@
     return (tabs[0] && tabs[0].id) || 'custom';
   }
 
-  function getActiveTab() {
+  function getActiveTab(snap) {
     const state = vscode.getState() || {};
-    return state.activeTab || 'custom';
+    if (state.activeTab) return state.activeTab;
+    // First run: land on Welcome until the user dismisses it.
+    if (snap && !snap.firstRunCompleted) return 'welcome';
+    return 'custom';
   }
 
   function setActiveTab(id) {
@@ -3982,6 +4108,26 @@
         if (action === 'goto-help') {
           setActiveTab('help');
           if (lastSnapshot) render(lastSnapshot);
+        }
+        if (action === 'goto-tab') {
+          const target = btn.getAttribute('data-tab');
+          if (target) {
+            setActiveTab(target);
+            if (lastSnapshot) render(lastSnapshot);
+          }
+        }
+        if (action === 'dismiss-welcome') {
+          // Mark first-run done, jump to Now (if a session exists) or Custom.
+          const targetTab = (lastSnapshot && lastSnapshot.cwd) ? 'now' : 'custom';
+          setActiveTab(targetTab);
+          vscode.postMessage({ type: 'markFirstRunComplete' });
+        }
+        if (action === 'reset-first-run') {
+          vscode.postMessage({ type: 'resetFirstRun' });
+          setActiveTab('welcome');
+        }
+        if (action === 'open-settings') {
+          vscode.postMessage({ type: 'openSettings' });
         }
         if (action === 'goto-changelog') {
           const cur = vscode.getState() || {};

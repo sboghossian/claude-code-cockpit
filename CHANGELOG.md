@@ -2,6 +2,17 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] — 2026-05-06
+
+### Added
+- **Welcome tab + first-run flow.** Brand new users land on a `Welcome` tab with a system-check checklist (Claude data on disk · active session · usage rollups · budget caps · theme) and one-click "Next steps" buttons (Customize widgets · Open settings · Go to Now · Read the docs). Auto-hides after dismissal; restorable via Customize → Visible tabs, or the "Reset welcome" button on the tab itself.
+- New extension messages: `markFirstRunComplete`, `resetFirstRun`, `openSettings` (opens VSCode Settings filtered to `@ext:dashable.claude-cockpit`).
+- `welcomeBanner` widget registered in the component registry — droppable on any tab.
+- `LICENSE` file (MIT, matches `package.json`) so GitHub correctly reports the license.
+
+### Changed
+- README install path rewritten as a 90-second quick start (download · install · open Cockpit · run `claude`). Optional-setup section pulls every opt-in toggle into one place.
+
 ## [0.19.0] — 2026-05-06
 
 ### Added

@@ -2216,3 +2216,44 @@ select[data-prompt-cat-new] {
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* Welcome / first-run setup banner */
+.welcome-banner {
+  padding: 4px 0 12px;
+}
+.welcome-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.welcome-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  align-items: start;
+}
+.welcome-row-icon {
+  padding-top: 1px;
+}
+.welcome-row-title {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.welcome-row-detail {
+  font-size: 11px;
+  opacity: 0.85;
+  line-height: 1.45;
+}
+.welcome-row-detail code {
+  font-size: 10px;
+  padding: 1px 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}

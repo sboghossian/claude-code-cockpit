@@ -104,7 +104,10 @@ interface InboundMessage {
     | 'jarvisToggleOffline'
     | 'jarvisOpenRoot'
     | 'checkForUpdate'
-    | 'openReleasePage';
+    | 'openReleasePage'
+    | 'markFirstRunComplete'
+    | 'resetFirstRun'
+    | 'openSettings';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -169,6 +172,7 @@ const PROMPTS_KEY = 'claudeCockpit.prompts';
 const PINS_KEY = 'claudeCockpit.pinnedMemory';
 const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
 const CUSTOM_FEEDS_KEY = 'claudeCockpit.customFeeds';
+const FIRST_RUN_KEY = 'claudeCockpit.firstRunCompleted';
 
 function isStringArrayMap(v: unknown): v is Record<string, string[]> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
@@ -433,6 +437,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       prompts,
       pinnedMemory,
       userPrefs,
+      firstRunCompleted: this.globalState.get<boolean>(FIRST_RUN_KEY, false),
       discover: {
         enabled: userPrefs.discoverEnabled,
         github: this.discoverGithub,
@@ -927,6 +932,23 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         };
         await this.globalState.update(USER_PREFS_KEY, next);
         this.refresh();
+        return;
+      }
+      case 'markFirstRunComplete': {
+        await this.globalState.update(FIRST_RUN_KEY, true);
+        this.refresh();
+        return;
+      }
+      case 'resetFirstRun': {
+        await this.globalState.update(FIRST_RUN_KEY, false);
+        this.refresh();
+        return;
+      }
+      case 'openSettings': {
+        await vscode.commands.executeCommand(
+          'workbench.action.openSettings',
+          '@ext:dashable.claude-cockpit',
+        );
         return;
       }
       case 'runSecurityScan': {

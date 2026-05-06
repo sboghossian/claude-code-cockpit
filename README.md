@@ -54,17 +54,29 @@ Claude Code stores rich session state on disk. The CLI doesn't surface most of i
 
 ## Install
 
-### From a release `.vsix` (recommended)
+### Quick start (90 seconds)
 
-Download the latest `claude-cockpit-<version>.vsix` from the [Releases page](https://github.com/sboghossian/claude-cockpit/releases) and install it via VSCode:
+1. **Grab the latest `.vsix`** from the [Releases page](https://github.com/sboghossian/claude-cockpit/releases) — pick the one named `claude-cockpit-<latest>.vsix`.
+2. **Install it:**
+   ```bash
+   code --install-extension claude-cockpit-<latest>.vsix
+   ```
+   Or in VSCode: Extensions sidebar → `…` menu → **Install from VSIX…** → pick the file.
+3. **Open the Cockpit:** click the Cockpit icon in the Activity Bar (left rail). On first launch you'll see a **Welcome** tab with a system-check checklist and "Next steps" buttons (Customize widgets · Open settings · Go to Now · Read the docs).
+4. **Bootstrap data:** open any folder in VSCode and run `claude` in its terminal. The moment Claude Code writes its first JSONL turn, the Cockpit lights up.
 
-```bash
-code --install-extension claude-cockpit-0.14.0.vsix
-```
+That's it. Cockpit is read-only and runs entirely on your machine — no telemetry, no network calls without an explicit opt-in (`Discover` and `Cloud routines` are both off by default).
 
-Or open VSCode → Extensions sidebar → `…` menu → **Install from VSIX…** and pick the file.
+### Optional setup (only if you want them)
 
-The header's update-check pill (added in v0.13.0) will tell you when a newer release exists; click it to download the next `.vsix`.
+- **Budget caps & rollups.** `claudeCockpit.budget.dailyCapUsd / weeklyCapUsd / monthlyCapUsd / yearlyCapUsd / sessionCapUsd` — set any of these in VSCode settings to get progress bars on the Usage rollups widget. All zeroed by default (no cap).
+- **Custom layout.** Click the gear (⚙) in the header (or any tab's Customize button) to pick widgets per tab, hide tabs you don't use, and lock theme to dark/light/auto. Empty = empty: if you uncheck every widget on a tab, the tab is empty.
+- **Discover (network opt-in).** Top GitHub repos + Hacker News + Product Hunt + your Obsidian RSS, fetched only when you click Refresh. Toggle in Settings → `claudeCockpit.discover.enabled`.
+- **Cloud routines (link only).** Surfaces a deep-link to claude.ai's scheduled-agents page. No API state is read. Toggle in Settings → `claudeCockpit.cloudRoutines.enabled`.
+
+### Update later
+
+When a new release lands, the header shows a green **Update available** pill — click it to jump to the GitHub release page and download the new `.vsix`.
 
 ### From source (dev)
 
