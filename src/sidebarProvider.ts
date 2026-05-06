@@ -50,6 +50,7 @@ import {
   JarvisData,
   readJarvis,
 } from './jarvis';
+import { scanSecurity, SecuritySnapshot, summarizeFindings } from './security';
 
 interface InboundMessage {
   type:
@@ -90,6 +91,8 @@ interface InboundMessage {
     | 'fetchCustomFeed'
     | 'addCustomFeed'
     | 'removeCustomFeed'
+    | 'runSecurityScan'
+    | 'launchCsoSkill'
     | 'fetchRoadmap'
     | 'fetchJarvis'
     | 'jarvisApprove'
@@ -190,6 +193,8 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private discoverHN: { window: DiscoverWindow; fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
   private discoverPH: { fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
   private discoverCustom: Record<string, { fetchedAt: number; items: FeedItem[]; error: string | undefined }> = {};
+  private security: SecuritySnapshot | undefined;
+  private securityInflight: Promise<void> | undefined;
   private updateStatus: UpdateStatus | undefined;
   private updateCheckTimer: NodeJS.Timeout | undefined;
   private roadmap: RoadmapData | undefined = readCachedRoadmap();
@@ -424,6 +429,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       changelog: this.readChangelogPayload(),
       updateStatus: this.readUpdateStatusPayload(),
       manage: readManageState(),
+      security: this.security ? { ...this.security, summary: summarizeFindings(this.security) } : undefined,
       lastSearch: this.lastSearch,
       stats: {
         ...snap.stats,
@@ -900,6 +906,30 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         };
         await this.globalState.update(USER_PREFS_KEY, next);
         this.refresh();
+        return;
+      }
+      case 'runSecurityScan': {
+        if (this.securityInflight) return;
+        this.securityInflight = (async () => {
+          try {
+            // Run scan off the event loop; readFile calls are sync but cheap.
+            this.security = await new Promise((resolve) => {
+              setImmediate(() => resolve(scanSecurity(cwd)));
+            });
+          } catch (err) {
+            logger.warn(`security scan failed: ${String(err)}`);
+          } finally {
+            this.securityInflight = undefined;
+            this.refresh();
+          }
+        })();
+        return;
+      }
+      case 'launchCsoSkill': {
+        const term = vscode.window.createTerminal({ name: 'cso security audit' });
+        term.show();
+        // /cso is a gstack skill — runs from the user's claude session in this folder.
+        term.sendText('claude /cso');
         return;
       }
       case 'startUsageDashboard': {

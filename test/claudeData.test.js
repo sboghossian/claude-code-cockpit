@@ -499,6 +499,26 @@ test('classifyPrompt returns expected category for keyword-bearing bodies', () =
   assert.equal(classifyPrompt('hi there'), 'other');
 });
 
+test('scanSecurity flags hardcoded API keys and tracked .env files', () => {
+  const { scanSecurity } = require('../out/security.js');
+  const ws = makeWorkspace('sec-' + Date.now());
+  fs.mkdirSync(ws.cwd, { recursive: true });
+  // Plant a fake hardcoded GitHub token.
+  fs.writeFileSync(path.join(ws.cwd, 'app.js'), 'const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";\nconsole.log(token);\n');
+  // Plant an .env file (no git ops here, so it'll show as untracked, not "danger").
+  fs.writeFileSync(path.join(ws.cwd, '.env'), 'DB_PASSWORD=hunter2\n');
+
+  const snap = scanSecurity(ws.cwd);
+  const ghHit = snap.secrets.find((s) => s.rule === 'GitHub Token (classic)');
+  assert.ok(ghHit, 'GitHub token rule should fire');
+  assert.equal(ghHit.severity, 'high');
+  // Excerpt must redact — never contain the full token.
+  assert.ok(!ghHit.excerpt.includes('ghp_abcdefghijklmnopqrstuvwxyz0123456789'), 'excerpt must redact the secret');
+
+  const envHit = snap.envFiles.find((e) => e.file === '.env');
+  assert.ok(envHit, '.env file should be enumerated');
+});
+
 test('parseRss extracts title/link/description from an RSS feed', () => {
   const { parseRss } = require('../out/discover.js');
   const xml = `<?xml version="1.0"?><rss><channel>

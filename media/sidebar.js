@@ -2091,6 +2091,161 @@
     `;
   }
 
+  function securitySection(snap) {
+    const sec = snap.security;
+    const summary = sec && sec.summary;
+    const state = vscode.getState() || {};
+    const view = state.securityView || 'overview';
+
+    const headerBtns = `
+      <span class="right">
+        <button class="office-btn" data-action="security-scan">${sec ? 'Re-scan' : 'Scan now'}</button>
+        <button class="office-btn" data-action="launch-cso" title="Run the gstack /cso skill — deeper audit, dependency CVEs, etc.">/cso</button>
+      </span>
+    `;
+
+    if (!sec) {
+      return `
+        <div class="row"><h2 class="left">Security</h2>${headerBtns}</div>
+        <p class="empty">No scan run yet. Click <strong>Scan now</strong> to audit this workspace for: tracked .env files, hardcoded API keys/tokens in source, MCP servers with inline secrets, git remote exposure. <strong>Local-only — nothing leaves your machine.</strong></p>
+        <p class="empty" style="font-size: 11px;">For deeper audits (dependency CVEs, GitHub repo settings, edge-function exposure, OWASP Top 10), use the <code>/cso</code> skill — runs in a terminal here.</p>
+      `;
+    }
+
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'overview' ? 'sub-tab-active' : ''}" data-security-view="overview">Overview</button>
+        <button class="sub-tab ${view === 'secrets' ? 'sub-tab-active' : ''}" data-security-view="secrets">Secrets <span class="chip-count">${(sec.secrets || []).length}</span></button>
+        <button class="sub-tab ${view === 'env' ? 'sub-tab-active' : ''}" data-security-view="env">.env <span class="chip-count">${(sec.envFiles || []).length}</span></button>
+        <button class="sub-tab ${view === 'git' ? 'sub-tab-active' : ''}" data-security-view="git">Git <span class="chip-count">${(sec.gitRemotes || []).length}</span></button>
+        <button class="sub-tab ${view === 'mcp' ? 'sub-tab-active' : ''}" data-security-view="mcp">MCP <span class="chip-count">${(sec.mcpServers || []).length}</span></button>
+      </div>
+    `;
+
+    let body = '';
+    if (view === 'overview') body = securityOverviewBody(sec, summary);
+    else if (view === 'secrets') body = securitySecretsBody(sec);
+    else if (view === 'env') body = securityEnvBody(sec);
+    else if (view === 'git') body = securityGitBody(sec);
+    else if (view === 'mcp') body = securityMcpBody(sec);
+
+    const truncatedNote = sec.truncated
+      ? `<p class="empty" style="font-size: 10px;">⚠ Scan capped — repo is large. Findings shown are partial.</p>`
+      : '';
+
+    return `
+      <div class="row"><h2 class="left">Security</h2>${headerBtns}</div>
+      <p class="empty" style="font-size: 10px;">Last scan: ${escapeHtml(fmtAge(sec.scannedAt))} · root: <code>${escapeHtml(sec.scanRoot || '—')}</code></p>
+      ${truncatedNote}
+      ${subBar}
+      <div class="sub-tab-panel">${body}</div>
+    `;
+  }
+
+  function severityChip(sev) {
+    if (sev === 'high') return '<span class="tag tag-warn">high</span>';
+    return '<span class="tag">medium</span>';
+  }
+
+  function securityOverviewBody(sec, summary) {
+    if (!summary) return '<p class="empty">No findings.</p>';
+    const tiles = `
+      <div class="sec-tiles">
+        <div class="sec-tile ${summary.high ? 'sec-tile-high' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.high}</div>
+          <div class="sec-tile-label">high-severity secrets</div>
+        </div>
+        <div class="sec-tile ${summary.medium ? 'sec-tile-warn' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.medium}</div>
+          <div class="sec-tile-label">medium-severity secrets</div>
+        </div>
+        <div class="sec-tile ${summary.envTracked ? 'sec-tile-high' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.envTracked}</div>
+          <div class="sec-tile-label">.env files tracked in git</div>
+        </div>
+        <div class="sec-tile ${summary.mcpInline ? 'sec-tile-warn' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.mcpInline}</div>
+          <div class="sec-tile-label">MCP servers with inline secrets</div>
+        </div>
+      </div>
+    `;
+    const verdict = summary.total === 0
+      ? '<p class="empty"><strong>✓ Clean scan.</strong> No obvious leaks. Run /cso for deeper audit.</p>'
+      : `<p class="empty">${summary.total} finding${summary.total === 1 ? '' : 's'} below. <strong>${summary.high} need urgent action.</strong></p>`;
+    return `${tiles}${verdict}`;
+  }
+
+  function securitySecretsBody(sec) {
+    const list = sec.secrets || [];
+    if (!list.length) return '<p class="empty">✓ No hardcoded secrets matched.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((s) => `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <a class="left link" data-open-file="${escapeHtml(s.absoluteFile)}" title="${escapeHtml(s.absoluteFile)}"><strong>${escapeHtml(s.file)}</strong>:${s.line}</a>
+          <span class="right">${severityChip(s.severity)}<span class="tag">${escapeHtml(s.rule)}</span></span>
+        </div>
+        <div class="note-excerpt"><code>${escapeHtml(s.excerpt)}</code></div>
+      </div>
+    </li>`).join('')}</ul>`;
+  }
+
+  function securityEnvBody(sec) {
+    const list = sec.envFiles || [];
+    if (!list.length) return '<p class="empty">No .env files in this workspace.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((e) => {
+      const danger = e.trackedInGit && !e.ignored;
+      const status = danger
+        ? '<span class="tag tag-warn">tracked in git</span>'
+        : e.ignored
+        ? '<span class="tag tag-used">gitignored ✓</span>'
+        : '<span class="tag">untracked</span>';
+      return `<li>
+        <div class="watch-card" style="display: block;">
+          <div class="row">
+            <a class="left link" data-open-file="${escapeHtml(e.absoluteFile)}"><strong>${escapeHtml(e.file)}</strong></a>
+            <span class="right">${status}<span class="tag">${(e.sizeBytes / 1024).toFixed(1)} KB</span></span>
+          </div>
+          ${danger ? '<div class="note-excerpt" style="color: var(--vscode-errorForeground);">⚠ This .env file is being tracked. Add it to .gitignore and rotate any secrets it contains.</div>' : ''}
+        </div>
+      </li>`;
+    }).join('')}</ul>`;
+  }
+
+  function securityGitBody(sec) {
+    const list = sec.gitRemotes || [];
+    if (!list.length) return '<p class="empty">Not a git repo (or no remotes configured).</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((r) => `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <span class="left"><strong>${escapeHtml(r.name)}</strong></span>
+          <span class="right">${r.isGithub ? '<span class="tag">GitHub</span>' : ''}</span>
+        </div>
+        <div class="note-excerpt"><code>${escapeHtml(r.url)}</code></div>
+      </div>
+    </li>`).join('')}</ul>
+    <p class="empty" style="font-size: 11px; margin-top: 8px;">For repo visibility / branch protection / secret scanning audit, run <code>/cso</code>.</p>`;
+  }
+
+  function securityMcpBody(sec) {
+    const list = sec.mcpServers || [];
+    if (!list.length) return '<p class="empty">No MCP servers configured in <code>~/.claude/settings.json</code>.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((m) => {
+      const inlineWarn = m.hasInlineSecret
+        ? '<span class="tag tag-warn">inline secret</span>'
+        : '<span class="tag tag-used">env-var only ✓</span>';
+      return `<li>
+        <div class="watch-card" style="display: block;">
+          <div class="row">
+            <span class="left"><strong>${escapeHtml(m.serverName)}</strong></span>
+            <span class="right">${inlineWarn}</span>
+          </div>
+          ${m.envKeys.length ? `<div class="note-excerpt">env keys: ${m.envKeys.map((k) => '<code>' + escapeHtml(k) + '</code>').join(', ')}</div>` : '<div class="note-excerpt" style="font-size: 10px;">No env config.</div>'}
+          ${m.hasInlineSecret ? '<div class="note-excerpt" style="color: var(--vscode-errorForeground);">⚠ A literal secret value appears to be set inline. Move it to <code>${</code> env var reference and rotate.</div>' : ''}
+        </div>
+      </li>`;
+    }).join('')}</ul>`;
+  }
+
   function browseSection(snap) {
     const state = vscode.getState() || {};
     const view = state.browseView === 'files' ? 'files' : 'projects';
@@ -2293,6 +2448,14 @@
     return `Recs (${recs.length})`;
   }
 
+  function secLabel(snap) {
+    const s = snap.security && snap.security.summary;
+    if (!s) return 'Security';
+    if (s.high > 0) return `Security (${s.high}!)`;
+    if (s.total > 0) return `Security (${s.total})`;
+    return 'Security ✓';
+  }
+
   function emptyTabBar(snap) {
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
@@ -2459,6 +2622,7 @@
       { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
       { id: 'browse',     label: `Browse (${snap.projects.length})`,                                  pinned: false, requiresCwd: false, hint: 'Recent projects + ~/.claude/ filesystem' },
+      { id: 'security',   label: secLabel(snap),                                                      pinned: false, requiresCwd: false, hint: 'Local secret scan, .env audit, MCP credential check, /cso launcher' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
@@ -3007,6 +3171,7 @@
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
       else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') body = browseSection(snap);
+      else if (activeTab === 'security') body = securitySection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
       else body = `
@@ -3126,6 +3291,8 @@
       body = skillsSection(snap);
     } else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') {
       body = browseSection(snap);
+    } else if (activeTab === 'security') {
+      body = securitySection(snap);
     } else if (activeTab === 'agents') {
       body = agentsSection(snap);
     } else if (activeTab === 'routines') {
@@ -3780,6 +3947,27 @@
         const state = vscode.getState() || {};
         vscode.setState({ ...state, browseView: v });
         if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-security-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-security-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, securityView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-action="security-scan"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Scanning…';
+        vscode.postMessage({ type: 'runSecurityScan' });
+      });
+    });
+    root.querySelectorAll('button[data-action="launch-cso"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'launchCsoSkill' });
       });
     });
 
