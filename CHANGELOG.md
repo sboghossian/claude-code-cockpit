@@ -2,6 +2,13 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.2] — 2026-05-06
+
+### Changed
+- **Screenshots refreshed.** Hero image now shows the actual v0.20.x surfaces — Welcome (first-run setup), Now (live session with PILOT card + 23 widgets), and the Customize panel (per-tab widget grid). Generated headlessly from a real snapshot via `preview-render.js` + Chromium so the data shown is real, not a mockup. New per-tab archives at `media/screenshots/welcome.png`, `now.png`, `customize.png`.
+- Cloudflare Pages site renamed: `claude-cockpit.pages.dev` → `claude-code-cockpit.pages.dev` (matches repo + marketplace identity). Old URL still serves.
+- `package.json` `homepage` updated to the new Pages URL.
+
 ## [0.20.1] — 2026-05-06
 
 ### Changed

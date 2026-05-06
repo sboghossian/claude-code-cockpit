@@ -4,7 +4,7 @@
 
 [![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/dashable.claude-code-cockpit?label=Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit) [![GitHub release](https://img.shields.io/github/v/release/sboghossian/claude-code-cockpit?label=GitHub)](https://github.com/sboghossian/claude-code-cockpit/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-![Claude Cockpit — Now and Mac tabs](media/screenshots/hero.png)
+![Claude Code Cockpit — Welcome, Now, and Customize panels](media/screenshots/hero.png)
 
 Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **Customizable**: a header strip with logo + actions sits above a tab bar you control — pick which tabs are visible, build a **Custom** tab from any of 30+ widgets, and switch between auto / dark / light theme.
 
@@ -12,7 +12,7 @@ Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your 
 
 **Global search** (in the header): type any string to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings — with type-filter chips to narrow results. Click any hit to jump to the right tab.
 
-Landing page: [claude-cockpit.pages.dev](https://claude-cockpit.pages.dev) · Sibling: [`claude-overlay`](https://github.com/sboghossian/claude-overlay) (macOS menubar, cross-surface).
+Landing page: [claude-code-cockpit.pages.dev](https://claude-code-cockpit.pages.dev) · Sibling: [`claude-overlay`](https://github.com/sboghossian/claude-overlay) (macOS menubar, cross-surface).
 
 ## What it does
 
