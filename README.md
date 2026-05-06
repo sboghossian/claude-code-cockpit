@@ -52,7 +52,21 @@ Set any flag to `false` for fully local operation with zero outbound traffic. Ze
 
 Claude Code stores rich session state on disk. The CLI doesn't surface most of it. Cockpit reads the JSONL session log + memory directory and gives you a passive HUD instead of `tail -f`-ing files yourself.
 
-## Install (dev)
+## Install
+
+### From a release `.vsix` (recommended)
+
+Download the latest `claude-cockpit-<version>.vsix` from the [Releases page](https://github.com/sboghossian/claude-cockpit/releases) and install it via VSCode:
+
+```bash
+code --install-extension claude-cockpit-0.14.0.vsix
+```
+
+Or open VSCode → Extensions sidebar → `…` menu → **Install from VSIX…** and pick the file.
+
+The header's update-check pill (added in v0.13.0) will tell you when a newer release exists; click it to download the next `.vsix`.
+
+### From source (dev)
 
 ```bash
 git clone https://github.com/sboghossian/claude-cockpit.git
@@ -62,6 +76,10 @@ npm run compile
 ```
 
 Then open the folder in VSCode and press `F5` to launch an Extension Development Host.
+
+### Marketplace
+
+Not published yet — coming once the icon is converted from SVG to PNG ≥128×128 (Marketplace requirement) and the publisher PAT is wired up. Until then, install via the `.vsix` route above.
 
 ## Architecture
 
