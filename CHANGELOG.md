@@ -2,6 +2,13 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.1] — 2026-05-06
+
+### Changed
+- **Repo renamed.** GitHub repo is now [`sboghossian/claude-code-cockpit`](https://github.com/sboghossian/claude-code-cockpit) so it matches the marketplace listing (`dashable.claude-code-cockpit`). GitHub auto-redirects every old `sboghossian/claude-cockpit` URL.
+- All source-baked URLs (`updateCheck.ts`, `sidebarProvider.ts`, sidebar.js release-link buttons, README, PRIVACY, landing page, `package.json` repository/badges/qna/bugs/configuration descriptions) now point at the new repo path so the next snapshot doesn't depend on redirect-following.
+- Title in README and the marketplace listing renamed to **Claude Code Cockpit** to match the unique marketplace identity (`yurman.claude-cockpit` already owns "Claude Cockpit"; we differentiate to keep listings distinct).
+
 ## [0.20.0] — 2026-05-06
 
 ### Added
@@ -104,7 +111,7 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 ### Added
 
 - **Changelog tab.** Renders this file inside the cockpit so you see what shipped without leaving VSCode. Each version shows date and notes, with a deep-link to the matching GitHub release.
-- **Self-update check.** Cockpit periodically polls `api.github.com/repos/sboghossian/claude-cockpit/releases/latest` (when `claudeCockpit.updateCheck.enabled = true`, default on). When a newer version is detected, an **Update available** pill appears in the header with a one-click link to the release page.
+- **Self-update check.** Cockpit periodically polls `api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest` (when `claudeCockpit.updateCheck.enabled = true`, default on). When a newer version is detected, an **Update available** pill appears in the header with a one-click link to the release page.
 - New setting `claudeCockpit.updateCheck.enabled` (default `true`). Disable to make the extension fully local with zero update-check traffic.
 
 ### Changed

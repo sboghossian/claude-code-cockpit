@@ -13,8 +13,8 @@ export interface UpdateStatus {
   error: string | undefined;
 }
 
-const RELEASE_URL = 'https://api.github.com/repos/sboghossian/claude-cockpit/releases/latest';
-const REPO_RELEASES_PAGE = 'https://github.com/sboghossian/claude-cockpit/releases';
+const RELEASE_URL = 'https://api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest';
+const REPO_RELEASES_PAGE = 'https://github.com/sboghossian/claude-code-cockpit/releases';
 
 export async function fetchLatestRelease(): Promise<{
   version: string;

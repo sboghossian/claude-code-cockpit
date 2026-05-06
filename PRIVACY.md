@@ -5,7 +5,7 @@ Claude Cockpit is **100% local**. The extension runs entirely on your machine. N
 ## Guarantees
 
 - **Network calls are bounded and disclosed.** The only outbound calls the extension can make are:
-  1. `api.github.com/repos/sboghossian/claude-cockpit/releases/latest` — the update check, **on by default** (controlled by `claudeCockpit.updateCheck.enabled`). Runs once on activation and every 6 hours while the sidebar is mounted. Sends only a default `User-Agent` header; receives only the GitHub release JSON. Set the setting to `false` to disable entirely.
+  1. `api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest` — the update check, **on by default** (controlled by `claudeCockpit.updateCheck.enabled`). Runs once on activation and every 6 hours while the sidebar is mounted. Sends only a default `User-Agent` header; receives only the GitHub release JSON. Set the setting to `false` to disable entirely.
   2. `api.github.com/search/repositories` — the Discover tab's GitHub trending fetch, **off by default** (controlled by `claudeCockpit.discover.enabled`), only when you click Refresh.
   3. `roadmap.dashable.dev/api/projects` (or `localhost:3000/api/projects` if you run the roadmap server locally) — the Roadmap tab's project metadata fetch, **on by default**. Auto-fetches when the Roadmap tab is opened if the disk cache (`~/.claude/.cache/cockpit-roadmap.json`) is older than 10 minutes, or when you click Refresh. This endpoint is owned by the same operator as this extension; no third-party service is involved. Set `claudeCockpit.roadmap.enabled` to `false` to disable (the tab will show only cached data).
   No telemetry, no analytics, no third-party services. RSS reads from your local Obsidian vault and makes no network call.
@@ -36,4 +36,4 @@ Stephane runs [HAQQ Legal AI](https://haqq.ai), which handles client-privileged 
 
 ## Open source
 
-The full source is at [github.com/sboghossian/claude-cockpit](https://github.com/sboghossian/claude-cockpit). Audit it yourself. If you find a violation of any guarantee above, please open an issue — it's a bug.
+The full source is at [github.com/sboghossian/claude-code-cockpit](https://github.com/sboghossian/claude-code-cockpit). Audit it yourself. If you find a violation of any guarantee above, please open an issue — it's a bug.

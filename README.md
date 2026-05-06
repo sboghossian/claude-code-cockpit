@@ -2,7 +2,7 @@
 
 > The local-first HUD for Claude Code. Every session, every token, every dollar — in your VSCode sidebar. Read-only. 100% local.
 
-[![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/dashable.claude-code-cockpit?label=Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit) [![GitHub release](https://img.shields.io/github/v/release/sboghossian/claude-cockpit?label=GitHub)](https://github.com/sboghossian/claude-cockpit/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/dashable.claude-code-cockpit?label=Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit) [![GitHub release](https://img.shields.io/github/v/release/sboghossian/claude-code-cockpit?label=GitHub)](https://github.com/sboghossian/claude-code-cockpit/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ![Claude Cockpit — Now and Mac tabs](media/screenshots/hero.png)
 
@@ -44,7 +44,7 @@ Updates live as Claude works (filesystem watcher + 400ms debounce).
 
 Local-first. No telemetry, no analytics, no third-party services. The webview itself runs under a strict CSP that blocks `connect-src` and `form-action`. The extension host makes only **three** bounded outbound calls, all disclosed and configurable:
 
-1. `api.github.com/repos/sboghossian/claude-cockpit/releases/latest` — update check, **on by default** (`claudeCockpit.updateCheck.enabled`).
+1. `api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest` — update check, **on by default** (`claudeCockpit.updateCheck.enabled`).
 2. `api.github.com/search/repositories` — Discover tab's GitHub trending fetch, **off by default** (`claudeCockpit.discover.enabled`), only on Refresh.
 3. `roadmap.dashable.dev/api/projects` (or `localhost:3777` locally) — Roadmap tab's project metadata, **on by default** (`claudeCockpit.roadmap.enabled`).
 
@@ -68,7 +68,7 @@ Or in VSCode: **Extensions** sidebar → search **"Claude Code Cockpit"** → cl
 
 ### Quick start (90 seconds)
 
-1. **Install** via the marketplace command above (or grab the `.vsix` from [Releases](https://github.com/sboghossian/claude-cockpit/releases)).
+1. **Install** via the marketplace command above (or grab the `.vsix` from [Releases](https://github.com/sboghossian/claude-code-cockpit/releases)).
 2. **Open the Cockpit:** click the Cockpit icon in the Activity Bar (left rail). On first launch you'll see a **Welcome** tab with a system-check checklist and "Next steps" buttons (Customize widgets · Open settings · Go to Now · Read the docs).
 3. **Bootstrap data:** open any folder in VSCode and run `claude` in its terminal. The moment Claude Code writes its first JSONL turn, the Cockpit lights up.
 
@@ -95,7 +95,7 @@ When a new release lands, the header shows a green **Update available** pill —
 ### From source (dev)
 
 ```bash
-git clone https://github.com/sboghossian/claude-cockpit.git
+git clone https://github.com/sboghossian/claude-code-cockpit.git
 cd claude-cockpit
 npm install
 npm run compile

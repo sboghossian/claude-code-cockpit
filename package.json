@@ -2,13 +2,13 @@
   "name": "claude-code-cockpit",
   "displayName": "Claude Code Cockpit",
   "description": "Local-first HUD for Claude Code. Token + cost rollups (session/day/week/month/year), cross-project session Watchtower, Mac/Obsidian integrations, 30+ customizable widgets per tab. Read-only. 100% local.",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "publisher": "dashable",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sboghossian/claude-cockpit.git"
+    "url": "https://github.com/sboghossian/claude-code-cockpit.git"
   },
   "homepage": "https://claude-cockpit.pages.dev",
   "engines": {
@@ -36,19 +36,19 @@
   },
   "badges": [
     {
-      "url": "https://img.shields.io/github/v/release/sboghossian/claude-cockpit?label=release",
-      "href": "https://github.com/sboghossian/claude-cockpit/releases",
+      "url": "https://img.shields.io/github/v/release/sboghossian/claude-code-cockpit?label=release",
+      "href": "https://github.com/sboghossian/claude-code-cockpit/releases",
       "description": "Latest GitHub release"
     },
     {
       "url": "https://img.shields.io/badge/license-MIT-green",
-      "href": "https://github.com/sboghossian/claude-cockpit/blob/main/LICENSE",
+      "href": "https://github.com/sboghossian/claude-code-cockpit/blob/main/LICENSE",
       "description": "MIT License"
     }
   ],
-  "qna": "https://github.com/sboghossian/claude-cockpit/issues",
+  "qna": "https://github.com/sboghossian/claude-code-cockpit/issues",
   "bugs": {
-    "url": "https://github.com/sboghossian/claude-cockpit/issues"
+    "url": "https://github.com/sboghossian/claude-code-cockpit/issues"
   },
   "main": "./out/extension.js",
   "activationEvents": [
@@ -174,7 +174,7 @@
         "claudeCockpit.updateCheck.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Periodically check api.github.com/repos/sboghossian/claude-cockpit/releases/latest for new releases of this extension and surface an 'Update available' pill in the header. Set to false for fully local operation with zero update-check traffic."
+          "description": "Periodically check api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest for new releases of this extension and surface an 'Update available' pill in the header. Set to false for fully local operation with zero update-check traffic."
         },
         "claudeCockpit.roadmap.enabled": {
           "type": "boolean",

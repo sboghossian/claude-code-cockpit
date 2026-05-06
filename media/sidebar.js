@@ -727,7 +727,7 @@
                 <span class="left"><strong>v${escapeHtml(v.version)}</strong>${v.date ? ` <span class="cost-rate">${escapeHtml(v.date)}</span>` : ''}</span>
                 <span class="right">
                   ${v.isCurrent ? '<span class="tag tag-used">installed</span>' : ''}
-                  <a class="link" data-open-url="https://github.com/sboghossian/claude-cockpit/releases/tag/v${escapeHtml(v.version)}">release ↗</a>
+                  <a class="link" data-open-url="https://github.com/sboghossian/claude-code-cockpit/releases/tag/v${escapeHtml(v.version)}">release ↗</a>
                 </span>
               </div>
               <div class="changelog-body">${renderMarkdown(v.body)}</div>

@@ -394,7 +394,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       currentVersion: this.currentVersion(),
       latestVersion: undefined,
       hasUpdate: false,
-      releaseUrl: 'https://github.com/sboghossian/claude-cockpit/releases',
+      releaseUrl: 'https://github.com/sboghossian/claude-code-cockpit/releases',
       releaseTitle: undefined,
       publishedAt: undefined,
       fetchedAt: undefined,
@@ -807,7 +807,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       }
       case 'openReleasePage': {
         const url = (this.updateStatus && this.updateStatus.releaseUrl)
-          || 'https://github.com/sboghossian/claude-cockpit/releases';
+          || 'https://github.com/sboghossian/claude-code-cockpit/releases';
         void vscode.env.openExternal(vscode.Uri.parse(url));
         return;
       }
