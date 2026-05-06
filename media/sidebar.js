@@ -200,10 +200,163 @@
     return `
       <h2>Mac Health ${healthBadge}</h2>
       <div class="mac-grid">${cards.join('')}</div>
+      ${systemStatsSection(m)}
       ${drives ? `<h3 class="sub-h">External drives</h3><div class="mac-grid">${drives}</div>` : ''}
       ${bt ? `<h3 class="sub-h">Bluetooth peripherals</h3><div class="bt-grid">${bt}</div>` : ''}
       ${appUsageSection(snap)}
     `;
+  }
+
+  // === System Stats — rich detail cards (CPU/Memory/Energy/Disk/Network) ===
+  // Inline icons live on the cards themselves. Tone uses the same thresholds as
+  // the existing summary cards above (disk 75/90, memory 75/90, battery <15
+  // unplugged = bad, CPU load 100/200) so colors stay consistent.
+  const STAT_ICONS = {
+    cpu:    '<svg class="stat-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>',
+    memory: '<svg class="stat-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="20" height="9" rx="1"/><line x1="6" y1="18" x2="6" y2="21"/><line x1="10" y1="18" x2="10" y2="21"/><line x1="14" y1="18" x2="14" y2="21"/><line x1="18" y1="18" x2="18" y2="21"/></svg>',
+    battery:'<svg class="stat-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>',
+    disk:   '<svg class="stat-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>',
+    net:    '<svg class="stat-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>',
+  };
+
+  function pctBar(parts) {
+    return `<div class="stat-stack">${parts
+      .filter((p) => p && p.pct > 0)
+      .map((p) => `<span class="${p.cls}" style="width: ${p.pct.toFixed(2)}%"></span>`)
+      .join('')}</div>`;
+  }
+
+  function fmt1(n) { return (Math.round(n * 10) / 10).toFixed(1); }
+  function fmt0(n) { return Math.round(n).toString(); }
+
+  function systemStatsSection(m) {
+    if (!m || !m.available) return '';
+    const cpu = m.cpu || {};
+    const md = m.memoryDetail;
+    const energy = m.energy;
+    const volumes = m.volumes || [];
+    const ifaces = m.interfaces || [];
+
+    // CPU card
+    const userPct = typeof cpu.userPct === 'number' ? cpu.userPct : 0;
+    const sysPct = typeof cpu.sysPct === 'number' ? cpu.sysPct : 0;
+    const idlePct = typeof cpu.idlePct === 'number' ? cpu.idlePct : 100;
+    const usedPct = Math.max(0, Math.min(100, userPct + sysPct));
+    const cpuTone = (cpu.loadPct1 || 0) > 200 ? 'bad' : (cpu.loadPct1 || 0) > 100 ? 'warn' : 'ok';
+    const cpuModel = cpu.model ? escapeHtml(cpu.model) : '';
+    const cpuSub = `user ${fmt1(userPct)}% · sys ${fmt1(sysPct)}%${
+      cpu.physicalCores ? ` · cores ${cpu.physicalCores}p/${cpu.cores || ''}` : ''
+    }${cpu.model ? ` · ${escapeHtml(cpu.model)}` : ''}`;
+    const cpuCard = `
+      <div class="stat-card" data-stat-card="cpu" ${cpuModel ? `data-cpu-model="${cpuModel}"` : ''} ${cpuModel ? 'title="Click to copy CPU model"' : ''}>
+        <div class="stat-card-head">${STAT_ICONS.cpu}<span class="stat-card-label">CPU</span></div>
+        <div class="stat-card-value tone-${cpuTone}">${fmt0(usedPct)}%</div>
+        ${pctBar([
+          { cls: 'seg-user', pct: userPct },
+          { cls: 'seg-sys', pct: sysPct },
+          { cls: 'seg-idle', pct: idlePct },
+        ])}
+        <div class="stat-card-sub">${cpuSub}</div>
+      </div>`;
+
+    // Memory card
+    let memCard = '';
+    if (md) {
+      const total = md.totalMb || 1;
+      const wiredPct = (md.wiredMb / total) * 100;
+      const activePct = (md.activeMb / total) * 100;
+      const compressedPct = (md.compressedMb / total) * 100;
+      const freePct = Math.max(0, 100 - wiredPct - activePct - compressedPct);
+      const pressurePct = (m.memory && m.memory.pressurePct) || (wiredPct + activePct + compressedPct);
+      const memTone = pressurePct > 90 ? 'bad' : pressurePct > 75 ? 'warn' : 'ok';
+      const swap = md.swapTotalMb > 0
+        ? ` · swap ${fmt1(md.swapUsedMb / 1024)}/${fmt1(md.swapTotalMb / 1024)}gb`
+        : '';
+      memCard = `
+        <div class="stat-card" data-stat-card="memory">
+          <div class="stat-card-head">${STAT_ICONS.memory}<span class="stat-card-label">Memory</span></div>
+          <div class="stat-card-value tone-${memTone}">${fmt0(pressurePct)}%</div>
+          ${pctBar([
+            { cls: 'seg-wired', pct: wiredPct },
+            { cls: 'seg-active', pct: activePct },
+            { cls: 'seg-compressed', pct: compressedPct },
+            { cls: 'seg-free', pct: freePct },
+          ])}
+          <div class="stat-card-sub">wired ${fmt1(md.wiredMb / 1024)}gb · active ${fmt1(md.activeMb / 1024)}gb · compressed ${fmt1(md.compressedMb / 1024)}gb${swap}</div>
+        </div>`;
+    }
+
+    // Energy card
+    let energyCard = '';
+    if (m.battery) {
+      const pct = m.battery.pct;
+      const onAc = (energy && energy.source === 'AC') || m.battery.isPluggedIn;
+      const tone = !onAc && pct < 15 ? 'bad' : pct < 30 ? 'warn' : 'ok';
+      const cycle = energy && typeof energy.cycleCount === 'number' ? `cycle ${energy.cycleCount}` : '';
+      const health = energy && typeof energy.healthPct === 'number' ? `health ${energy.healthPct}%` : '';
+      const remaining = (energy && energy.timeRemaining) || m.battery.timeRemaining || '';
+      const watt = energy && energy.acWattage ? `${energy.acWattage}W` : '';
+      const subBits = [
+        cycle, health, onAc ? 'src AC' : 'src Batt',
+        remaining ? `${remaining} remaining` : '',
+      ].filter(Boolean).join(' · ');
+      const pill = onAc
+        ? `<span class="stat-pill">${watt || 'AC'}${m.battery.isCharging ? ' · charging' : ''}</span>`
+        : '';
+      energyCard = `
+        <div class="stat-card" data-stat-card="energy">
+          <div class="stat-card-head">${STAT_ICONS.battery}<span class="stat-card-label">Energy</span>${pill}</div>
+          <div class="stat-card-value tone-${tone}">${pct}%</div>
+          <div class="stat-stack"><span class="seg-active" style="width: ${pct}%"></span><span class="seg-free" style="width: ${100 - pct}%"></span></div>
+          <div class="stat-card-sub">${escapeHtml(subBits || '—')}</div>
+        </div>`;
+    }
+
+    // Disk card (uses existing m.disk for headline; volumes for the list)
+    let diskCard = '';
+    if (m.disk) {
+      const pct = m.disk.usedPct;
+      const tone = pct > 90 ? 'bad' : pct > 75 ? 'warn' : 'ok';
+      const volRows = volumes.length
+        ? volumes.map((v) => {
+            return `<div class="stat-mini-row" title="${escapeHtml(v.mount)}">
+              <span style="flex-shrink:0; max-width: 50%; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(v.mount)}</span>
+              <span class="stat-mini-bar"><span style="width: ${v.pct.toFixed(1)}%"></span></span>
+              <span style="flex-shrink:0;">${fmt1(v.freeGb)}gb free</span>
+            </div>`;
+          }).join('')
+        : '';
+      diskCard = `
+        <div class="stat-card" data-stat-card="disk">
+          <div class="stat-card-head">${STAT_ICONS.disk}<span class="stat-card-label">Disk</span></div>
+          <div class="stat-card-value tone-${tone}">${fmt0(pct)}%</div>
+          <div class="stat-card-sub">${fmt1(m.disk.availableGb)}gb free of ${fmt1(m.disk.totalGb)}gb</div>
+          ${volRows}
+        </div>`;
+    }
+
+    // Network card
+    let netCard = '';
+    if (m.network) {
+      const total = m.network.rxKbps + m.network.txKbps;
+      const tone = 'ok';
+      const ifaceRows = ifaces.length
+        ? ifaces.map((i) => `<div class="stat-mini-row"><span>${escapeHtml(i.name)}</span><span>${escapeHtml(i.ipv4 || '—')}</span></div>`).join('')
+        : '';
+      const ssid = m.network.ssid ? escapeHtml(m.network.ssid) : '—';
+      const primaryIp = (ifaces.find((i) => i.name === m.network.interfaceName) || {}).ipv4 || '';
+      netCard = `
+        <div class="stat-card" data-stat-card="network">
+          <div class="stat-card-head">${STAT_ICONS.net}<span class="stat-card-label">Network</span></div>
+          <div class="stat-card-value tone-${tone}">${fmt0(total)}<span style="font-size:11px; color: var(--vscode-descriptionForeground);"> kb/s</span></div>
+          <div class="stat-card-sub">${escapeHtml(m.network.interfaceName)} · ${ssid}${primaryIp ? ' · ' + escapeHtml(primaryIp) : ''}</div>
+          ${ifaceRows}
+        </div>`;
+    }
+
+    const all = [cpuCard, memCard, energyCard, diskCard, netCard].filter(Boolean).join('');
+    if (!all) return '';
+    return `<h3 class="sub-h">System stats</h3><div class="stat-grid">${all}</div>`;
   }
 
   function appUsageSection(snap) {
@@ -620,7 +773,7 @@
       .filter((k) => !['hooks', 'mcpServers', 'enabledPlugins'].includes(k))
       .map((k) => {
         const v = (g.data && g.data[k] !== undefined) ? g.data[k] : (l.data ? l.data[k] : undefined);
-        const display = typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v);
+        const display = v === undefined || v === null ? '—' : (typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v));
         return `<div class="manage-row">
           <div class="left-col">
             <div><strong>${escapeHtml(k)}</strong></div>
@@ -2297,6 +2450,7 @@
     let hudRotation = 0;
     let speakingEnvelope = null; // { until, baseline, fn } for synth speaking
     let utterance = null;        // current SpeechSynthesisUtterance
+    let resizeObserver = null;   // tracked so teardown() can disconnect
 
     // Fibonacci sphere — N evenly-distributed unit vectors. Generated once.
     function buildCoreParticles(n) {
@@ -2351,7 +2505,9 @@
           dustParticles = buildDust(120, w, h);
         };
         resize();
-        new ResizeObserver(resize).observe(canvas);
+        if (resizeObserver) { try { resizeObserver.disconnect(); } catch {} }
+        resizeObserver = new ResizeObserver(resize);
+        resizeObserver.observe(canvas);
       }
       if (!coreParticles) coreParticles = buildCoreParticles(520);
     }
@@ -2804,6 +2960,9 @@
       stopListening();
       stopSpeaking();
       stopAnimation();
+      if (resizeObserver) { try { resizeObserver.disconnect(); } catch {} resizeObserver = null; }
+      if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
+      analyser = null;
     }
 
     return { init, teardown, startListening, stopListening, send, speakPreview, stopSpeaking };
@@ -3393,6 +3552,32 @@
     self:       ['selfTelemetry'],
   };
 
+  // Inline SVG icons for the primary tab bar. Stroke-only, 14×14, currentColor
+  // so they inherit the tab text color (active/hover handled by parent). VSCode
+  // webviews don't auto-load codicons, so we ship the geometry inline.
+  const TAB_ICONS = {
+    now:        '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 7 12 10 5 14 19 17 12 21 12"/></svg>',
+    library:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+    skills:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/></svg>',
+    browse:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>',
+    history:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/><polyline points="12 7 12 12 15 14"/></svg>',
+    timeline:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    settings:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+    watchtower: '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    search:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    prompts:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><polyline points="7 22 12 18 17 22"/></svg>',
+    talk:       '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>',
+    security:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/></svg>',
+    mac:        '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><line x1="9" y1="2" x2="9" y2="6"/><line x1="15" y1="2" x2="15" y2="6"/><line x1="9" y1="18" x2="9" y2="22"/><line x1="15" y1="18" x2="15" y2="22"/><line x1="2" y1="9" x2="6" y2="9"/><line x1="2" y1="15" x2="6" y2="15"/><line x1="18" y1="9" x2="22" y2="9"/><line x1="18" y1="15" x2="22" y2="15"/></svg>',
+    inbox:      '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
+    agents:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    chat:       '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    discover:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
+    welcome:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/></svg>',
+    custom:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 7.6c.4-.4.4-1 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L14 7v3h3l2.4-2.4z"/><path d="M14 10l-9 9v3h3l9-9"/><path d="M9 4H5a2 2 0 0 0-2 2v4"/></svg>',
+    help:       '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  };
+
   function tabCatalogue(snap) {
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
@@ -3980,7 +4165,8 @@
             const title = t.hint
               ? `title="${escapeHtml(t.hint + (t.requiresCwd ? ' — needs an active session' : ''))}"`
               : '';
-            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" ${title}>${cwdMark}${escapeHtml(t.label)}</button>`;
+            const icon = TAB_ICONS[t.id] || '';
+            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
           })
           .join('')}
       </nav>
@@ -4079,7 +4265,7 @@
         const id = btn.getAttribute('data-tab');
         if (!id) return;
         setActiveTab(id);
-        if (id === 'roadmap') maybeAutoFetchRoadmap();
+        if (id === 'timeline' || id === 'roadmap') maybeAutoFetchRoadmap();
         if (lastSnapshot) render(lastSnapshot);
       });
     });
@@ -4121,10 +4307,12 @@
           const targetTab = (lastSnapshot && lastSnapshot.cwd) ? 'now' : 'custom';
           setActiveTab(targetTab);
           vscode.postMessage({ type: 'markFirstRunComplete' });
+          if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'reset-first-run') {
           vscode.postMessage({ type: 'resetFirstRun' });
           setActiveTab('welcome');
+          if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'open-settings') {
           vscode.postMessage({ type: 'openSettings' });
@@ -4510,7 +4698,7 @@
         const a = btn.getAttribute('data-rec-action');
         const payload = btn.getAttribute('data-rec-payload') || '';
         if (a === 'gotoTab' && payload) {
-          setActiveTab(payload);
+          setActiveTab(TAB_MIGRATIONS[payload] || payload);
           if (lastSnapshot) render(lastSnapshot);
         } else if (a === 'openMemory') {
           vscode.postMessage({ type: 'openMemory' });
@@ -4755,6 +4943,14 @@
         if (lastSnapshot) render(lastSnapshot);
       });
     });
+    // CPU stat card click → copy model string.
+    root.querySelectorAll('.stat-card[data-stat-card="cpu"][data-cpu-model]').forEach((card) => {
+      card.addEventListener('click', () => {
+        const model = card.getAttribute('data-cpu-model') || '';
+        if (model) vscode.postMessage({ type: 'copyText', text: model, label: 'CPU model' });
+      });
+    });
+
     root.querySelectorAll('button[data-action="security-scan"]').forEach((btn) => {
       btn.addEventListener('click', () => {
         btn.disabled = true;

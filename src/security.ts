@@ -151,28 +151,49 @@ export function scanSecurity(scanRoot: string | undefined): SecuritySnapshot {
     if (!raw) continue;
     if (looksBinary(raw)) continue;
     const lines = raw.split('\n');
+    const WINDOW = 2000;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (!line || line.length > 2000) continue;
-      for (const r of SECRET_RULES) {
-        const m = r.rx.exec(line);
-        if (!m) continue;
-        // AWS Secret Key is high-FP — only flag if the line ALSO mentions
-        // an AWS-y context word.
-        if (r.rule === 'AWS Secret Key' && !/aws|secret|access/i.test(line)) continue;
-        const hit = m[0];
-        const redacted = hit.length > 12 ? `${hit.slice(0, 6)}…${hit.slice(-4)}` : '••••';
-        const before = line.slice(0, m.index).slice(-30);
-        const after = line.slice(m.index + hit.length).slice(0, 30);
-        out.secrets.push({
-          file: path.relative(scanRoot, f),
-          absoluteFile: f,
-          line: i + 1,
-          excerpt: `${before}${redacted}${after}`.replace(/\s+/g, ' ').trim(),
-          rule: r.rule,
-          severity: r.severity,
-        });
-        break; // One finding per line is plenty.
+      if (!line) continue;
+      // Long minified lines (bundles, sourcemaps) used to be skipped entirely
+      // — that hid embedded secrets. Scan in 2000-char overlapping windows so
+      // anchored regexes still catch leading tokens. 200-char overlap covers
+      // the longest secret patterns we look for.
+      const windows: { offset: number; chunk: string }[] = [];
+      if (line.length <= WINDOW) {
+        windows.push({ offset: 0, chunk: line });
+      } else {
+        for (let off = 0; off < line.length; off += WINDOW - 200) {
+          windows.push({ offset: off, chunk: line.slice(off, off + WINDOW) });
+          if (off + WINDOW >= line.length) break;
+        }
+      }
+      let matched = false;
+      for (const win of windows) {
+        if (matched) break;
+        for (const r of SECRET_RULES) {
+          // exec is stateful for /g regex but our rules are not /g; safe.
+          const m = r.rx.exec(win.chunk);
+          if (!m) continue;
+          // AWS Secret Key is high-FP — only flag if the line ALSO mentions
+          // an AWS-y context word.
+          if (r.rule === 'AWS Secret Key' && !/aws|secret|access/i.test(line)) continue;
+          const hit = m[0];
+          const redacted = hit.length > 12 ? `${hit.slice(0, 6)}…${hit.slice(-4)}` : '••••';
+          const absIdx = win.offset + m.index;
+          const before = line.slice(0, absIdx).slice(-30);
+          const after = line.slice(absIdx + hit.length).slice(0, 30);
+          out.secrets.push({
+            file: path.relative(scanRoot, f),
+            absoluteFile: f,
+            line: i + 1,
+            excerpt: `${before}${redacted}${after}`.replace(/\s+/g, ' ').trim(),
+            rule: r.rule,
+            severity: r.severity,
+          });
+          matched = true; // One finding per line is plenty.
+          break;
+        }
       }
     }
   }

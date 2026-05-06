@@ -2,7 +2,7 @@
   "name": "claude-code-cockpit",
   "displayName": "Claude Code Cockpit",
   "description": "Local-first HUD for Claude Code. Token + cost rollups (session/day/week/month/year), cross-project session Watchtower, Mac/Obsidian integrations, 30+ customizable widgets per tab. Read-only. 100% local.",
-  "version": "0.20.2",
+  "version": "0.21.0",
   "publisher": "dashable",
   "license": "MIT",
   "icon": "media/icon.png",

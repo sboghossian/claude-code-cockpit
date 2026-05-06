@@ -96,18 +96,12 @@ interface InboundMessage {
     | 'talkToClaude'
     | 'triggerWisprFlow'
     | 'fetchRoadmap'
-    | 'fetchJarvis'
-    | 'jarvisApprove'
-    | 'jarvisReject'
-    | 'jarvisSendPeer'
-    | 'jarvisPromoteAllow'
-    | 'jarvisToggleOffline'
-    | 'jarvisOpenRoot'
     | 'checkForUpdate'
     | 'openReleasePage'
     | 'markFirstRunComplete'
     | 'resetFirstRun'
-    | 'openSettings';
+    | 'openSettings'
+    | 'copyText';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -132,14 +126,8 @@ interface InboundMessage {
   feedUrl?: string;
   talkText?: string;
   talkMode?: 'new-session' | 'resume' | 'background';
-  approvalId?: string;
-  approvalReason?: string;
-  peerText?: string;
-  peerKind?: string;
-  allowTool?: string;
-  allowPattern?: string;
-  allowNote?: string;
-  offline?: boolean;
+  text?: string;
+  label?: string;
 }
 
 interface UserPrefs {
@@ -225,6 +213,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private jarvisInflight: Promise<void> | undefined;
   private jarvisWatcher: fs.FSWatcher | undefined;
   private jarvisLastPendingIds = new Set<string>();
+  private lastAlwaysLive: string[] = [];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -266,9 +255,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     // reflect reality. Cheap (<3s with timeout per host), cached server-side.
     if (subdomainHealthEnabled) {
       const refreshHealth = () => {
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const snap = snapshot(cwd, this.readBudgetConfig(), false);
-        const domains = snap.pilot ? snap.pilot.alwaysLive : [];
+        const domains = this.lastAlwaysLive;
         if (domains.length === 0) return;
         void refreshSubdomainHealth(domains).then(() => this.refresh());
       };
@@ -291,6 +278,8 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
 
   private startJarvisWatcher(): void {
     try {
+      this.jarvisWatcher?.close();
+      this.jarvisWatcher = undefined;
       const queuePath = getQueueDbPath();
       if (!fs.existsSync(queuePath)) return;
       let debounce: NodeJS.Timeout | undefined;
@@ -411,6 +400,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       .getConfiguration('claudeCockpit')
       .get<boolean>('cloudRoutines.enabled', false);
     const snap = snapshot(cwd, this.readBudgetConfig(), cloudRoutinesEnabled);
+    this.lastAlwaysLive = snap.pilot ? snap.pilot.alwaysLive : [];
     this.onSnapshot(snap);
     const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
     const pinnedMemory = this.globalState.get<string[]>(PINS_KEY, []);
@@ -448,7 +438,6 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
       },
       roadmap: this.roadmap,
-      jarvis: this.jarvis,
       changelog: this.readChangelogPayload(),
       updateStatus: this.readUpdateStatusPayload(),
       manage: readManageState(),
@@ -626,6 +615,14 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           });
         }
         return;
+      case 'copyText':
+        if (typeof msg.text === 'string' && msg.text) {
+          void vscode.env.clipboard.writeText(msg.text).then(() => {
+            const label = typeof msg.label === 'string' && msg.label ? msg.label : 'text';
+            void vscode.window.setStatusBarMessage(`Copied ${label}`, 1500);
+          });
+        }
+        return;
       case 'revealInOS':
         if (msg.path) {
           void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(msg.path));
@@ -788,6 +785,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       case 'runRoutine': {
         const name = msg.routineName;
         if (!name) return;
+        if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(name)) {
+          logger.warn(`runRoutine: rejected invalid name "${name}"`);
+          return;
+        }
         const skill = path.join(os.homedir(), '.claude', 'scheduled-tasks', name, 'SKILL.md');
         if (!fs.existsSync(skill)) {
           void vscode.window.showErrorMessage(`Cockpit: routine SKILL.md not found at ${skill}`);
@@ -953,9 +954,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       }
       case 'runSecurityScan': {
         if (this.securityInflight) return;
+        // NOTE: scanSecurity is sync I/O (readFileSync per file) and blocks
+        // the extension host while it runs. Keep this user-triggered only —
+        // never call from a timer or auto-refresh.
         this.securityInflight = (async () => {
           try {
-            // Run scan off the event loop; readFile calls are sync but cheap.
+            // Yield once so we don't block the message-handling tick.
             this.security = await new Promise((resolve) => {
               setImmediate(() => resolve(scanSecurity(cwd)));
             });
@@ -1011,10 +1015,21 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           return;
         }
         // Translate "control+option+space" → AppleScript form. Keep it
-        // narrow — we only support common modifiers + a single key.
+        // narrow — we only support common modifiers + a single key. Validate
+        // strictly to avoid AppleScript injection through user settings.
         const parts = userShortcut.toLowerCase().split('+').map((s) => s.trim());
         const keyPart = parts.pop();
-        if (!keyPart) return;
+        if (!keyPart || !/^[a-z0-9 ]$/.test(keyPart)) {
+          logger.warn(`wispr trigger: invalid key "${keyPart ?? ''}"`);
+          return;
+        }
+        const allowedMods = new Set(['cmd', 'command', 'ctrl', 'control', 'alt', 'option', 'shift', 'fn']);
+        for (const p of parts) {
+          if (!allowedMods.has(p)) {
+            logger.warn(`wispr trigger: invalid modifier "${p}"`);
+            return;
+          }
+        }
         const mods: string[] = [];
         if (parts.includes('control') || parts.includes('ctrl')) mods.push('control down');
         if (parts.includes('option') || parts.includes('alt')) mods.push('option down');

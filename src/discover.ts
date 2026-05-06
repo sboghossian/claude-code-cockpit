@@ -268,7 +268,11 @@ export interface CreateRoutineResult {
 // All read-only, all opt-in (gated by claudeCockpit.discover.enabled).
 // ===========================================================================
 
-function httpGet(rawUrl: string, timeoutMs = 8000): Promise<{ status: number; body: string }> {
+function httpGet(
+  rawUrl: string,
+  timeoutMs = 8000,
+  hopsLeft = 5,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     let parsed: URL;
     try {
@@ -287,11 +291,48 @@ function httpGet(rawUrl: string, timeoutMs = 8000): Promise<{ status: number; bo
         },
       },
       (res) => {
+        const code = res.statusCode || 0;
+        // Follow redirects up to a hop cap of 5.
+        if ([301, 302, 303, 307, 308].includes(code)) {
+          const loc = res.headers.location;
+          res.resume();
+          if (!loc) {
+            reject(new Error(`HTTP ${code} without Location header for ${rawUrl}`));
+            return;
+          }
+          if (hopsLeft <= 0) {
+            reject(new Error(`HTTP redirect hop cap exceeded for ${rawUrl}`));
+            return;
+          }
+          let next: string;
+          try {
+            next = new URL(loc, parsed).toString();
+          } catch (err) {
+            reject(err);
+            return;
+          }
+          httpGet(next, timeoutMs, hopsLeft - 1).then(resolve, reject);
+          return;
+        }
         let body = '';
+        let total = 0;
+        const MAX = 2_000_000;
+        let aborted = false;
         res.setEncoding('utf8');
-        res.on('data', (chunk: string) => { body += chunk; });
+        res.on('data', (chunk: string) => {
+          if (aborted) return;
+          total += chunk.length;
+          if (total > MAX) {
+            aborted = true;
+            res.destroy();
+            reject(new Error(`HTTP body exceeded ${MAX} bytes for ${rawUrl}`));
+            return;
+          }
+          body += chunk;
+        });
         res.on('end', () => {
-          resolve({ status: res.statusCode || 0, body });
+          if (aborted) return;
+          resolve({ status: code, body });
         });
       },
     );

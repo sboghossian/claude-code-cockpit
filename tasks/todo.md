@@ -2,6 +2,33 @@
 
 VSCode extension that surfaces Claude Code's hidden state directly in the editor. Sibling to `claude-overlay` (macOS menubar, cross-surface) — this one is VSCode-native, focused on the Code surface.
 
+## v0.21.0 — Bug-fix + system stats wave (DONE)
+
+### Fixed
+
+- [x] Talk widget ResizeObserver / AudioContext leak on refresh
+- [x] Recommendations dropdown routing to renamed tabs (library/settings)
+- [x] Roadmap auto-fetch on `'timeline'` tab id
+- [x] Manage tab rendering `"undefined"` for missing config keys
+- [x] Tab bar sticky positioning clipping 12px on scroll
+- [x] Welcome dismiss / reset-first-run / goto-tab instant re-render
+- [x] Per-day cost attribution splitting correctly across model families
+- [x] Wispr shortcut validated against injection-safe whitelist before AppleScript dispatch
+- [x] `runRoutine` validates routine name with strict regex (blocks path traversal)
+- [x] App-usage tracker timer leak on extension reload; local-tz used consistently
+- [x] `httpGet` capped at 2 MB, follows up to 5 redirects
+- [x] Git branch detection in worktrees (`gitdir:` parsing)
+- [x] Mac Health network parser tolerates macOS Sequoia layout variations
+- [x] Security scan processes long lines in 2000-char windows (was skipping them)
+- [x] `listProjects` uses head-only session reader on refresh
+- [x] Health refresh no longer double-runs the full snapshot scan
+- [x] Jarvis dead-code paths removed from inbound message union
+
+### Added
+
+- [x] Tab icons — inline-SVG line icon beside every tab label; theme-adaptive via `currentColor`; covers all 20 tabs
+- [x] System Stats cards in the Mac tab — CPU (used %, stacked bar, core count, model), Memory (pressure %, wired/active/compressed/free, swap), Energy (battery %, cycle count, health %, wattage, time remaining, source pill), Disk (per-volume mini bars), Network (rx/tx KB/s, interface, SSID, IPv4, per-interface IPs); green/amber/red tones at existing thresholds; single-column collapse under 300 px
+
 ## Phase 1 (this PR) — read-only sidebar
 
 Goal: prove the data plumbing. No mutations to `~/.claude/`.

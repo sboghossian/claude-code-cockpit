@@ -488,10 +488,25 @@ export function readGitBranchSync(cwd: string | undefined): string | undefined {
   if (!cwd) return undefined;
   let dir = cwd;
   for (let i = 0; i < 8; i++) {
-    const head = path.join(dir, '.git', 'HEAD');
-    if (fs.existsSync(head)) {
+    const dotGit = path.join(dir, '.git');
+    if (fs.existsSync(dotGit)) {
+      let headPath = path.join(dotGit, 'HEAD');
       try {
-        const raw = fs.readFileSync(head, 'utf8').trim();
+        const dotGitStat = fs.statSync(dotGit);
+        if (dotGitStat.isFile()) {
+          // Worktree: .git is a text file `gitdir: <path>` pointing at the
+          // real gitdir. HEAD lives inside that gitdir.
+          const pointer = fs.readFileSync(dotGit, 'utf8').trim();
+          const gm = /^gitdir:\s*(.+)$/.exec(pointer);
+          if (!gm) return undefined;
+          const gitdir = path.isAbsolute(gm[1]) ? gm[1] : path.resolve(dir, gm[1]);
+          headPath = path.join(gitdir, 'HEAD');
+        }
+      } catch {
+        return undefined;
+      }
+      try {
+        const raw = fs.readFileSync(headPath, 'utf8').trim();
         const m = /^ref:\s+refs\/heads\/(.+)$/.exec(raw);
         if (m) return m[1];
         // Detached HEAD — show short SHA.
@@ -954,8 +969,9 @@ export async function readRTKSavings(): Promise<RtkStatus> {
         return;
       }
       const totalCmds = (/Total commands:\s*(\d+)/.exec(stdout) ?? [])[1];
-      const saved = (/Tokens saved:\s*([\d.]+[KMB]?)\s*\(([\d.]+)%/.exec(stdout) ?? [])[1];
-      const pct = (/Tokens saved:\s*[\d.]+[KMB]?\s*\(([\d.]+)%/.exec(stdout) ?? [])[1];
+      const savedMatch = /Tokens saved:\s*([\d.]+[KMB]?)\s*\(([\d.]+)%/.exec(stdout);
+      const saved = savedMatch?.[1];
+      const pct = savedMatch?.[2];
       const top = (/^\s*1\.\s+(\S.+?)\s{2}/m.exec(stdout) ?? [])[1];
       const status: RtkStatus = {
         installed: true,

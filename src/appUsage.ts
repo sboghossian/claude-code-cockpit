@@ -38,12 +38,20 @@ function emptyDay(date: string): AppUsageDay {
   return { date, totalSeconds: 0, perApp: {}, perHour: {} };
 }
 
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const MM = String(d.getMonth() + 1).padStart(2, '0');
+  const DD = String(d.getDate()).padStart(2, '0');
+  return `${y}-${MM}-${DD}`;
+}
+
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Use local date so it agrees with `new Date().getHours()` in `perHour`.
+  return localDateKey(new Date());
 }
 
 function yesterdayKey(): string {
-  return new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  return localDateKey(new Date(Date.now() - 86_400_000));
 }
 
 function load(state: vscode.Memento): PersistedShape {
@@ -56,7 +64,7 @@ function load(state: vscode.Memento): PersistedShape {
 
 function save(state: vscode.Memento, val: PersistedShape): Thenable<void> {
   // Cap retention to last 30 days to keep globalState lean.
-  const cutoff = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const cutoff = localDateKey(new Date(Date.now() - 30 * 86_400_000));
   for (const k of Object.keys(val.days)) {
     if (k < cutoff) delete val.days[k];
   }
@@ -82,8 +90,6 @@ function readFrontmost(): Promise<string | undefined> {
     );
   });
 }
-
-let timer: NodeJS.Timeout | undefined;
 
 export function startAppUsageTracker(state: vscode.Memento): () => void {
   // Always-on for darwin. No-op elsewhere.
@@ -116,7 +122,7 @@ export function startAppUsageTracker(state: vscode.Memento): () => void {
   }
   // Sample once on start so users see something fast, then on interval.
   void sample();
-  timer = setInterval(() => void sample(), SAMPLE_INTERVAL_MS);
+  let timer: NodeJS.Timeout | undefined = setInterval(() => void sample(), SAMPLE_INTERVAL_MS);
   return () => {
     if (timer) clearInterval(timer);
     timer = undefined;
