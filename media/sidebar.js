@@ -58,6 +58,386 @@
     return `<section class="notif-strip">${items}</section>`;
   }
 
+  function fmtBytes(gb) {
+    if (gb >= 1000) return `${(gb / 1000).toFixed(2)} TB`;
+    if (gb >= 1) return `${gb.toFixed(2)} GB`;
+    return `${(gb * 1000).toFixed(0)} MB`;
+  }
+
+  function fmtSeconds(s) {
+    if (!s) return '0m';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+
+  function macHealthSection(snap) {
+    const m = snap.macHealth;
+    if (!m || !m.available) {
+      return `
+        <h2>Mac Health</h2>
+        <p class="empty">Mac-specific metrics only available on macOS.</p>
+      `;
+    }
+    if (!m.disk && !m.memory && !m.battery && !m.cpu) {
+      return `
+        <h2>Mac Health</h2>
+        <p class="empty">Probing system… refresh in a moment.</p>
+      `;
+    }
+    const healthBadge = `<span class="health-badge health-${escapeHtml(m.overallHealth)}">${escapeHtml(m.overallHealth)}</span>`;
+    const cards = [];
+    if (m.disk) {
+      const tone = m.disk.usedPct > 90 ? 'danger' : m.disk.usedPct > 75 ? 'warn' : 'ok';
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">Macintosh HD</div>
+          <div class="mac-card-value">${fmtBytes(m.disk.availableGb)} free</div>
+          <div class="bar"><div class="bar-fill bar-${tone}" style="width: ${m.disk.usedPct.toFixed(1)}%"></div></div>
+          <div class="mac-card-sub">${escapeHtml(m.disk.usedPct.toFixed(0))}% used of ${fmtBytes(m.disk.totalGb)}</div>
+        </div>`);
+    }
+    if (m.memory) {
+      const tone = m.memory.pressurePct > 90 ? 'danger' : m.memory.pressurePct > 75 ? 'warn' : 'ok';
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">Memory</div>
+          <div class="mac-card-value">${m.memory.pressurePct.toFixed(0)}% pressure</div>
+          <div class="bar"><div class="bar-fill bar-${tone}" style="width: ${m.memory.pressurePct.toFixed(1)}%"></div></div>
+          <div class="mac-card-sub">${fmtBytes(m.memory.appUsedGb)} app · ${fmtBytes(m.memory.wiredGb)} wired · ${fmtBytes(m.memory.totalGb)} total</div>
+        </div>`);
+    }
+    if (m.battery) {
+      const charge = m.battery.fullyCharged
+        ? 'Fully charged'
+        : m.battery.isCharging
+          ? `Charging${m.battery.timeRemaining ? ' · ' + m.battery.timeRemaining : ''}`
+          : m.battery.isPluggedIn
+            ? 'Plugged in'
+            : `On battery${m.battery.timeRemaining ? ' · ' + m.battery.timeRemaining + ' left' : ''}`;
+      const tone = m.battery.pct > 50 ? 'ok' : m.battery.pct > 20 ? 'warn' : 'danger';
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">Battery ${m.battery.isCharging ? '⚡' : ''}</div>
+          <div class="mac-card-value">${m.battery.pct}%</div>
+          <div class="bar"><div class="bar-fill bar-${tone}" style="width: ${m.battery.pct}%"></div></div>
+          <div class="mac-card-sub">${escapeHtml(charge)}</div>
+        </div>`);
+    }
+    if (m.cpu) {
+      const tone = m.cpu.loadPct1 > 200 ? 'danger' : m.cpu.loadPct1 > 100 ? 'warn' : 'ok';
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">CPU</div>
+          <div class="mac-card-value">${m.cpu.loadPct1.toFixed(0)}% load</div>
+          <div class="bar"><div class="bar-fill bar-${tone}" style="width: ${Math.min(100, m.cpu.loadPct1).toFixed(1)}%"></div></div>
+          <div class="mac-card-sub">${m.cpu.loadAvg1.toFixed(2)} · ${m.cpu.loadAvg5.toFixed(2)} · ${m.cpu.loadAvg15.toFixed(2)} on ${m.cpu.cores} cores</div>
+        </div>`);
+    }
+    if (m.network) {
+      const wifi = m.network.ssid ? `${m.network.ssid}` : m.network.interfaceName;
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">Network · ${escapeHtml(wifi)}</div>
+          <div class="mac-card-value">${m.network.rxKbps.toFixed(0)} ↓ / ${m.network.txKbps.toFixed(0)} ↑ KB/s</div>
+          <div class="mac-card-sub">interface: ${escapeHtml(m.network.interfaceName)}</div>
+        </div>`);
+    }
+    if (m.cpu && m.cpu.uptime) {
+      cards.push(`
+        <div class="mac-card">
+          <div class="mac-card-label">Uptime</div>
+          <div class="mac-card-value">${m.cpu.uptime.days}d ${m.cpu.uptime.hours}h ${m.cpu.uptime.minutes}m</div>
+          <div class="mac-card-sub">${escapeHtml(m.hostname)}${m.model ? ' · ' + escapeHtml(m.model) : ''}</div>
+        </div>`);
+    }
+
+    const drives = (m.externalDrives || [])
+      .map(
+        (d) => `
+        <div class="mac-card">
+          <div class="mac-card-label">${escapeHtml(d.name)}</div>
+          <div class="mac-card-value">${fmtBytes(d.availableGb)} free</div>
+          <div class="bar"><div class="bar-fill bar-${d.usedPct > 90 ? 'danger' : d.usedPct > 75 ? 'warn' : 'ok'}" style="width: ${d.usedPct.toFixed(1)}%"></div></div>
+          <div class="mac-card-sub">${d.usedPct.toFixed(0)}% used of ${fmtBytes(d.totalGb)}</div>
+        </div>`,
+      )
+      .join('');
+
+    const bt = (m.bluetooth || [])
+      .map((d) => {
+        const pct = typeof d.battery === 'number' ? d.battery : undefined;
+        const ringColor = pct === undefined
+          ? 'var(--vscode-editorWidget-border)'
+          : pct > 50
+            ? '#6ad48f'
+            : pct > 20
+              ? '#ffa05a'
+              : '#e36161';
+        return `
+          <div class="bt-device">
+            <div class="bt-ring" style="--pct: ${pct ?? 0}; --ring: ${ringColor};"></div>
+            <div class="bt-name">${escapeHtml(d.name)}</div>
+            <div class="bt-meta">${pct !== undefined ? pct + '%' : (d.connected ? 'connected' : 'disconnected')}${d.kind ? ' · ' + escapeHtml(d.kind) : ''}</div>
+          </div>`;
+      })
+      .join('');
+
+    return `
+      <h2>Mac Health ${healthBadge}</h2>
+      <div class="mac-grid">${cards.join('')}</div>
+      ${drives ? `<h3 class="sub-h">External drives</h3><div class="mac-grid">${drives}</div>` : ''}
+      ${bt ? `<h3 class="sub-h">Bluetooth peripherals</h3><div class="bt-grid">${bt}</div>` : ''}
+      ${appUsageSection(snap)}
+    `;
+  }
+
+  function appUsageSection(snap) {
+    const u = snap.appUsage;
+    if (!u || !u.available) return '';
+    const total = u.today.totalSeconds;
+    if (total === 0) {
+      return `
+        <h3 class="sub-h">Application time today</h3>
+        <p class="empty" style="font-size: 11px;">Tracking starts on activation. Sample once per minute. Data shows up after a few minutes.</p>
+      `;
+    }
+    const max = Math.max(...u.hourly.map((h) => h.total), 60);
+    let bars = '<div style="display: grid; grid-template-columns: repeat(24, 1fr); gap: 1px; align-items: end; height: 60px;">';
+    for (const h of u.hourly) {
+      const pct = (h.total / max) * 100;
+      const bg = h.total > 0 ? 'var(--vscode-charts-blue, var(--vscode-textLink-foreground))' : 'transparent';
+      const title = `${h.hour.toString().padStart(2, '0')}:00 — ${fmtSeconds(h.total)}${h.topApp ? ' · ' + h.topApp : ''}`;
+      bars += `<div title="${escapeHtml(title)}" style="height: ${pct.toFixed(0)}%; background: ${bg}; min-height: 1px; border-radius: 1px 1px 0 0;"></div>`;
+    }
+    bars += '</div>';
+    bars += '<div style="display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 4px; font-size: 9px; color: var(--vscode-descriptionForeground);"><div>00</div><div>06</div><div>12</div><div>18</div></div>';
+    const apps = u.topApps
+      .slice(0, 8)
+      .map(
+        (a) => `
+        <div class="cost-tool-row">
+          <span class="tool-name">${escapeHtml(a.name)}</span>
+          <span>${escapeHtml(fmtSeconds(a.seconds))} · ${a.pct.toFixed(0)}%</span>
+        </div>
+        <div class="bar"><div class="bar-fill" style="width: ${a.pct.toFixed(1)}%"></div></div>`,
+      )
+      .join('');
+    return `
+      <h3 class="sub-h">Application time today <span class="cost-rate">${fmtSeconds(total)}</span></h3>
+      ${bars}
+      ${apps}
+      <p class="empty" style="font-size: 10px; margin-top: 6px;">Frontmost app sampled every minute while VSCode is running. Local-only — no telemetry.</p>
+    `;
+  }
+
+  function helpSection() {
+    const tabs = [
+      ['Now', 'Your live cockpit. Greeting, alerts that need attention (Inbox), at-a-glance stats, your active Claude session details (tokens, cost, files, tools).'],
+      ['Mac', 'Mac system health: disk, memory, battery, CPU, Wi-Fi, external drives, Bluetooth peripheral battery levels. Plus application time tracked today.'],
+      ['Watchtower', 'Every Claude Code session touched in the last hour, color-coded green (live) → orange (idle) → grey (stale). Click any session to inspect.'],
+      ['Agents', 'Your specialist council — agent definitions found in <code>~/.claude/agents/</code> (global) and <code>.claude/agents/</code> (per-workspace).'],
+      ['Chat', 'Conversations from claude.ai (the web Chat surface) parsed from a <code>claude-data-export</code> folder. Cockpit unifies Chat + Code in one view.'],
+      ['Search', 'Grep across every Claude session JSONL on this machine. Min 2 chars. Click a hit to open the source session.'],
+      ['Obsidian', 'Auto-detects your Obsidian vaults, lists recent notes, lets you save the active session as a markdown digest with one click.'],
+      ['Memory', 'Persistent memory entries Claude has saved across conversations. Pin (📌) the ones you reference most. Stale entries (>30 days) are flagged.'],
+      ['Prompts', 'Personal prompt library. Click any prompt to copy it to your clipboard, paste into Claude.'],
+      ['Skills', 'Every <code>SKILL.md</code> Claude has access to. Click to copy <code>/skill-name</code> to your clipboard. Usage counts show how often each fires this session.'],
+      ['Projects', 'Recent projects with Claude Code history. Click to open a project folder in a new VSCode window.'],
+      ['Files', 'Browse <code>~/.claude/</code> (the "mother folder") and the active project folder. Reveal in Finder.'],
+      ['Config', 'Budget caps, RTK token-killer stats, Cloudflare tunnels, MCP servers, hooks, plugins, disk usage, office visualizer launcher.'],
+    ];
+    const metrics = [
+      ['Tokens', 'Sum of input + output + cache-read + cache-write tokens for this session.'],
+      ['Input tokens', 'New text Claude reads (your prompts, file contents, tool results).'],
+      ['Output tokens', 'Text Claude generates back (its responses).'],
+      ['Cache read', 'Tokens served from prompt cache — much cheaper than fresh input.'],
+      ['Cache write', 'Tokens added to the cache for future reuse.'],
+      ['Cache hit rate', 'cache reads ÷ (cache reads + fresh input). Higher = cheaper sessions. Below 30% on long sessions usually means you can structure your prompts better.'],
+      ['Context window', 'Maximum tokens Claude can hold in working memory. 200K (default) or 1M (extended). When fill % approaches 100, run <code>/compact</code> or start fresh.'],
+      ['Cost burn ($/hr)', 'Total session cost ÷ wall-clock duration. A live "is this getting expensive?" gauge.'],
+      ['Streak', 'Consecutive days with Claude Code activity (counted from yesterday backwards — today doesn\'t count yet).'],
+      ['Active days · 30d', 'How many of the last 30 days had any Claude Code session activity.'],
+      ['Peak hour', 'Hour of day where you ran the most events in the last 7 days.'],
+      ['Favorite model', 'Whichever model family (Opus / Sonnet / Haiku) used the most tokens in the last 7 days.'],
+      ['Streak vs Active days', 'Streak is consecutive. Active days is total. A 22-day streak = 22 active days in a row. 27 active days in 30 = had 3 off days but not necessarily consecutive.'],
+      ['Watchtower status', 'green = live (touched <10s ago) · green = recent (<15min) · orange = idle (15-30min) · grey = stale (>30min).'],
+      ['Idle sentinel', 'Sessions sitting waiting for input. Often a sub-agent finished and you forgot.'],
+      ['Sub-agents', 'Specialized agents Claude spawned mid-session for sub-tasks. Each has its own JSONL log.'],
+      ['Tool histogram', 'Which tools (Read, Edit, Bash, etc.) Claude has used most this session.'],
+      ['Tool decisions', 'Recent tool calls with ✓ (succeeded), ✗ (errored), · (still running).'],
+      ['Plans', 'Auto-detected from <code>tasks/todo.md</code>, <code>forkcast.md</code>, etc. Counts <code>[x]</code> done vs <code>[ ]</code> pending checkboxes.'],
+      ['MCP servers', 'Model Context Protocol servers giving Claude extra tools (Linear, Gmail, Notion, etc.).'],
+      ['Hooks', 'Shell commands the harness runs automatically on events like Stop, UserPromptSubmit, ToolUse.'],
+      ['RTK', 'Rust Token Killer — Stephane\'s CLI proxy that rewrites verbose commands into compact equivalents to save context tokens. Shows cumulative savings.'],
+      ['Tunnels', 'Cloudflare tunnels exposing local services to public hostnames (e.g. <code>cockpit.dashable.dev</code>).'],
+      ['Mac Health: pressure', 'Memory pressure = how much of your RAM is actively being used. >75% = your Mac is starting to swap; >90% = noticeable slowdown.'],
+      ['Mac Health: load avg', 'Average tasks waiting for CPU. Above your core count for 15min straight means the machine is under sustained load.'],
+      ['Application time', 'How long each Mac app has been frontmost today. Sampled once per minute; only counts time while VSCode is open.'],
+    ];
+    return `
+      <h2>Help · how to read this thing</h2>
+      <p class="empty" style="font-size: 11px; margin-bottom: 12px;">Cockpit reads files Claude Code stores under <code>~/.claude/</code> plus a few system sources on macOS. Everything is local — zero telemetry, zero network calls (except optional Obsidian/Cloudflare/usage-dashboard handoffs).</p>
+
+      <h3 class="sub-h">Tabs</h3>
+      <ul class="list">
+        ${tabs.map(([t, d]) => `<li><div class="row"><span class="left"><strong>${t}</strong></span></div><div class="note-excerpt">${d}</div></li>`).join('')}
+      </ul>
+
+      <h3 class="sub-h">Metrics</h3>
+      <ul class="list">
+        ${metrics.map(([t, d]) => `<li><div class="row"><span class="left"><strong>${escapeHtml(t)}</strong></span></div><div class="note-excerpt">${d}</div></li>`).join('')}
+      </ul>
+
+      <h3 class="sub-h">Privacy</h3>
+      <p class="empty" style="font-size: 11px;">All data is read-only and stays on your machine. Cockpit never makes outbound network calls except: (1) when you click an Obsidian link (<code>obsidian://</code>), (2) when you click a Cloudflare tunnel hostname (opens external), or (3) when probing localhost ports for the optional claude-usage dashboard. The webview content security policy blocks all <code>connect-src</code>.</p>
+
+      <h3 class="sub-h">Where data comes from</h3>
+      <ul class="list">
+        <li><strong>Sessions:</strong> <code>~/.claude/projects/&lt;encoded-cwd&gt;/*.jsonl</code></li>
+        <li><strong>Memory:</strong> <code>~/.claude/projects/&lt;encoded-cwd&gt;/memory/MEMORY.md</code> + linked files</li>
+        <li><strong>Skills:</strong> <code>~/.claude/skills/&lt;name&gt;/SKILL.md</code></li>
+        <li><strong>Agents:</strong> <code>~/.claude/agents/&lt;name&gt;.md</code> + <code>.claude/agents/</code></li>
+        <li><strong>Hooks/MCP:</strong> <code>~/.claude/settings.json</code></li>
+        <li><strong>Obsidian:</strong> <code>~/Library/Application Support/obsidian/obsidian.json</code></li>
+        <li><strong>Tunnels:</strong> <code>~/.cloudflared/*.yml</code></li>
+        <li><strong>Mac Health:</strong> <code>df</code>, <code>vm_stat</code>, <code>pmset</code>, <code>sysctl</code>, <code>netstat</code>, <code>system_profiler SPBluetoothDataType</code></li>
+        <li><strong>App time:</strong> polling <code>lsappinfo front</code> once per minute</li>
+      </ul>
+    `;
+  }
+
+  function greetingSection(snap) {
+    const greet = snap.greeting || 'Hi';
+    const pilotName = (snap.pilot && snap.pilot.name) || 'there';
+    const live = (snap.watchtower || []).filter((w) => w.status === 'live').length;
+    const idle = (snap.watchtower || []).filter((w) => w.status === 'idle' || w.status === 'stale').length;
+    const inbox = (snap.inbox || []).length;
+    const meta = [];
+    if (live) meta.push(`<strong>${live}</strong> live run${live === 1 ? '' : 's'}`);
+    if (idle) meta.push(`<strong>${idle}</strong> idle`);
+    if (inbox) meta.push(`<strong>${inbox}</strong> need${inbox === 1 ? 's' : ''} you`);
+    return `
+      <div class="greeting">
+        <div class="greeting-line">${escapeHtml(greet)}, <strong>${escapeHtml(pilotName)}</strong></div>
+        <div class="greeting-meta">${meta.join(' · ') || 'all clear'}</div>
+      </div>
+    `;
+  }
+
+  function statsGridSection(snap) {
+    const cs = snap.cockpitStats;
+    if (!cs) return '';
+    const cards = [
+      { label: 'Streak', value: cs.streakDays > 0 ? `${cs.streakDays}d` : '—', accent: cs.streakDays >= 7 ? 'ok' : '' },
+      { label: 'Active days · 30d', value: String(cs.activeDays30), accent: '' },
+      { label: 'Peak hour', value: cs.peakHourLabel, accent: '' },
+      { label: 'Favorite model', value: cs.favoriteModel ? cs.favoriteModel : '—', accent: '' },
+      { label: 'Week cost', value: cs.weekUsdFormatted || '—', accent: '' },
+    ];
+    return `
+      <h2>At a glance</h2>
+      <div class="stats-grid">
+        ${cards
+          .map(
+            (c) => `<div class="stat-card ${c.accent ? 'stat-' + c.accent : ''}">
+              <div class="stat-label">${escapeHtml(c.label)}</div>
+              <div class="stat-value">${escapeHtml(c.value)}</div>
+            </div>`,
+          )
+          .join('')}
+      </div>
+    `;
+  }
+
+  function inboxSection(snap) {
+    const items = snap.inbox || [];
+    if (!items.length) return '';
+    const iconFor = (cat) =>
+      ({ idle: '◌', error: '✗', memory: '🗂', plan: '☐', subagent: '⚙', budget: '$' })[cat] || '·';
+    const cards = items
+      .slice(0, 8)
+      .map(
+        (it) => `
+        <div class="inbox-card inbox-${escapeHtml(it.level)}">
+          <div class="inbox-icon">${iconFor(it.category)}</div>
+          <div class="inbox-body">
+            <div class="inbox-title">${escapeHtml(it.title)}</div>
+            <div class="inbox-detail">${escapeHtml(it.detail)}</div>
+          </div>
+          ${it.action !== 'none' ? `<button class="inbox-action" data-inbox-action="${escapeHtml(it.action)}" data-inbox-payload="${escapeHtml(it.actionPayload || '')}">→</button>` : ''}
+        </div>`,
+      )
+      .join('');
+    return `<h2>Inbox <span class="cost-rate">${items.length} need${items.length === 1 ? 's' : ''} you</span></h2>${cards}`;
+  }
+
+  function agentsSection(snap) {
+    const list = snap.agents || [];
+    if (!list.length) {
+      return `
+        <h2>Agents</h2>
+        <p class="empty">No agents found in <code>~/.claude/agents/</code> or <code>.claude/agents/</code>.</p>
+      `;
+    }
+    const globals = list.filter((a) => a.scope === 'global');
+    const workspace = list.filter((a) => a.scope === 'workspace');
+    const renderOne = (a) => `
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <a class="left link" data-open-file="${escapeHtml(a.filePath)}" title="${escapeHtml(a.filePath)}"><strong>${escapeHtml(a.name)}</strong></a>
+          <span class="right">
+            ${a.scope === 'workspace' ? '<span class="tag tag-used">workspace</span>' : '<span class="tag">global</span>'}
+            ${a.model ? `<span class="tag">${escapeHtml(a.model)}</span>` : ''}
+          </span>
+        </div>
+        <div class="note-excerpt">${escapeHtml(a.description || 'No description')}</div>
+        ${a.tools ? `<div style="margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 10px;">tools: ${escapeHtml(a.tools)}</div>` : ''}
+      </div>
+    `;
+    return `
+      <h2>Agents <span class="cost-rate">${list.length}</span></h2>
+      <input type="search" class="search" data-search="agents" placeholder="Filter agents…" />
+      <ul class="list" data-search-target="agents" style="list-style: none; padding: 0;">
+        ${[
+          ...workspace.map((a) => `<li data-search-text="${escapeHtml((a.name + ' ' + a.description).toLowerCase())}">${renderOne(a)}</li>`),
+          ...globals.map((a) => `<li data-search-text="${escapeHtml((a.name + ' ' + a.description).toLowerCase())}">${renderOne(a)}</li>`),
+        ].join('')}
+      </ul>
+    `;
+  }
+
+  function tunnelsSection(snap) {
+    const list = snap.tunnels || [];
+    if (!list.length) return '';
+    const items = list
+      .map(
+        (t) => `<li>
+          <div class="row">
+            <a class="left link" data-open-file="${escapeHtml(t.configPath)}" title="${escapeHtml(t.configPath)}">${escapeHtml(t.name)}</a>
+            ${t.hostname ? `<span class="right"><a class="link" data-open-url="https://${escapeHtml(t.hostname)}">${escapeHtml(t.hostname)} ↗</a></span>` : ''}
+          </div>
+          ${t.service ? `<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">→ ${escapeHtml(t.service)}</div>` : ''}
+        </li>`,
+      )
+      .join('');
+    return `<h2>Tunnels <span class="cost-rate">${list.length}</span></h2><ul class="list">${items}</ul>`;
+  }
+
+  function rtkSection(snap) {
+    const r = snap.rtk;
+    if (!r || !r.installed) return '';
+    return `
+      <h2>RTK token killer <span class="cost-rate">${r.efficiencyPct ? r.efficiencyPct.toFixed(1) + '%' : '—'} efficient</span></h2>
+      <div class="kv">
+        <span class="k">Commands</span><span class="v">${r.totalCommands ? r.totalCommands.toLocaleString() : '—'}</span>
+        <span class="k">Saved</span><span class="v">${escapeHtml(r.tokensSaved || '—')}</span>
+        ${r.topCommand ? `<span class="k">Top</span><span class="v">${escapeHtml(r.topCommand.slice(0, 60))}</span>` : ''}
+      </div>
+    `;
+  }
+
   function plansSection(snap) {
     const plans = snap.plans || [];
     if (!plans.length) return '';
@@ -828,15 +1208,19 @@
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
       : 'Chat ◌';
+    const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
     return [
       { id: 'now', label: 'Now' },
+      { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
+      { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
       { id: 'chat', label: chatLabel },
       { id: 'search', label: 'Search' },
       { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
       { id: 'skills', label: `Skills (${snap.skills.length})` },
       { id: 'projects', label: `Projects (${snap.projects.length})` },
       { id: 'config', label: 'Config' },
+      { id: 'help', label: '? Help' },
     ];
   }
 
@@ -844,9 +1228,12 @@
     const chatLabel = snap.chatExport && snap.chatExport.installed
       ? `Chat (${snap.chatExport.conversationCount})`
       : 'Chat ◌';
+    const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
     return [
       { id: 'now', label: 'Now' },
+      { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
+      { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
       { id: 'chat', label: chatLabel },
       { id: 'search', label: 'Search' },
       { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
@@ -856,6 +1243,7 @@
       { id: 'projects', label: `Projects (${snap.projects.length})` },
       { id: 'files', label: 'Files' },
       { id: 'config', label: 'Config' },
+      { id: 'help', label: '? Help' },
     ];
   }
 
@@ -882,14 +1270,20 @@
       const tabBar = renderTabBar(tabs, activeTab);
       let body = '';
       if (activeTab === 'watchtower') body = watchtowerSection(snap);
+      else if (activeTab === 'mac') body = macHealthSection(snap);
+      else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'projects') body = projectsSection(snap);
-      else if (activeTab === 'config') body = `${budgetSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
+      else if (activeTab === 'help') body = helpSection();
+      else if (activeTab === 'config') body = `${budgetSection(snap)}${rtkSection(snap)}${tunnelsSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
       else body = `
+        ${greetingSection(snap)}
         ${notificationsSection(snap)}
+        ${inboxSection(snap)}
+        ${statsGridSection(snap)}
         ${quickActionsSection(snap)}
         <p class="empty">No Claude Code session for the open folder. Use Watchtower to see other projects, or run <code>claude</code> here to start.</p>
         ${heatmapSection(snap)}
@@ -955,7 +1349,10 @@
     let body = '';
     if (activeTab === 'now') {
       body = `
+        ${greetingSection(snap)}
         ${notificationsSection(snap)}
+        ${inboxSection(snap)}
+        ${statsGridSection(snap)}
         ${pilotSection(snap)}
         ${quickActionsSection(snap)}
         ${plansSection(snap)}
@@ -996,9 +1393,17 @@
       body = projectsSection(snap);
     } else if (activeTab === 'files') {
       body = filesSection(snap);
+    } else if (activeTab === 'agents') {
+      body = agentsSection(snap);
+    } else if (activeTab === 'mac') {
+      body = macHealthSection(snap);
+    } else if (activeTab === 'help') {
+      body = helpSection();
     } else if (activeTab === 'config') {
       body = `
         ${budgetSection(snap)}
+        ${rtkSection(snap)}
+        ${tunnelsSection(snap)}
         ${usageDashboardSection(snap)}
         ${officeSection(snap)}
         ${settingsSection(snap)}
@@ -1073,6 +1478,20 @@
         const a = btn.getAttribute('data-notif-action');
         if (a === 'openMemory') vscode.postMessage({ type: 'openMemory' });
         else if (a === 'openSession') vscode.postMessage({ type: 'openSessionFile' });
+      });
+    });
+
+    root.querySelectorAll('button[data-inbox-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-inbox-action');
+        const payload = btn.getAttribute('data-inbox-payload');
+        if (action === 'openMemory') {
+          vscode.postMessage({ type: 'openMemory' });
+        } else if (action === 'openSession' && payload) {
+          vscode.postMessage({ type: 'openFile', filePath: payload });
+        } else if (action === 'openFile' && payload) {
+          vscode.postMessage({ type: 'openFile', filePath: payload });
+        }
       });
     });
 

@@ -29,6 +29,58 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 - [x] Enabled plugins panel
 - [x] Sessions are first-class, not workspace folders (v0.2.0 refactor)
 
+## v0.8.0 — Personal OS HUD (DONE, shipped)
+
+User goal: cockpit becomes the "personal OS" surface for VSCode users —
+glanceable system health + Claude state + actionable inbox + plain-language
+explanations for non-power-users. Shipped:
+
+- [x] **Greeting header** — time-aware ("Morning, Stephane · 4 live runs ·
+      2 need you")
+- [x] **At-a-glance stats grid** — Streak (consecutive days), Active days
+      (30d), Peak hour (last 7d), Favorite model, Week cost
+- [x] **Inbox panel** — aggregated needs-you items: idle sessions, errored
+      tools, stale memories, pending plan checkboxes, working sub-agents,
+      budget breaches
+- [x] **Agents tab** — read `.claude/agents/*.md` (global + workspace),
+      surface description / model / tools / color
+- [x] **Tunnels** — read `~/.cloudflared/*.yml` and subdir configs, surface
+      tunnel-name → hostname → service mapping with click-to-open
+- [x] **RTK token killer** — if `rtk` is in PATH, run `rtk gain` (cached 60s),
+      surface efficiency % + total saved + top command in Config tab
+- [x] **Mac Health tab** — disk / memory pressure / battery / CPU load /
+      Wi-Fi throughput / external drives / Bluetooth peripheral rings (with
+      battery levels for AirPods, keyboard, mouse, etc.) — plus an overall
+      excellent/good/attention badge
+- [x] **App usage tracker** — polling-based focus tracker via
+      `lsappinfo front` once per minute, persists per-day per-app per-hour
+      in globalState (30-day retention), renders today's hourly bar chart
+      + top-8 apps. Local-only.
+- [x] **Help tab** — plain-language explanations of every tab, every metric,
+      data sources, and privacy model. For users who aren't deep into Claude
+      Code internals.
+- [x] **+4 tests** (33/33 pass): readAgents, readTunnels, computeStats,
+      computeInbox
+
+### Recon notes (so compaction doesn't lose them)
+- Mac Health uses: `df -k`, `vm_stat` + `sysctl hw.memsize`, `pmset -g batt`,
+  `sysctl -n vm.loadavg`, `route -n get default` + `netstat -bI`,
+  `system_profiler SPBluetoothDataType -json`, `networksetup
+  -getairportnetwork`. Cached 8s in module scope. Async refresh every 30s
+  while sidebar view is open.
+- App usage poll: `/usr/bin/lsappinfo front` returns `"App Name"`. Cheap
+  (sub-100ms). 1min cadence keeps overhead trivial. globalState key:
+  `claudeCockpit.appUsage`.
+- Health tone thresholds: disk 75/90, memory pressure 75/90, battery <15
+  unplugged = bad, CPU load %1 100/200.
+- BT peripheral rings use a CSS conic-gradient + inner mask for the donut.
+  `--pct` and `--ring` CSS variables drive the visual.
+- RTK probe: `execFile('rtk', ['gain'], { timeout: 4000 })`. Parses
+  "Tokens saved: X.YM (NN.N%)" line. Runs once on view-open via async
+  refresh. If rtk is missing, the section quietly omits itself.
+- Help tab data is hardcoded in `sidebar.js:helpSection()` for now —
+  trivial to maintain since the cockpit surface area is finite.
+
 ## v0.7.0 — Cross-surface bridge (DONE, shipped)
 
 User asked for ideas mined from neighboring projects in `~/Documents/Code/`.

@@ -18,6 +18,7 @@ import {
   saveSessionToVault,
   SessionDigest,
 } from './obsidian';
+import { startAppUsageTracker } from './appUsage';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
 
@@ -210,6 +211,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   status.update(snapshot(cwd, readBudgetConfig()));
+
+  const stopUsage = startAppUsageTracker(context.globalState);
+  context.subscriptions.push({ dispose: stopUsage });
 
   context.subscriptions.push({ dispose: () => status.dispose() });
   context.subscriptions.push({ dispose: () => logger.dispose() });

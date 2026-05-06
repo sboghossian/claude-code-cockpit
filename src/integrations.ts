@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
@@ -412,5 +413,480 @@ export function detectUsageDashboardSync(): UsageDashboardStatus {
     installPath,
     runningOnPort: undefined,
     url: undefined,
+  };
+}
+
+// ===========================================================================
+// Stats grid — streak, active days, peak hour, favorite model, week cost.
+// ===========================================================================
+
+export interface CockpitStats {
+  streakDays: number;
+  activeDays30: number;
+  peakHour: number | undefined;
+  peakHourLabel: string;
+  favoriteModel: string | undefined;
+  weekUsdRaw: number;
+  totalSessions: number;
+}
+
+interface StatsInput {
+  byHour: number[];
+  byDay: number[];
+  watchtower: { lastActivityMs: number; modelFamily: string; totalUsd: number }[];
+  todayUsdRaw: number;
+}
+
+export function computeStats(input: StatsInput): CockpitStats {
+  // Active days: count days in last 30 with any activity.
+  const claudeHome = path.join(os.homedir(), '.claude', 'projects');
+  const days30 = new Set<string>();
+  let streak = 0;
+  let weekUsd = 0;
+  let totalSessions = 0;
+  const modelTokens: Record<string, number> = {};
+  if (fs.existsSync(claudeHome)) {
+    let projects: string[] = [];
+    try {
+      projects = fs.readdirSync(claudeHome);
+    } catch {
+      /* ignore */
+    }
+    const now = Date.now();
+    const cutoff30 = now - 30 * 86_400_000;
+    const cutoff7 = now - 7 * 86_400_000;
+    for (const proj of projects) {
+      const dir = path.join(claudeHome, proj);
+      let files: string[] = [];
+      try {
+        files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        const full = path.join(dir, f);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(full);
+        } catch {
+          continue;
+        }
+        if (stat.mtimeMs < cutoff30) continue;
+        totalSessions += 1;
+        const dayKey = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+        days30.add(dayKey);
+        if (stat.mtimeMs >= cutoff7) {
+          // Tally model + tokens cheaply for favorite/cost.
+          let raw: string;
+          try {
+            raw = fs.readFileSync(full, 'utf8');
+          } catch {
+            continue;
+          }
+          let lastModel: string | undefined;
+          for (const line of raw.split('\n')) {
+            const mModel = line.match(/"model"\s*:\s*"([^"]+)"/);
+            if (mModel) lastModel = mModel[1];
+            const usage = line.match(
+              /"usage"\s*:\s*\{[^}]*"input_tokens"\s*:\s*(\d+)[^}]*"output_tokens"\s*:\s*(\d+)/,
+            );
+            if (usage && lastModel) {
+              const fam = lastModel.toLowerCase().includes('opus')
+                ? 'opus'
+                : lastModel.toLowerCase().includes('sonnet')
+                  ? 'sonnet'
+                  : lastModel.toLowerCase().includes('haiku')
+                    ? 'haiku'
+                    : 'unknown';
+              modelTokens[fam] = (modelTokens[fam] ?? 0) + Number(usage[1]) + Number(usage[2]);
+            }
+          }
+        }
+      }
+    }
+    // Streak: count consecutive days back from today.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today.getTime() - i * 86_400_000);
+      const k = d.toISOString().slice(0, 10);
+      if (days30.has(k)) {
+        streak += 1;
+      } else {
+        // Allow today to be empty — streak only breaks if a *prior* day has none.
+        if (i === 0) continue;
+        break;
+      }
+    }
+  }
+
+  let peakHour: number | undefined;
+  let peakCount = -1;
+  input.byHour.forEach((c, h) => {
+    if (c > peakCount) {
+      peakCount = c;
+      peakHour = h;
+    }
+  });
+  const peakHourLabel =
+    peakHour === undefined || peakCount <= 0
+      ? '—'
+      : peakHour === 0
+        ? '12 AM'
+        : peakHour < 12
+          ? `${peakHour} AM`
+          : peakHour === 12
+            ? '12 PM'
+            : `${peakHour - 12} PM`;
+
+  let favoriteModel: string | undefined;
+  let favCount = 0;
+  for (const [fam, count] of Object.entries(modelTokens)) {
+    if (count > favCount) {
+      favCount = count;
+      favoriteModel = fam;
+    }
+  }
+
+  // Week cost: rough sum across watchtower-tracked sessions in last 7d.
+  // Most accurate signal we have without re-walking everything.
+  weekUsd = input.watchtower.reduce((a, b) => a + b.totalUsd, 0) + input.todayUsdRaw;
+
+  return {
+    streakDays: streak,
+    activeDays30: days30.size,
+    peakHour,
+    peakHourLabel,
+    favoriteModel,
+    weekUsdRaw: weekUsd,
+    totalSessions,
+  };
+}
+
+// ===========================================================================
+// Inbox — aggregated "needs you" items for glance-at-a-time triage.
+// ===========================================================================
+
+export interface InboxItem {
+  id: string;
+  level: 'info' | 'warn' | 'danger';
+  category: 'idle' | 'error' | 'memory' | 'plan' | 'subagent' | 'budget';
+  title: string;
+  detail: string;
+  action: 'openSession' | 'openMemory' | 'openFile' | 'none';
+  actionPayload: string | undefined;
+}
+
+interface InboxContext {
+  watchtower: { name: string; ageSeconds: number; status: string; sessionFile: string }[];
+  toolHistory: { tool: string; result: string; errorMessage?: string }[];
+  memory: { isStale: boolean; title: string; filename: string }[];
+  plans: { name: string; pendingCount: number; nextItems: string[]; path: string }[];
+  subAgents: { agentId: string; jsonlFile: string; toolCallCount: number }[];
+  budgetTone: 'ok' | 'warn' | 'danger';
+}
+
+export function computeInbox(ctx: InboxContext): InboxItem[] {
+  const out: InboxItem[] = [];
+
+  // Idle sessions
+  for (const w of ctx.watchtower.filter((x) => x.status === 'idle' || x.status === 'stale').slice(0, 4)) {
+    const mins = Math.floor(w.ageSeconds / 60);
+    out.push({
+      id: `idle-${w.name}`,
+      level: 'info',
+      category: 'idle',
+      title: `${w.name} idle`,
+      detail: `Waiting ${mins}min`,
+      action: 'openSession',
+      actionPayload: w.sessionFile,
+    });
+  }
+
+  // Errored tools (recent)
+  const errs = ctx.toolHistory.filter((t) => t.result === 'error').slice(0, 3);
+  for (const e of errs) {
+    out.push({
+      id: `err-${e.tool}-${out.length}`,
+      level: 'danger',
+      category: 'error',
+      title: `${e.tool} errored`,
+      detail: (e.errorMessage ?? 'See tool decisions').slice(0, 100),
+      action: 'none',
+      actionPayload: undefined,
+    });
+  }
+
+  // Stale memory
+  const stale = ctx.memory.filter((m) => m.isStale);
+  if (stale.length > 0) {
+    out.push({
+      id: 'mem-stale',
+      level: 'info',
+      category: 'memory',
+      title: `${stale.length} stale memor${stale.length === 1 ? 'y' : 'ies'}`,
+      detail: stale.slice(0, 3).map((m) => m.title).join(', '),
+      action: 'openMemory',
+      actionPayload: undefined,
+    });
+  }
+
+  // Pending plan items
+  for (const p of ctx.plans.slice(0, 2)) {
+    if (p.pendingCount === 0) continue;
+    out.push({
+      id: `plan-${p.name}`,
+      level: 'info',
+      category: 'plan',
+      title: `${p.name}: ${p.pendingCount} open`,
+      detail: p.nextItems[0] ? p.nextItems[0].slice(0, 100) : 'See file',
+      action: 'openFile',
+      actionPayload: p.path,
+    });
+  }
+
+  // Sub-agents that did work
+  for (const a of ctx.subAgents.filter((x) => x.toolCallCount > 0).slice(0, 2)) {
+    out.push({
+      id: `sub-${a.agentId}`,
+      level: 'info',
+      category: 'subagent',
+      title: `${a.agentId}: ${a.toolCallCount} tool calls`,
+      detail: 'Click to inspect',
+      action: 'openFile',
+      actionPayload: a.jsonlFile,
+    });
+  }
+
+  if (ctx.budgetTone === 'danger') {
+    out.push({
+      id: 'budget-danger',
+      level: 'danger',
+      category: 'budget',
+      title: 'Budget cap hit',
+      detail: 'See Config tab',
+      action: 'none',
+      actionPayload: undefined,
+    });
+  }
+
+  return out;
+}
+
+// ===========================================================================
+// Agents — read .claude/agents/*.md from global + workspace.
+// ===========================================================================
+
+export interface AgentDef {
+  name: string;
+  description: string;
+  scope: 'global' | 'workspace';
+  filePath: string;
+  model: string | undefined;
+  color: string | undefined;
+  tools: string | undefined;
+}
+
+function parseAgentFrontmatter(raw: string): Record<string, string> {
+  const m = /^---\s*\n([\s\S]*?)\n---/.exec(raw);
+  if (!m) return {};
+  const out: Record<string, string> = {};
+  for (const line of m[1].split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx < 0) continue;
+    const key = line.slice(0, idx).trim();
+    let val = line.slice(idx + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (key) out[key] = val;
+  }
+  return out;
+}
+
+function readAgentsFromDir(dir: string, scope: 'global' | 'workspace'): AgentDef[] {
+  if (!fs.existsSync(dir)) return [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: AgentDef[] = [];
+  for (const e of entries) {
+    if (!e.endsWith('.md')) continue;
+    const full = path.join(dir, e);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    const fm = parseAgentFrontmatter(raw);
+    out.push({
+      name: fm.name || e.replace(/\.md$/, ''),
+      description: fm.description || '',
+      scope,
+      filePath: full,
+      model: fm.model || undefined,
+      color: fm.color || undefined,
+      tools: fm.tools || undefined,
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+export function readAgents(cwd: string | undefined): AgentDef[] {
+  const out: AgentDef[] = [];
+  out.push(...readAgentsFromDir(path.join(os.homedir(), '.claude', 'agents'), 'global'));
+  if (cwd) {
+    out.push(...readAgentsFromDir(path.join(cwd, '.claude', 'agents'), 'workspace'));
+  }
+  return out;
+}
+
+// ===========================================================================
+// Tunnels — Cloudflare config files at ~/.cloudflared/.
+// ===========================================================================
+
+export interface TunnelConfig {
+  name: string;
+  hostname: string | undefined;
+  service: string | undefined;
+  configPath: string;
+}
+
+export function readTunnels(): TunnelConfig[] {
+  const dir = path.join(os.homedir(), '.cloudflared');
+  if (!fs.existsSync(dir)) return [];
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: TunnelConfig[] = [];
+  for (const e of entries) {
+    if (!e.endsWith('.yml')) continue;
+    if (e.includes('.bak')) continue;
+    const full = path.join(dir, e);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(full, 'utf8');
+    } catch {
+      continue;
+    }
+    const tunnel = (/^\s*tunnel:\s*(.+)$/m.exec(raw) ?? [])[1]?.trim();
+    const host = (/hostname:\s*([^\s]+)/.exec(raw) ?? [])[1]?.trim();
+    const service = (/service:\s*(http[^\s]+)/.exec(raw) ?? [])[1]?.trim();
+    out.push({
+      name: tunnel || e.replace(/\.ya?ml$/, ''),
+      hostname: host,
+      service,
+      configPath: full,
+    });
+  }
+  // Also walk a subdir if present (e.g. ~/.cloudflared/dashable/config.yml).
+  let dirEntries: fs.Dirent[] = [];
+  try {
+    dirEntries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    /* ignore */
+  }
+  for (const ent of dirEntries) {
+    if (!ent.isDirectory()) continue;
+    const sub = path.join(dir, ent.name);
+    let subFiles: string[] = [];
+    try {
+      subFiles = fs.readdirSync(sub);
+    } catch {
+      continue;
+    }
+    for (const sf of subFiles) {
+      if (sf !== 'config.yml' && sf !== 'config.yaml') continue;
+      const full = path.join(sub, sf);
+      let raw: string;
+      try {
+        raw = fs.readFileSync(full, 'utf8');
+      } catch {
+        continue;
+      }
+      const tunnel = (/^\s*tunnel:\s*(.+)$/m.exec(raw) ?? [])[1]?.trim();
+      const host = (/hostname:\s*([^\s]+)/.exec(raw) ?? [])[1]?.trim();
+      const service = (/service:\s*(http[^\s]+)/.exec(raw) ?? [])[1]?.trim();
+      out.push({
+        name: tunnel || ent.name,
+        hostname: host,
+        service,
+        configPath: full,
+      });
+    }
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
+// ===========================================================================
+// RTK savings — `rtk gain` if installed.
+// ===========================================================================
+
+export interface RtkStatus {
+  installed: boolean;
+  totalCommands: number | undefined;
+  tokensSaved: string | undefined;
+  efficiencyPct: number | undefined;
+  topCommand: string | undefined;
+  raw: string | undefined;
+}
+
+let cachedRtk: { status: RtkStatus; ts: number } | undefined;
+
+export async function readRTKSavings(): Promise<RtkStatus> {
+  if (cachedRtk && Date.now() - cachedRtk.ts < 60_000) {
+    return cachedRtk.status;
+  }
+  const empty: RtkStatus = {
+    installed: false,
+    totalCommands: undefined,
+    tokensSaved: undefined,
+    efficiencyPct: undefined,
+    topCommand: undefined,
+    raw: undefined,
+  };
+  return new Promise((resolve) => {
+    execFile('rtk', ['gain'], { timeout: 4000 }, (err, stdout) => {
+      if (err || !stdout) {
+        cachedRtk = { status: empty, ts: Date.now() };
+        resolve(empty);
+        return;
+      }
+      const totalCmds = (/Total commands:\s*(\d+)/.exec(stdout) ?? [])[1];
+      const saved = (/Tokens saved:\s*([\d.]+[KMB]?)\s*\(([\d.]+)%/.exec(stdout) ?? [])[1];
+      const pct = (/Tokens saved:\s*[\d.]+[KMB]?\s*\(([\d.]+)%/.exec(stdout) ?? [])[1];
+      const top = (/^\s*1\.\s+(\S.+?)\s{2}/m.exec(stdout) ?? [])[1];
+      const status: RtkStatus = {
+        installed: true,
+        totalCommands: totalCmds ? Number(totalCmds) : undefined,
+        tokensSaved: saved,
+        efficiencyPct: pct ? Number(pct) : undefined,
+        topCommand: top?.trim(),
+        raw: stdout.slice(0, 600),
+      };
+      cachedRtk = { status, ts: Date.now() };
+      resolve(status);
+    });
+  });
+}
+
+export function readRTKSavingsSync(): RtkStatus {
+  if (cachedRtk) return cachedRtk.status;
+  return {
+    installed: false,
+    totalCommands: undefined,
+    tokensSaved: undefined,
+    efficiencyPct: undefined,
+    topCommand: undefined,
+    raw: undefined,
   };
 }

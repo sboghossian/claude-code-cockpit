@@ -3,15 +3,26 @@ import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
 import { ObsidianStatus, readObsidianStatus } from './obsidian';
+import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
 import {
   ActivityHeatmap,
+  AgentDef,
   ChatExportStatus,
+  CockpitStats,
+  InboxItem,
   PlanFile,
+  RtkStatus,
+  TunnelConfig,
   UsageDashboardStatus,
   computeActivityHeatmap,
+  computeInbox,
+  computeStats,
   detectUsageDashboardSync,
+  readAgents,
   readChatExport,
   readPlans,
+  readRTKSavingsSync,
+  readTunnels,
 } from './integrations';
 
 export interface SessionStats {
@@ -194,6 +205,13 @@ export interface CockpitSnapshot {
   chatExport: ChatExportStatus;
   heatmap: ActivityHeatmap;
   usageDashboard: UsageDashboardStatus;
+  cockpitStats: CockpitStats;
+  inbox: InboxItem[];
+  agents: AgentDef[];
+  tunnels: TunnelConfig[];
+  rtk: RtkStatus;
+  greeting: string;
+  macHealth: MacHealthSnapshot;
 }
 
 export interface WatchtowerSession {
@@ -1597,6 +1615,21 @@ export function snapshot(
   const chatExport = readChatExport();
   const heatmap = computeActivityHeatmap();
   const usageDashboard = detectUsageDashboardSync();
+  const agents = readAgents(cwd);
+  const tunnels = readTunnels();
+  const rtk = readRTKSavingsSync();
+  const macHealth = readMacHealthSync();
+  const greeting = computeGreeting();
+  const cockpitStats = computeStats({
+    byHour: heatmap.byHour,
+    byDay: heatmap.byDay,
+    watchtower: watchtower.map((w) => ({
+      lastActivityMs: w.lastActivityMs,
+      modelFamily: w.modelFamily,
+      totalUsd: w.totalUsd,
+    })),
+    todayUsdRaw: today.totalUsd,
+  });
 
   if (!active) {
     const stats = emptyStatsFor(undefined);
@@ -1630,6 +1663,25 @@ export function snapshot(
       chatExport,
       heatmap,
       usageDashboard,
+      cockpitStats,
+      inbox: computeInbox({
+        watchtower: watchtower.map((w) => ({
+          name: w.name,
+          ageSeconds: w.ageSeconds,
+          status: w.status,
+          sessionFile: w.sessionFile,
+        })),
+        toolHistory: [],
+        memory: [],
+        plans,
+        subAgents: [],
+        budgetTone: budget.dailyTone,
+      }),
+      agents,
+      tunnels,
+      rtk,
+      greeting,
+      macHealth,
     };
   }
 
@@ -1670,7 +1722,47 @@ export function snapshot(
     chatExport,
     heatmap,
     usageDashboard,
+    cockpitStats,
+    inbox: computeInbox({
+      watchtower: watchtower.map((w) => ({
+        name: w.name,
+        ageSeconds: w.ageSeconds,
+        status: w.status,
+        sessionFile: w.sessionFile,
+      })),
+      toolHistory: stats.toolHistory.map((t) => ({
+        tool: t.tool,
+        result: t.result,
+        errorMessage: t.errorMessage,
+      })),
+      memory: memory.map((m) => ({
+        isStale: m.isStale,
+        title: m.title,
+        filename: m.filename,
+      })),
+      plans,
+      subAgents: stats.subAgents.map((a) => ({
+        agentId: a.agentId,
+        jsonlFile: a.jsonlFile,
+        toolCallCount: a.toolCallCount,
+      })),
+      budgetTone: budget.dailyTone,
+    }),
+    agents,
+    tunnels,
+    rtk,
+    greeting,
+    macHealth,
   };
+}
+
+function computeGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return 'Late';
+  if (h < 12) return 'Morning';
+  if (h < 17) return 'Afternoon';
+  if (h < 22) return 'Evening';
+  return 'Late';
 }
 
 export function formatTokens(n: number): string {
