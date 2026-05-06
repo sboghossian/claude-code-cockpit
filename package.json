@@ -2,7 +2,7 @@
   "name": "claude-cockpit",
   "displayName": "Claude Cockpit",
   "description": "Surface Claude Code's hidden state — token burn, files touched, memory, modes — directly in VSCode.",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "publisher": "dashable",
   "license": "MIT",
   "repository": {
@@ -122,6 +122,11 @@
           "type": "boolean",
           "default": true,
           "description": "Periodically check api.github.com/repos/sboghossian/claude-cockpit/releases/latest for new releases of this extension and surface an 'Update available' pill in the header. Set to false for fully local operation with zero update-check traffic."
+        },
+        "claudeCockpit.roadmap.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the Roadmap tab to fetch project metadata from roadmap.dashable.dev (or localhost:3000 if running the roadmap server locally). On by default — the endpoint is owned by the same operator as this extension. Set to false to make the Roadmap tab show only cached data (under ~/.claude/.cache/cockpit-roadmap.json) with no outbound traffic."
         }
       }
     },

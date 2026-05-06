@@ -34,6 +34,13 @@ import {
   UpdateStatus,
 } from './updateCheck';
 import { readManageState } from './manage';
+import { fetchRoadmap, readCachedRoadmap, RoadmapData } from './roadmap';
+import {
+  decideApproval,
+  getQueueDbPath,
+  JarvisData,
+  readJarvis,
+} from './jarvis';
 
 interface InboundMessage {
   type:
@@ -66,6 +73,14 @@ interface InboundMessage {
     | 'createRoutine'
     | 'runRoutine'
     | 'fetchDiscover'
+    | 'fetchRoadmap'
+    | 'fetchJarvis'
+    | 'jarvisApprove'
+    | 'jarvisReject'
+    | 'jarvisSendPeer'
+    | 'jarvisPromoteAllow'
+    | 'jarvisToggleOffline'
+    | 'jarvisOpenRoot'
     | 'checkForUpdate'
     | 'openReleasePage';
   filename?: string;
@@ -86,6 +101,14 @@ interface InboundMessage {
   patch?: UserPrefsPatch;
   routineName?: string;
   window?: DiscoverWindow;
+  approvalId?: string;
+  approvalReason?: string;
+  peerText?: string;
+  peerKind?: string;
+  allowTool?: string;
+  allowPattern?: string;
+  allowNote?: string;
+  offline?: boolean;
 }
 
 interface UserPrefs {
@@ -143,6 +166,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private discoverGithub: { window: DiscoverWindow; fetchedAt: number; repos: GithubRepo[]; error: string | undefined } | undefined;
   private updateStatus: UpdateStatus | undefined;
   private updateCheckTimer: NodeJS.Timeout | undefined;
+  private roadmap: RoadmapData | undefined = readCachedRoadmap();
+  private roadmapInflight: Promise<void> | undefined;
+  private jarvis: JarvisData | undefined;
+  private jarvisInflight: Promise<void> | undefined;
+  private jarvisWatcher: fs.FSWatcher | undefined;
+  private jarvisLastPendingIds = new Set<string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -177,6 +206,63 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     // Self-update check — opt-out, runs once on activation and every 6 hours
     // while the view is mounted. Network call goes out only when enabled.
     this.scheduleUpdateCheck();
+
+    void this.refreshJarvis();
+    this.startJarvisWatcher();
+    view.onDidDispose(() => {
+      this.jarvisWatcher?.close();
+      this.jarvisWatcher = undefined;
+    });
+  }
+
+  private startJarvisWatcher(): void {
+    try {
+      const queuePath = getQueueDbPath();
+      if (!fs.existsSync(queuePath)) return;
+      let debounce: NodeJS.Timeout | undefined;
+      this.jarvisWatcher = fs.watch(queuePath, () => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => void this.refreshJarvis(true), 250);
+      });
+    } catch (err) {
+      logger.info(`jarvis: watcher attach failed: ${String(err)}`);
+    }
+  }
+
+  private async refreshJarvis(notifyOnNewPending = false): Promise<void> {
+    if (this.jarvisInflight) return this.jarvisInflight;
+    this.jarvisInflight = (async () => {
+      try {
+        const next = await readJarvis();
+        if (notifyOnNewPending && this.jarvis) {
+          const prevIds = this.jarvisLastPendingIds;
+          const newPending = next.pendingApprovals.filter((a) => !prevIds.has(a.id));
+          for (const a of newPending) {
+            const tool = a.tool.replace(/^action\./, '');
+            const preview = a.payload.length > 80 ? a.payload.slice(0, 80) + '…' : a.payload;
+            const choice = await vscode.window.showInformationMessage(
+              `Jarvis: ${a.requestedBy} wants to run ${tool} — ${preview}`,
+              'Approve',
+              'Reject',
+              'Open Cockpit',
+            );
+            if (choice === 'Approve') {
+              try { decideApproval(a.id, 'approved', 'cockpit-notification'); } catch { /* ignore */ }
+            } else if (choice === 'Reject') {
+              try { decideApproval(a.id, 'rejected', 'cockpit-notification', 'rejected from notification'); } catch { /* ignore */ }
+            } else if (choice === 'Open Cockpit') {
+              void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+            }
+          }
+        }
+        this.jarvis = next;
+        this.jarvisLastPendingIds = new Set(next.pendingApprovals.map((a) => a.id));
+      } finally {
+        this.jarvisInflight = undefined;
+        this.refresh();
+      }
+    })();
+    return this.jarvisInflight;
   }
 
   private scheduleUpdateCheck(): void {
@@ -282,6 +368,8 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         github: this.discoverGithub,
         rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
       },
+      roadmap: this.roadmap,
+      jarvis: this.jarvis,
       changelog: this.readChangelogPayload(),
       updateStatus: this.readUpdateStatusPayload(),
       manage: readManageState(),
@@ -601,6 +689,26 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           };
         }
         this.refresh();
+        return;
+      }
+      case 'fetchRoadmap': {
+        const enabled = vscode.workspace
+          .getConfiguration('claudeCockpit')
+          .get<boolean>('roadmap.enabled', true);
+        if (!enabled) {
+          // Setting is off — don't issue any network call. The disk cache
+          // (if any) already populated `this.roadmap` on construction.
+          return;
+        }
+        if (this.roadmapInflight) return;
+        this.roadmapInflight = (async () => {
+          try {
+            this.roadmap = await fetchRoadmap();
+          } finally {
+            this.roadmapInflight = undefined;
+            this.refresh();
+          }
+        })();
         return;
       }
       case 'setUserPrefs': {
