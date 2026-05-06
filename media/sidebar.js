@@ -1991,6 +1991,19 @@
     `;
   }
 
+  function browseSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.browseView === 'files' ? 'files' : 'projects';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'projects' ? 'sub-tab-active' : ''}" data-browse-view="projects">Projects</button>
+        <button class="sub-tab ${view === 'files' ? 'sub-tab-active' : ''}" data-browse-view="files">Files (~/.claude)</button>
+      </div>
+    `;
+    const body = view === 'files' ? filesSection(snap) : projectsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function historySection(snap) {
     const state = vscode.getState() || {};
     const view = state.historyView === 'chat' ? 'chat' : 'search';
@@ -2345,8 +2358,7 @@
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
       { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
-      { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
-      { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
+      { id: 'browse',     label: `Browse (${snap.projects.length})`,                                  pinned: false, requiresCwd: false, hint: 'Recent projects + ~/.claude/ filesystem' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
@@ -2363,6 +2375,8 @@
     changelog: 'timeline',
     chat: 'history',
     search: 'history',
+    projects: 'browse',
+    files: 'browse',
   };
 
   function migrateEnabledTabIds(ids) {
@@ -2658,7 +2672,7 @@
         type: 'project',
         title: p.decodedPath ? p.decodedPath.split('/').slice(-1)[0] : p.dirName,
         subtitle: p.decodedPath || p.dirName,
-        tab: 'projects',
+        tab: 'browse',
         action: 'open-project',
         payload: p.decodedPath,
         keywords: `${p.decodedPath || ''} ${p.dirName || ''}`.toLowerCase(),
@@ -2892,7 +2906,7 @@
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
-      else if (activeTab === 'projects') body = projectsSection(snap);
+      else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') body = browseSection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
       else body = `
@@ -3010,10 +3024,8 @@
       body = librarySection(snap);
     } else if (activeTab === 'skills') {
       body = skillsSection(snap);
-    } else if (activeTab === 'projects') {
-      body = projectsSection(snap);
-    } else if (activeTab === 'files') {
-      body = filesSection(snap);
+    } else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') {
+      body = browseSection(snap);
     } else if (activeTab === 'agents') {
       body = agentsSection(snap);
     } else if (activeTab === 'routines') {
@@ -3599,6 +3611,15 @@
         const v = btn.getAttribute('data-history-view');
         const state = vscode.getState() || {};
         vscode.setState({ ...state, historyView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-browse-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-browse-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, browseView: v });
         if (lastSnapshot) render(lastSnapshot);
       });
     });
