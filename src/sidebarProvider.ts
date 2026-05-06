@@ -34,6 +34,7 @@ import {
   UpdateStatus,
 } from './updateCheck';
 import { readManageState } from './manage';
+import { getTelemetrySnapshot } from './telemetry';
 import { fetchRoadmap, readCachedRoadmap, RoadmapData } from './roadmap';
 import {
   decideApproval,
@@ -196,25 +197,33 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     this.watchActive();
     // Kick off RTK probe (may take 0-4s); refresh when done so cache is populated.
     void readRTKSavings().then(() => this.refresh());
+    const surfaces = vscode.workspace.getConfiguration('claudeCockpit.surfaces');
+    const macHealthEnabled = surfaces.get<boolean>('macHealth', true);
+    const subdomainHealthEnabled = surfaces.get<boolean>('subdomainHealth', true);
+
     // Async Mac Health probe; system_profiler is slow (~1s). Refresh every
     // 30s to keep CPU/memory pressure / network throughput live.
-    const refreshMac = () => void readMacHealth().then(() => this.refresh());
-    refreshMac();
-    const macTimer = setInterval(refreshMac, 30_000);
-    view.onDidDispose(() => clearInterval(macTimer));
+    if (macHealthEnabled) {
+      const refreshMac = () => void readMacHealth().then(() => this.refresh());
+      refreshMac();
+      const macTimer = setInterval(refreshMac, 30_000);
+      view.onDidDispose(() => clearInterval(macTimer));
+    }
 
     // Subdomain health: HEAD-probe pilot's always-live domains so the dots
     // reflect reality. Cheap (<3s with timeout per host), cached server-side.
-    const refreshHealth = () => {
-      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      const snap = snapshot(cwd, this.readBudgetConfig(), false);
-      const domains = snap.pilot ? snap.pilot.alwaysLive : [];
-      if (domains.length === 0) return;
-      void refreshSubdomainHealth(domains).then(() => this.refresh());
-    };
-    refreshHealth();
-    const healthTimer = setInterval(refreshHealth, 60_000);
-    view.onDidDispose(() => clearInterval(healthTimer));
+    if (subdomainHealthEnabled) {
+      const refreshHealth = () => {
+        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const snap = snapshot(cwd, this.readBudgetConfig(), false);
+        const domains = snap.pilot ? snap.pilot.alwaysLive : [];
+        if (domains.length === 0) return;
+        void refreshSubdomainHealth(domains).then(() => this.refresh());
+      };
+      refreshHealth();
+      const healthTimer = setInterval(refreshHealth, 60_000);
+      view.onDidDispose(() => clearInterval(healthTimer));
+    }
 
     // Self-update check — opt-out, runs once on activation and every 6 hours
     // while the view is mounted. Network call goes out only when enabled.
@@ -464,6 +473,18 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         weekUsdFormatted: formatUsd(snap.cockpitStats.weekUsdRaw),
       },
       appUsage: readAppUsage(this.globalState),
+      telemetry: getTelemetrySnapshot(),
+      surfaces: {
+        macHealth: vscode.workspace
+          .getConfiguration('claudeCockpit.surfaces')
+          .get<boolean>('macHealth', true),
+        appUsage: vscode.workspace
+          .getConfiguration('claudeCockpit.surfaces')
+          .get<boolean>('appUsage', true),
+        subdomainHealth: vscode.workspace
+          .getConfiguration('claudeCockpit.surfaces')
+          .get<boolean>('subdomainHealth', true),
+      },
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
   }

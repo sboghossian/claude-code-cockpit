@@ -127,6 +127,21 @@
           "type": "boolean",
           "default": true,
           "description": "Allow the Roadmap tab to fetch project metadata from roadmap.dashable.dev (or localhost:3000 if running the roadmap server locally). On by default — the endpoint is owned by the same operator as this extension. Set to false to make the Roadmap tab show only cached data (under ~/.claude/.cache/cockpit-roadmap.json) with no outbound traffic."
+        },
+        "claudeCockpit.surfaces.macHealth": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Mac Health tab (disk / memory / battery / CPU / Wi-Fi / Bluetooth peripherals). Disable to hide the tab and skip the periodic system_profiler probe (~1s every 30s). Cockpit's wedge is Claude observability, not iStat — keep this off if you already use a dedicated system monitor."
+        },
+        "claudeCockpit.surfaces.appUsage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track which macOS app is in focus once per minute (cheap, local-only) and render today's hourly bar chart. Disable to skip the lsappinfo poll and hide the App Usage panel."
+        },
+        "claudeCockpit.surfaces.subdomainHealth": {
+          "type": "boolean",
+          "default": true,
+          "description": "HEAD-probe the always-live subdomains in your PILOT memory every 60s so the dots reflect reality. Disable for fully local operation with zero outbound HEAD requests."
         }
       }
     },

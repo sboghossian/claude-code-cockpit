@@ -5,6 +5,7 @@ import { logger } from './logger';
 import { ObsidianStatus, readObsidianStatus } from './obsidian';
 import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
 import { RoutinesStatus, readRoutinesStatus } from './routines';
+import { record as recordTime } from './telemetry';
 import {
   ActivityHeatmap,
   AgentDef,
@@ -233,6 +234,27 @@ export interface WatchtowerSession {
   lastActivityMs: number;
   ageSeconds: number;
   status: 'live' | 'recent' | 'idle' | 'stale';
+  totalTokens: number;
+  totalUsd: number;
+  model: string | undefined;
+  modelFamily: ModelFamily;
+}
+
+export interface OfficeFloorTile {
+  decodedPath: string;
+  projectDir: string;
+  sessionFile: string;
+  name: string;
+  status: 'live' | 'recent' | 'idle' | 'stale';
+  ageSeconds: number;
+  lastActivityAt: string;
+  lastTool: string | undefined;
+  lastToolArgs: string | undefined;
+  lastToolResult: 'ok' | 'error' | 'pending' | undefined;
+  currentFile: string | undefined;
+  subAgentName: string | undefined;
+  subAgentDescription: string | undefined;
+  recentFiles: string[];
   totalTokens: number;
   totalUsd: number;
   model: string | undefined;
@@ -1640,10 +1662,20 @@ export function snapshot(
   budgetConfig?: BudgetConfig,
   cloudRoutinesEnabled?: boolean,
 ): CockpitSnapshot {
-  const projects = listProjects();
-  const settings = readGlobalSettings();
+  return recordTime('snapshot.total', () =>
+    snapshotInner(cwd, budgetConfig, cloudRoutinesEnabled),
+  );
+}
+
+function snapshotInner(
+  cwd: string | undefined,
+  budgetConfig?: BudgetConfig,
+  cloudRoutinesEnabled?: boolean,
+): CockpitSnapshot {
+  const projects = recordTime('snapshot.listProjects', () => listProjects());
+  const settings = recordTime('snapshot.readGlobalSettings', () => readGlobalSettings());
   const local = cwd ? locationForCwd(cwd) : undefined;
-  const global = findGlobalActiveSession();
+  const global = recordTime('snapshot.findGlobalActiveSession', () => findGlobalActiveSession());
 
   // Pick whichever session has the more recent mtime — sessions are first
   // class, not workspace folders. If a sub-agent in a different project just
@@ -1655,20 +1687,20 @@ export function snapshot(
     active = local ?? global;
   }
 
-  const today = computeToday();
-  const diskUsageBytes = computeDiskUsage();
+  const today = recordTime('snapshot.computeToday', () => computeToday());
+  const diskUsageBytes = recordTime('snapshot.computeDiskUsage', () => computeDiskUsage());
   const office = detectOffice(settings);
-  const watchtower = computeWatchtower();
-  const obsidian = readObsidianStatus();
-  const plans = readPlans(cwd);
-  const chatExport = readChatExport();
-  const heatmap = computeActivityHeatmap();
+  const watchtower = recordTime('snapshot.computeWatchtower', () => computeWatchtower());
+  const obsidian = recordTime('snapshot.readObsidian', () => readObsidianStatus());
+  const plans = recordTime('snapshot.readPlans', () => readPlans(cwd));
+  const chatExport = recordTime('snapshot.readChatExport', () => readChatExport());
+  const heatmap = recordTime('snapshot.computeActivityHeatmap', () => computeActivityHeatmap());
   const usageDashboard = detectUsageDashboardSync();
-  const agents = readAgents(cwd);
-  const tunnels = readTunnels();
+  const agents = recordTime('snapshot.readAgents', () => readAgents(cwd));
+  const tunnels = recordTime('snapshot.readTunnels', () => readTunnels());
   const rtk = readRTKSavingsSync();
   const macHealth = readMacHealthSync();
-  const routines = readRoutinesStatus(cloudRoutinesEnabled === true);
+  const routines = recordTime('snapshot.readRoutines', () => readRoutinesStatus(cloudRoutinesEnabled === true));
   const greeting = computeGreeting();
   const gitBranch = readGitBranchSync(cwd ?? (active ? active.decodedPath : undefined));
   const cockpitStats = computeStats({
@@ -1754,10 +1786,10 @@ export function snapshot(
     };
   }
 
-  const stats = readSession(active.sessionFile, active.decodedPath);
-  const memory = readMemoryIndex(active.decodedPath);
-  const pilot = readPilotProfile(active.decodedPath);
-  const skills = listSkills(active.sessionFile);
+  const stats = recordTime('snapshot.readSession', () => readSession(active!.sessionFile, active!.decodedPath));
+  const memory = recordTime('snapshot.readMemoryIndex', () => readMemoryIndex(active!.decodedPath));
+  const pilot = recordTime('snapshot.readPilotProfile', () => readPilotProfile(active!.decodedPath));
+  const skills = recordTime('snapshot.listSkills', () => listSkills(active!.sessionFile));
   const claudeMdStack = readClaudeMdStack(active.decodedPath);
   const costByTool = computeCostByTool(stats);
   const budget = computeBudget(budgetConfig, today.totalUsd, stats.cost.totalUsd, stats.costPerHourUsd);

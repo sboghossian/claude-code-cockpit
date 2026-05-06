@@ -212,8 +212,15 @@ export function activate(context: vscode.ExtensionContext): void {
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   status.update(snapshot(cwd, readBudgetConfig()));
 
-  const stopUsage = startAppUsageTracker(context.globalState);
-  context.subscriptions.push({ dispose: stopUsage });
+  const appUsageEnabled = vscode.workspace
+    .getConfiguration('claudeCockpit')
+    .get<boolean>('surfaces.appUsage', true);
+  if (appUsageEnabled) {
+    const stopUsage = startAppUsageTracker(context.globalState);
+    context.subscriptions.push({ dispose: stopUsage });
+  } else {
+    logger.info('app usage tracker disabled via claudeCockpit.surfaces.appUsage');
+  }
 
   context.subscriptions.push({ dispose: () => status.dispose() });
   context.subscriptions.push({ dispose: () => logger.dispose() });
