@@ -202,6 +202,7 @@ export interface CockpitSnapshot {
   localLayout: LocalLayout;
   claudeMdStack: ClaudeMdEntry[];
   office: OfficeStatus;
+  officeFloor: OfficeFloorTile[];
   watchtower: WatchtowerSession[];
   obsidian: ObsidianStatus;
   costByTool: CostByToolEntry[];
@@ -1690,6 +1691,7 @@ function snapshotInner(
   const today = recordTime('snapshot.computeToday', () => computeToday());
   const diskUsageBytes = recordTime('snapshot.computeDiskUsage', () => computeDiskUsage());
   const office = detectOffice(settings);
+  const officeFloor = recordTime('snapshot.computeOfficeFloor', () => computeOfficeFloor());
   const watchtower = recordTime('snapshot.computeWatchtower', () => computeWatchtower());
   const obsidian = recordTime('snapshot.readObsidian', () => readObsidianStatus());
   const plans = recordTime('snapshot.readPlans', () => readPlans(cwd));
@@ -1732,6 +1734,7 @@ function snapshotInner(
       localLayout: computeLocalLayout(undefined, undefined),
       claudeMdStack: [],
       office,
+      officeFloor,
       watchtower,
       obsidian,
       costByTool: [],
@@ -1828,6 +1831,7 @@ function snapshotInner(
     localLayout: computeLocalLayout(active.projectDir, active.sessionFile),
     claudeMdStack,
     office,
+    officeFloor,
     watchtower,
     obsidian,
     costByTool,
@@ -1990,6 +1994,193 @@ export function computeWatchtower(): WatchtowerSession[] {
     });
   }
   out.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+  return out;
+}
+
+// Office Floor — for each project with a recently-touched session, surface
+// the *current activity*: last tool call, target file, active sub-agent.
+// Built on top of the same project scan as Watchtower but reads each session's
+// tail to extract the live "what is the agent doing right now" signal.
+const OFFICE_FLOOR_MAX_AGE_MS = 60 * 60 * 1000; // 1h, same as Watchtower
+const OFFICE_FLOOR_TAIL_BYTES = 64 * 1024; // last 64KB is plenty for last activity
+
+function readSessionTail(file: string, fileSize: number): string {
+  const start = Math.max(0, fileSize - OFFICE_FLOOR_TAIL_BYTES);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const len = fileSize - start;
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, start);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+interface FloorActivity {
+  lastTool: string | undefined;
+  lastToolArgs: string | undefined;
+  lastToolResult: 'ok' | 'error' | 'pending' | undefined;
+  currentFile: string | undefined;
+  recentFiles: string[];
+  subAgentName: string | undefined;
+  subAgentDescription: string | undefined;
+}
+
+function readSessionLastActivity(file: string): FloorActivity {
+  const out: FloorActivity = {
+    lastTool: undefined,
+    lastToolArgs: undefined,
+    lastToolResult: undefined,
+    currentFile: undefined,
+    recentFiles: [],
+    subAgentName: undefined,
+    subAgentDescription: undefined,
+  };
+  let stat;
+  try { stat = fs.statSync(file); } catch { return out; }
+  const raw = readSessionTail(file, stat.size);
+  if (!raw) return out;
+  const lines = raw.split('\n');
+  // Single forward pass. Track:
+  //   - latest tool_use → becomes lastTool/lastToolArgs/lastToolId
+  //   - latest subagent (Task/Agent) tool_use → subAgentName/Description
+  //   - all file_paths from FILE_TOOLS in order, deduped → recentFiles + currentFile
+  //   - tool_use_id → outcome map for result reconciliation at the end
+  const fileBag: string[] = [];
+  const seen = new Set<string>();
+  let latestToolId: string | undefined;
+  const resultById = new Map<string, 'ok' | 'error'>();
+  for (const line of lines) {
+    const parsed = parseLine(line);
+    if (!parsed) continue;
+    const content = parsed.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type === 'tool_use' && block.name) {
+        out.lastTool = block.name;
+        out.lastToolArgs = summarizeToolArgs(block);
+        out.lastToolResult = 'pending';
+        latestToolId = typeof block.id === 'string' ? block.id : undefined;
+        if (block.name === 'Task' || block.name === 'Agent') {
+          const sa = block.input?.subagent_type;
+          const desc = block.input?.description;
+          if (typeof sa === 'string') out.subAgentName = sa;
+          if (typeof desc === 'string') out.subAgentDescription = desc;
+        }
+        if (FILE_TOOLS.has(block.name)) {
+          const fp = block.input?.file_path ?? block.input?.path;
+          if (typeof fp === 'string' && !seen.has(fp)) {
+            seen.add(fp);
+            fileBag.push(fp);
+            out.currentFile = fp;
+          }
+        }
+      }
+      if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+        resultById.set(block.tool_use_id, block.is_error === true ? 'error' : 'ok');
+      }
+    }
+  }
+  if (latestToolId) {
+    const r = resultById.get(latestToolId);
+    if (r) out.lastToolResult = r;
+  }
+  // Newest files first — fileBag was filled forward, so reverse + dedupe was
+  // already maintained. Re-dedupe to put the most recent edit at index 0.
+  out.recentFiles = fileBag.slice(-5).reverse();
+  if (out.recentFiles.length) out.currentFile = out.recentFiles[0];
+  return out;
+}
+
+export function computeOfficeFloor(): OfficeFloorTile[] {
+  if (!fs.existsSync(claudeHome)) return [];
+  let projects: string[];
+  try {
+    projects = fs.readdirSync(claudeHome);
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const out: OfficeFloorTile[] = [];
+  for (const proj of projects) {
+    const dir = path.join(claudeHome, proj);
+    let stat;
+    try { stat = fs.statSync(dir); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+    } catch {
+      continue;
+    }
+    let best: { file: string; mtime: number } | undefined;
+    for (const f of files) {
+      const full = path.join(dir, f);
+      try {
+        const fStat = fs.statSync(full);
+        if (!best || fStat.mtimeMs > best.mtime) {
+          best = { file: full, mtime: fStat.mtimeMs };
+        }
+      } catch {
+        continue;
+      }
+    }
+    if (!best) continue;
+    const ageMs = now - best.mtime;
+    if (ageMs > OFFICE_FLOOR_MAX_AGE_MS) continue;
+    const decoded = decodeProjectName(proj);
+    const light = readSessionLight(best.file);
+    const activity = readSessionLastActivity(best.file);
+    const status: OfficeFloorTile['status'] =
+      ageMs < 10_000
+        ? 'live'
+        : ageMs < IDLE_THRESHOLD_MS
+          ? 'recent'
+          : ageMs < STALE_THRESHOLD_MS
+            ? 'idle'
+            : 'stale';
+    const family = modelFamilyOf(light.lastModel);
+    const cost = computeCost({
+      inputTokens: light.inputTokens,
+      outputTokens: light.outputTokens,
+      cacheReadTokens: light.cacheReadTokens,
+      cacheCreationTokens: light.cacheCreationTokens,
+      modelFamily: family,
+    });
+    out.push({
+      decodedPath: decoded,
+      projectDir: dir,
+      sessionFile: best.file,
+      name: path.basename(decoded) || decoded,
+      status,
+      ageSeconds: Math.floor(ageMs / 1000),
+      lastActivityAt: new Date(best.mtime).toISOString(),
+      lastTool: activity.lastTool,
+      lastToolArgs: activity.lastToolArgs,
+      lastToolResult: activity.lastToolResult,
+      currentFile: activity.currentFile,
+      subAgentName: activity.subAgentName,
+      subAgentDescription: activity.subAgentDescription,
+      recentFiles: activity.recentFiles,
+      totalTokens: light.totalTokens,
+      totalUsd: cost.totalUsd,
+      model: light.lastModel,
+      modelFamily: family,
+    });
+  }
+  out.sort((a, b) => {
+    const order: Record<OfficeFloorTile['status'], number> = {
+      live: 0, recent: 1, idle: 2, stale: 3,
+    };
+    if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+    return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+  });
   return out;
 }
 
