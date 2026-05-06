@@ -3,6 +3,16 @@ import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
 import { ObsidianStatus, readObsidianStatus } from './obsidian';
+import {
+  ActivityHeatmap,
+  ChatExportStatus,
+  PlanFile,
+  UsageDashboardStatus,
+  computeActivityHeatmap,
+  detectUsageDashboardSync,
+  readChatExport,
+  readPlans,
+} from './integrations';
 
 export interface SessionStats {
   sessionFile: string | undefined;
@@ -180,6 +190,10 @@ export interface CockpitSnapshot {
   costByTool: CostByToolEntry[];
   notifications: Notification[];
   budget: BudgetStatus;
+  plans: PlanFile[];
+  chatExport: ChatExportStatus;
+  heatmap: ActivityHeatmap;
+  usageDashboard: UsageDashboardStatus;
 }
 
 export interface WatchtowerSession {
@@ -1579,6 +1593,10 @@ export function snapshot(
   const office = detectOffice(settings);
   const watchtower = computeWatchtower();
   const obsidian = readObsidianStatus();
+  const plans = readPlans(cwd);
+  const chatExport = readChatExport();
+  const heatmap = computeActivityHeatmap();
+  const usageDashboard = detectUsageDashboardSync();
 
   if (!active) {
     const stats = emptyStatsFor(undefined);
@@ -1608,6 +1626,10 @@ export function snapshot(
         budget,
       }),
       budget,
+      plans,
+      chatExport,
+      heatmap,
+      usageDashboard,
     };
   }
 
@@ -1644,6 +1666,10 @@ export function snapshot(
     costByTool,
     notifications,
     budget,
+    plans,
+    chatExport,
+    heatmap,
+    usageDashboard,
   };
 }
 

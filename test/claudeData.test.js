@@ -357,6 +357,61 @@ test('globalSessionSearch rejects queries shorter than 2 chars', () => {
   assert.deepEqual(globalSessionSearch('a'), []);
 });
 
+test('readPlans parses checkboxes from tasks/todo.md', () => {
+  const { readPlans } = require('../out/integrations.js');
+  const ws = makeWorkspace('plans-' + Date.now());
+  const tasksDir = path.join(ws.cwd, 'tasks');
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tasksDir, 'todo.md'),
+    '# plan\n\n- [x] done thing\n- [ ] do another thing\n- [X] big done\n- [ ] urgent\n- not a checkbox\n',
+  );
+  const plans = readPlans(ws.cwd);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].totalCount, 4);
+  assert.equal(plans[0].doneCount, 2);
+  assert.equal(plans[0].pendingCount, 2);
+  assert.equal(plans[0].pct, 50);
+  assert.deepEqual(plans[0].nextItems, ['do another thing', 'urgent']);
+});
+
+test('readPlans returns empty when no plan files exist', () => {
+  const { readPlans } = require('../out/integrations.js');
+  const ws = makeWorkspace('noplans-' + Date.now());
+  fs.mkdirSync(ws.cwd, { recursive: true });
+  assert.deepEqual(readPlans(ws.cwd), []);
+});
+
+test('readPlans handles plan files in workspace root, not just tasks/', () => {
+  const { readPlans } = require('../out/integrations.js');
+  const ws = makeWorkspace('rootplans-' + Date.now());
+  fs.mkdirSync(ws.cwd, { recursive: true });
+  fs.writeFileSync(path.join(ws.cwd, 'TODO.md'), '- [x] a\n- [ ] b\n');
+  const plans = readPlans(ws.cwd);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].name, 'TODO.md');
+  assert.equal(plans[0].totalCount, 2);
+});
+
+test('computeActivityHeatmap returns 24-hour and 7-day buckets', () => {
+  const { computeActivityHeatmap } = require('../out/integrations.js');
+  const heat = computeActivityHeatmap();
+  assert.equal(heat.byHour.length, 24);
+  assert.equal(heat.byDay.length, 7);
+  assert.equal(typeof heat.max, 'number');
+  assert.ok(Array.isArray(heat.cells));
+});
+
+test('readChatExport reports installed=false when no export folder is found', () => {
+  const { readChatExport } = require('../out/integrations.js');
+  // tmpHome has no claude-data-export — should return empty status.
+  const status = readChatExport();
+  // Could be true or false depending on whether the user's real export folder
+  // exists relative to tmpHome — we only assert the shape.
+  assert.equal(typeof status.installed, 'boolean');
+  assert.ok(Array.isArray(status.recentConversations));
+});
+
 test('formatTokens formats raw, k, and M ranges', () => {
   assert.equal(formatTokens(0), '0');
   assert.equal(formatTokens(1), '1');

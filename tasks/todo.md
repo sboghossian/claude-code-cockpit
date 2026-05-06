@@ -29,6 +29,42 @@ Goal: prove the data plumbing. No mutations to `~/.claude/`.
 - [x] Enabled plugins panel
 - [x] Sessions are first-class, not workspace folders (v0.2.0 refactor)
 
+## v0.7.0 — Cross-surface bridge (DONE, shipped)
+
+User asked for ideas mined from neighboring projects in `~/Documents/Code/`.
+Surfaced + shipped four integrations that turn cockpit into a true multi-surface
+HUD:
+
+- [x] **Plans panel** — auto-parses `tasks/todo.md` / `tasks/forkcast.md` /
+      `plan.md` / `tasks.md` / `TODO.md` from workspace root + `tasks/` subdir,
+      counts checkboxes, shows progress bar with up to 5 next pending items
+- [x] **Chat surface tab** — auto-detects `~/Documents/Code/claude-data-export/`
+      (also checks `~/` and `~/Downloads/`), surfaces conversation count, recent
+      20 conversations with excerpts + msg counts, and a preview of the
+      claude.ai memory blob. Cockpit is now genuinely cross-surface (Code + Chat).
+- [x] **Activity heatmap** — 7d × 24h grid in Now tab, intensity-shaded green
+      cells, hover for exact count. Concept lifted from `claude-usage`'s
+      Python parser; built from JSONL message timestamps (cheap regex parse).
+- [x] **claude-usage dashboard launcher** — detects install at
+      `~/Documents/Code/claude-usage/`, pings ports 5000/8000/8080/5050/5001,
+      shows live URL when running, "Start dashboard" button shells out to
+      `python3 server.py` in a terminal otherwise. Cached 30s.
+- [x] **+5 tests** (29/29 pass): readPlans (3 cases), computeActivityHeatmap,
+      readChatExport
+- [x] New tab: **Chat** (with ◌ indicator when export not present)
+
+### Recon notes (so compaction doesn't lose them)
+- Chat-export shape: `conversations.json` is an array of `{uuid, name, summary,
+  created_at, updated_at, chat_messages: [{text, content, sender}]}`. Some
+  exports use `messages` instead of `chat_messages` — handled both. `memories.json`
+  is `[{conversations_memory: <string>}]` — Stephane's is ~5KB of life context.
+- Plan parse regex: `^\s*[-*]\s+\[([ xX])\]\s+(.+?)\s*$` — handles `- [x]`,
+  `- [X]`, `* [ ]`, etc. Strips `**bold**` and backticks from item text.
+- Heatmap uses cheap `indexOf("\"timestamp\"")` pre-filter before regex; full
+  JSON parse would be 10x slower across 100MB of session logs.
+- claude-usage port detection uses HEAD requests with 250ms timeout. Cached
+  30s in module-scope to avoid spamming ports on every refresh.
+
 ## v0.6.0 — Watchtower (DONE, shipped)
 
 User asked for: fix v0.5.0 gaps, integrate Obsidian, mine claude-overlay

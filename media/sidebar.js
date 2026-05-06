@@ -58,6 +58,135 @@
     return `<section class="notif-strip">${items}</section>`;
   }
 
+  function plansSection(snap) {
+    const plans = snap.plans || [];
+    if (!plans.length) return '';
+    const cards = plans
+      .map((p) => {
+        const tone = p.pct >= 100 ? 'ok' : p.pct >= 50 ? 'warn' : p.pct >= 1 ? 'ok' : 'warn';
+        const next = p.nextItems.slice(0, 5)
+          .map((t) => `<li>${escapeHtml(t.slice(0, 100))}${t.length > 100 ? '…' : ''}</li>`)
+          .join('');
+        return `
+          <div class="watch-card" style="display: block;">
+            <div class="row">
+              <a class="left link" data-open-file="${escapeHtml(p.path)}" title="${escapeHtml(p.path)}"><strong>${escapeHtml(p.name)}</strong></a>
+              <span class="right">${p.doneCount}/${p.totalCount} · ${p.pct}%</span>
+            </div>
+            <div class="bar" style="margin-top: 4px;"><div class="bar-fill bar-${escapeHtml(tone)}" style="width: ${p.pct}%"></div></div>
+            ${next ? `<ul class="list" style="margin-top: 6px;">${next}</ul>` : ''}
+          </div>`;
+      })
+      .join('');
+    return `<h2>Plans <span class="cost-rate">${plans.length}</span></h2>${cards}`;
+  }
+
+  function heatmapSection(snap) {
+    const h = snap.heatmap;
+    if (!h || h.max === 0) return '';
+    const dayLabels = ['6d', '5d', '4d', '3d', '2d', '1d', 'today'];
+    const grid = [];
+    const map = new Map();
+    for (const c of h.cells) map.set(c.day * 24 + c.hour, c.count);
+    let html = '<div style="display: grid; grid-template-columns: 32px repeat(24, 1fr); gap: 1px; font-size: 9px; color: var(--vscode-descriptionForeground);">';
+    html += '<div></div>';
+    for (let hr = 0; hr < 24; hr++) {
+      html += `<div style="text-align: center; font-variant-numeric: tabular-nums;">${hr % 6 === 0 ? hr : ''}</div>`;
+    }
+    for (let day = 0; day < 7; day++) {
+      html += `<div style="text-align: right; padding-right: 4px;">${dayLabels[day]}</div>`;
+      for (let hr = 0; hr < 24; hr++) {
+        const count = map.get(day * 24 + hr) || 0;
+        const intensity = count === 0 ? 0 : Math.max(0.15, count / h.max);
+        const bg = count === 0
+          ? 'var(--vscode-editorWidget-border)'
+          : `rgba(106, 212, 143, ${intensity.toFixed(2)})`;
+        html += `<div title="${dayLabels[day]} ${hr}:00 — ${count}" style="background: ${bg}; height: 10px; border-radius: 1px;"></div>`;
+      }
+    }
+    html += '</div>';
+    return `<h2>Activity heatmap <span class="cost-rate">last 7 days</span></h2>${html}<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 4px;">Hour of day → ; brighter = more events</div>`;
+    void grid;
+  }
+
+  function chatExportSection(snap) {
+    const c = snap.chatExport;
+    if (!c) {
+      return `
+        <h2>Chat surface (claude.ai)</h2>
+        <p class="empty">Chat export not detected.</p>
+      `;
+    }
+    if (!c.installed) {
+      return `
+        <h2>Chat surface (claude.ai)</h2>
+        <p class="empty">No <code>claude-data-export</code> folder found.</p>
+        <p class="empty" style="font-size: 11px; margin-top: 4px;">Export your claude.ai data, drop the JSON into <code>~/Documents/Code/claude-data-export/</code>, refresh.</p>
+      `;
+    }
+    const memBlock = c.memoryPreview
+      ? `
+        <h3 class="sub-h">claude.ai memory <span class="cost-rate">${(c.memoryPreview.bytes / 1024).toFixed(1)} KB</span></h3>
+        <div class="watch-card" style="display: block;">
+          <div class="note-excerpt">${escapeHtml(c.memoryPreview.preview)}…</div>
+          <div class="row" style="margin-top: 6px;">
+            <a class="left link" data-open-file="${escapeHtml(c.memoryPreview.fullPath)}">open full memory →</a>
+          </div>
+        </div>
+      `
+      : '';
+    const convs = c.recentConversations || [];
+    const convList = convs.length
+      ? convs
+          .map(
+            (cv) => `
+        <div class="note-card">
+          <div class="row">
+            <span class="left note-title">${escapeHtml(cv.name)}</span>
+            <span class="right">${escapeHtml(fmtRelative(cv.updatedAt || cv.createdAt))} · ${cv.messageCount} msgs</span>
+          </div>
+          ${cv.excerpt ? `<div class="note-excerpt">${escapeHtml(cv.excerpt)}</div>` : ''}
+        </div>`,
+          )
+          .join('')
+      : '<p class="empty">No conversations parsed.</p>';
+    return `
+      <h2>Chat surface (claude.ai) <span class="cost-rate">${c.conversationCount} convos · ${c.projectCount} projects</span></h2>
+      <p class="empty" style="font-size: 11px; margin-bottom: 8px;">From <code>${escapeHtml(c.exportPath)}</code></p>
+      ${memBlock}
+      <h3 class="sub-h">Recent conversations</h3>
+      ${convList}
+    `;
+  }
+
+  function usageDashboardSection(snap) {
+    const u = snap.usageDashboard;
+    if (!u) return '';
+    if (u.url) {
+      return `
+        <h2>Usage dashboard <span class="cost-rate">running on :${u.runningOnPort}</span></h2>
+        <div class="actions">
+          <button class="office-btn" data-open-url="${escapeHtml(u.url)}">Open dashboard ↗</button>
+          <button class="office-btn" data-qa="detect-usage">Re-check</button>
+        </div>
+      `;
+    }
+    if (u.installed) {
+      return `
+        <h2>Usage dashboard <span class="cost-rate">installed, not running</span></h2>
+        <p class="empty">Found at <code>${escapeHtml(u.installPath)}</code>.</p>
+        <div class="actions">
+          <button class="office-btn" data-qa="start-usage">Start dashboard</button>
+          <button class="office-btn" data-qa="detect-usage">Re-check</button>
+        </div>
+      `;
+    }
+    return `
+      <h2>Usage dashboard <span class="cost-rate">not installed</span></h2>
+      <p class="empty">Install <a class="link" data-open-url="https://github.com/phuryn/claude-usage">claude-usage</a> for charts of cost-by-day, model breakdown, hour heatmap.</p>
+    `;
+  }
+
   function quickActionsSection(snap) {
     const buttons = [
       `<button data-qa="search">Search sessions ⌕</button>`,
@@ -696,22 +825,29 @@
   }
 
   function emptyTabBar(snap) {
-    const tabs = [
+    const chatLabel = snap.chatExport && snap.chatExport.installed
+      ? `Chat (${snap.chatExport.conversationCount})`
+      : 'Chat ◌';
+    return [
       { id: 'now', label: 'Now' },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
+      { id: 'chat', label: chatLabel },
       { id: 'search', label: 'Search' },
       { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
       { id: 'skills', label: `Skills (${snap.skills.length})` },
       { id: 'projects', label: `Projects (${snap.projects.length})` },
       { id: 'config', label: 'Config' },
     ];
-    return tabs;
   }
 
   function fullTabBar(snap) {
+    const chatLabel = snap.chatExport && snap.chatExport.installed
+      ? `Chat (${snap.chatExport.conversationCount})`
+      : 'Chat ◌';
     return [
       { id: 'now', label: 'Now' },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
+      { id: 'chat', label: chatLabel },
       { id: 'search', label: 'Search' },
       { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
       { id: 'memory', label: `Memory (${snap.memory.length})` },
@@ -746,15 +882,17 @@
       const tabBar = renderTabBar(tabs, activeTab);
       let body = '';
       if (activeTab === 'watchtower') body = watchtowerSection(snap);
+      else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
       else if (activeTab === 'projects') body = projectsSection(snap);
-      else if (activeTab === 'config') body = `${budgetSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
+      else if (activeTab === 'config') body = `${budgetSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
       else body = `
         ${notificationsSection(snap)}
         ${quickActionsSection(snap)}
         <p class="empty">No Claude Code session for the open folder. Use Watchtower to see other projects, or run <code>claude</code> here to start.</p>
+        ${heatmapSection(snap)}
         ${snap.watchtower.length ? watchtowerSection(snap) : ''}
         ${snap.today.sessions ? todaySection(snap) : ''}
       `;
@@ -820,11 +958,13 @@
         ${notificationsSection(snap)}
         ${pilotSection(snap)}
         ${quickActionsSection(snap)}
+        ${plansSection(snap)}
         <h2>Active session ${liveDot}</h2>
         <div class="kv">
           <span class="k">project</span><span class="v">${escapeHtml(snap.cwd)}</span>
         </div>
         ${tokens}
+        ${heatmapSection(snap)}
         ${contextFillSection(s)}
         ${costSection(s)}
         ${costByToolSection(snap)}
@@ -840,6 +980,8 @@
       `;
     } else if (activeTab === 'watchtower') {
       body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
+    } else if (activeTab === 'chat') {
+      body = chatExportSection(snap);
     } else if (activeTab === 'search') {
       body = searchSection(snap);
     } else if (activeTab === 'obsidian') {
@@ -857,6 +999,7 @@
     } else if (activeTab === 'config') {
       body = `
         ${budgetSection(snap)}
+        ${usageDashboardSection(snap)}
         ${officeSection(snap)}
         ${settingsSection(snap)}
         ${diskUsageSection(snap)}
@@ -917,6 +1060,10 @@
           if (input && input.value.trim()) {
             vscode.postMessage({ type: 'searchSessions', query: input.value.trim() });
           }
+        } else if (qa === 'start-usage') {
+          vscode.postMessage({ type: 'startUsageDashboard' });
+        } else if (qa === 'detect-usage') {
+          vscode.postMessage({ type: 'detectUsageDashboard' });
         }
       });
     });

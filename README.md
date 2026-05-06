@@ -12,13 +12,14 @@ Read-only. Watches `~/.claude/projects/<your-cwd>/` and renders:
 
 - **Status bar**: workspace name, total tokens this session, files touched
 - **Sidebar webview** (Activity Bar) — tabbed:
-  - **Now**: PILOT card, notifications strip, tokens + sparkline, cost (with $/hr + cache hit rate), context fill, cost-by-tool breakdown, budget caps, session metadata, CLAUDE.md stack, tool histogram, sub-agents, tool decisions (✓/✗/·), activity feed, files touched, today summary
+  - **Now**: PILOT card, notifications strip, plans (auto-parsed from `tasks/todo.md` / `tasks/forkcast.md`), tokens + sparkline, 7-day activity heatmap, cost (with $/hr + cache hit rate), context fill, cost-by-tool breakdown, budget caps, session metadata, CLAUDE.md stack, tool histogram, sub-agents, tool decisions (✓/✗/·), activity feed, files touched, today summary
   - **Watchtower**: every Claude session touched in the last hour, color-coded (live/recent/idle/stale) — plus a dedicated idle-sentinel view for stalled sessions
+  - **Chat**: cross-surface bridge — auto-detects your `claude-data-export` folder and surfaces conversations + memory from claude.ai
   - **Search**: global grep across every session JSONL on this machine
   - **Obsidian**: auto-detects your vaults from `~/Library/Application Support/obsidian/obsidian.json`, lists recent notes, "Save active session →" writes a markdown digest, "Open vault" hands off to Obsidian via `obsidian://`
   - **Memory**: pinnable index (📌), per-entry stale flag, instant filter
   - **Prompts**: personal prompt library backed by VSCode globalState — copy to clipboard with one click
-  - **Skills / Projects / Files / Config**: skill palette with usage counts, recent projects, full `~/.claude/` layout, MCP/hooks/plugins, disk usage, office visualizer launcher, budget config
+  - **Skills / Projects / Files / Config**: skill palette with usage counts, recent projects, full `~/.claude/` layout, MCP/hooks/plugins, disk usage, office visualizer launcher, claude-usage dashboard launcher, budget config
 
 Updates live as Claude works (filesystem watcher + 400ms debounce).
 
