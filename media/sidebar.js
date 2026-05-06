@@ -1239,13 +1239,70 @@
       ? `<div class="budget-row" style="margin-top: 8px;"><span>This session</span><span class="b-cap">${escapeHtml(b.spentSessionFormatted)} / ${escapeHtml(b.sessionCapFormatted)}</span></div>
          <div class="bar"><div class="bar-fill bar-${escapeHtml(b.sessionTone)}" style="width: ${b.sessionPct.toFixed(1)}%"></div></div>`
       : '';
+    const burn = typeof b.burnUsdPerHour === 'number' ? b.burnUsdPerHour : 0;
+    const projectionLine = burn > 0
+      ? (() => {
+          const burnText = `$${burn.toFixed(2)}/hr`;
+          const next30 = `$${(b.projected30MinUsd || 0).toFixed(2)}`;
+          const capWarn = b.projectedDailyHitsCap
+            ? ` <span class="tag tag-warn" title="Projected to hit daily cap before midnight at current burn rate">will hit cap</span>`
+            : '';
+          const tte = typeof b.minutesToDailyCap === 'number'
+            ? ` · ETA cap ${b.minutesToDailyCap < 60 ? b.minutesToDailyCap + 'm' : Math.round(b.minutesToDailyCap / 60) + 'h'}`
+            : '';
+          return `<div class="budget-row" style="margin-top: 8px; opacity: 0.85;"><span>Burn rate</span><span class="b-cap">${burnText} · next 30m ≈ ${next30}${tte}${capWarn}</span></div>`;
+        })()
+      : '';
     return `
       <h2>Budget caps ${b.enabled ? '<span class="tag tag-used">on</span>' : '<span class="tag">off</span>'}</h2>
       <div class="budget-card">
         ${dailyBar}
         ${sessionBar}
+        ${projectionLine}
       </div>
       <div class="actions"><button data-qa="set-cap">Set daily cap</button></div>
+    `;
+  }
+
+  function selfTelemetrySection(snap) {
+    const t = snap.telemetry;
+    if (!t || !Array.isArray(t.sections)) {
+      return '<h2>Self</h2><p class="empty">No telemetry yet — refresh once.</p>';
+    }
+    const surfaces = snap.surfaces || {};
+    const surfaceState = (k, label) =>
+      `<li><span class="left">${escapeHtml(label)}</span><span class="right">${surfaces[k] === false ? '<span class="tag">off</span>' : '<span class="tag tag-used">on</span>'}</span></li>`;
+    const upMs = Math.max(0, Date.now() - (t.startedAt || Date.now()));
+    const upText = upMs < 60_000 ? `${Math.round(upMs / 1000)}s`
+      : upMs < 3600_000 ? `${Math.round(upMs / 60_000)}m`
+      : `${(upMs / 3600_000).toFixed(1)}h`;
+    const sectionItems = t.sections.length
+      ? t.sections
+          .map((s) => `
+        <li>
+          <div class="row">
+            <span class="left" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
+            <span class="right"><span class="tag">${s.runs}×</span> avg ${s.avgDurationMs}ms · last ${s.lastDurationMs}ms · max ${s.maxDurationMs}ms${s.errorCount > 0 ? ' · <span class="tag tag-warn">' + s.errorCount + ' err</span>' : ''}</span>
+          </div>
+        </li>`)
+          .join('')
+      : '<li><span class="empty">Idle.</span></li>';
+    return `
+      <h2>Self · cockpit observing itself</h2>
+      <div class="kv">
+        <span class="k">Uptime</span><span class="v">${upText}</span>
+        <span class="k">Total runs</span><span class="v">${t.totalRuns}</span>
+        <span class="k">Errors</span><span class="v">${t.totalErrors}</span>
+      </div>
+      <h3 style="margin-top: 12px;">Surfaces enabled</h3>
+      <ul class="list">
+        ${surfaceState('macHealth', 'Mac Health')}
+        ${surfaceState('appUsage', 'App Usage')}
+        ${surfaceState('subdomainHealth', 'Subdomain HEAD probes')}
+      </ul>
+      <h3 style="margin-top: 12px;">Refresh cost by section</h3>
+      <ul class="list">${sectionItems}</ul>
+      <p class="empty" style="margin-top: 12px;">Each refresh runs the listed sections. If a section is consistently slow (>100ms) and you don't need it, disable its surface in <code>settings.json</code> under <code>claudeCockpit.surfaces.*</code>.</p>
     `;
   }
 
@@ -1874,6 +1931,7 @@
       { id: 'skills', label: `Skills (${snap.skills.length})` },
       { id: 'projects', label: `Projects (${snap.projects.length})` },
       { id: 'config', label: 'Config' },
+      { id: 'self', label: 'Self' },
       { id: 'help', label: '? Help' },
     ];
   }
@@ -1951,11 +2009,14 @@
   function sessionMetaFragment(snap) {
     const s = snap.stats;
     const sessionShort = s.sessionId ? s.sessionId.slice(0, 8) : '—';
+    const modeRow = s.permissionMode
+      ? `\n        <span class="k">Mode</span><span class="v"><span class="tag tag-mode-${escapeHtml(s.permissionMode)}" title="Latest permissionMode seen in the session JSONL — Cockpit displays only; toggle in Claude Code itself.">${escapeHtml(s.permissionMode)}</span></span>`
+      : '';
     return `
       <h2>Session</h2>
       <div class="kv">
         <span class="k">ID</span><span class="v">${escapeHtml(sessionShort)}</span>
-        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>
+        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>${modeRow}
         <span class="k">Messages</span><span class="v">${s.messageCount}</span>
         <span class="k">Tool calls</span><span class="v">${s.toolCallCount}</span>
         <span class="k">Last activity</span><span class="v">${escapeHtml(s.lastActivityAt ?? '—')}</span>
@@ -2020,6 +2081,7 @@
       { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
       { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
       { id: 'config',     label: 'Config',                                                            pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins' },
+      { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
   }
@@ -2027,12 +2089,19 @@
   function getEnabledTabIds(snap) {
     const prefs = (snap && snap.userPrefs) || {};
     const cat = tabCatalogue(snap);
+    const surfaces = (snap && snap.surfaces) || {};
+    // Hide tabs whose underlying surface has been disabled in settings,
+    // regardless of user prefs — the data isn't being collected anyway.
+    const filtered = cat.filter((t) => {
+      if (t.id === 'mac' && surfaces.macHealth === false) return false;
+      return true;
+    });
     if (Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length) {
       const set = new Set(prefs.enabledTabs);
-      return cat.filter((t) => t.pinned || set.has(t.id));
+      return filtered.filter((t) => t.pinned || set.has(t.id));
     }
     // First-launch default: every tab visible (preserves prior UX).
-    return cat;
+    return filtered;
   }
 
   function visibleTabBar(snap) {
@@ -2567,11 +2636,14 @@
       </div>
     `;
 
+    const modeRow = s.permissionMode
+      ? `\n        <span class="k">Mode</span><span class="v"><span class="tag tag-mode-${escapeHtml(s.permissionMode)}" title="Latest permissionMode seen in the session JSONL — Cockpit displays only; toggle in Claude Code itself.">${escapeHtml(s.permissionMode)}</span></span>`
+      : '';
     const session = `
       <h2>Session</h2>
       <div class="kv">
         <span class="k">ID</span><span class="v">${escapeHtml(sessionShort)}</span>
-        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>
+        <span class="k">Model</span><span class="v">${escapeHtml(s.lastModel || '—')}</span>${modeRow}
         <span class="k">Messages</span><span class="v">${s.messageCount}</span>
         <span class="k">Tool calls</span><span class="v">${s.toolCallCount}</span>
         <span class="k">Last activity</span><span class="v">${escapeHtml(s.lastActivityAt ?? '—')}</span>
