@@ -1,10 +1,12 @@
 # Claude Cockpit
 
-A VSCode extension that surfaces Claude Code's hidden state directly in the editor — token burn, files touched, persistent memory — without leaving your workspace.
+> The personal-OS HUD for Claude Code. VSCode-native. 100% local.
 
-> Sibling to [`claude-overlay`](https://github.com/sboghossian/claude-overlay) (macOS menubar, cross-surface). Cockpit is VSCode-native and focused on the Code surface.
+![Claude Cockpit — Now and Mac tabs](media/screenshots/hero.png)
 
-Landing page: [claude-cockpit.pages.dev](https://claude-cockpit.pages.dev)
+Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **14 tabs** — Now · Mac · Watchtower · Agents · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help.
+
+Landing page: [claude-cockpit.pages.dev](https://claude-cockpit.pages.dev) · Sibling: [`claude-overlay`](https://github.com/sboghossian/claude-overlay) (macOS menubar, cross-surface).
 
 ## What it does
 
