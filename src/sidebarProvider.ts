@@ -4,12 +4,15 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import {
   BudgetConfig,
+  classifyPrompt,
   CockpitSnapshot,
   computeRecommendations,
   formatBytes,
   formatTokens,
   formatUsd,
   globalSessionSearch,
+  minePrompts,
+  PromptCategory,
   SessionSearchHit,
   snapshot,
 } from './claudeData';
@@ -20,8 +23,13 @@ import { logger } from './logger';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 import {
   createRoutineSkill,
+  CustomFeed,
   DiscoverWindow,
+  FeedItem,
+  fetchCustomFeed,
   fetchGithubTrending,
+  fetchHackerNews,
+  fetchProductHunt,
   GithubRepo,
   readRssFromObsidian,
   RssEntry,
@@ -42,6 +50,7 @@ import {
   JarvisData,
   readJarvis,
 } from './jarvis';
+import { scanSecurity, SecuritySnapshot, summarizeFindings } from './security';
 
 interface InboundMessage {
   type:
@@ -64,6 +73,9 @@ interface InboundMessage {
     | 'addPrompt'
     | 'deletePrompt'
     | 'usePrompt'
+    | 'updatePromptCategory'
+    | 'minePrompts'
+    | 'savePromptsBatch'
     | 'pinMemory'
     | 'unpinMemory'
     | 'setDailyCap'
@@ -74,6 +86,15 @@ interface InboundMessage {
     | 'createRoutine'
     | 'runRoutine'
     | 'fetchDiscover'
+    | 'fetchHN'
+    | 'fetchProductHunt'
+    | 'fetchCustomFeed'
+    | 'addCustomFeed'
+    | 'removeCustomFeed'
+    | 'runSecurityScan'
+    | 'launchCsoSkill'
+    | 'talkToClaude'
+    | 'triggerWisprFlow'
     | 'fetchRoadmap'
     | 'fetchJarvis'
     | 'jarvisApprove'
@@ -98,10 +119,16 @@ interface InboundMessage {
   promptId?: string;
   promptTitle?: string;
   promptBody?: string;
+  promptCategory?: PromptCategory;
+  promptBatch?: { title: string; body: string; category?: PromptCategory }[];
   sessionFile?: string;
   patch?: UserPrefsPatch;
   routineName?: string;
   window?: DiscoverWindow;
+  feedName?: string;
+  feedUrl?: string;
+  talkText?: string;
+  talkMode?: 'new-session' | 'resume' | 'background';
   approvalId?: string;
   approvalReason?: string;
   peerText?: string;
@@ -133,11 +160,13 @@ interface PromptEntry {
   title: string;
   body: string;
   createdAt: number;
+  category?: PromptCategory;
 }
 
 const PROMPTS_KEY = 'claudeCockpit.prompts';
 const PINS_KEY = 'claudeCockpit.pinnedMemory';
 const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
+const CUSTOM_FEEDS_KEY = 'claudeCockpit.customFeeds';
 
 function readUserPrefs(state: vscode.Memento): UserPrefs {
   const stored = state.get<Partial<UserPrefs>>(USER_PREFS_KEY, {});
@@ -165,6 +194,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private debounce: NodeJS.Timeout | undefined;
   private lastSearch: { query: string; hits: SessionSearchHit[] } | undefined;
   private discoverGithub: { window: DiscoverWindow; fetchedAt: number; repos: GithubRepo[]; error: string | undefined } | undefined;
+  private discoverHN: { window: DiscoverWindow; fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
+  private discoverPH: { fetchedAt: number; items: FeedItem[]; error: string | undefined } | undefined;
+  private discoverCustom: Record<string, { fetchedAt: number; items: FeedItem[]; error: string | undefined }> = {};
+  private security: SecuritySnapshot | undefined;
+  private securityInflight: Promise<void> | undefined;
   private updateStatus: UpdateStatus | undefined;
   private updateCheckTimer: NodeJS.Timeout | undefined;
   private roadmap: RoadmapData | undefined = readCachedRoadmap();
@@ -388,6 +422,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       discover: {
         enabled: userPrefs.discoverEnabled,
         github: this.discoverGithub,
+        hn: this.discoverHN,
+        producthunt: this.discoverPH,
+        custom: this.discoverCustom,
+        customFeeds: this.globalState.get<CustomFeed[]>(CUSTOM_FEEDS_KEY, []),
         rss: userPrefs.discoverEnabled ? readRssFromObsidian() : { folder: undefined, entries: [] as RssEntry[], error: undefined },
       },
       roadmap: this.roadmap,
@@ -395,6 +433,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       changelog: this.readChangelogPayload(),
       updateStatus: this.readUpdateStatusPayload(),
       manage: readManageState(),
+      security: this.security ? { ...this.security, summary: summarizeFindings(this.security) } : undefined,
       lastSearch: this.lastSearch,
       stats: {
         ...snap.stats,
@@ -497,7 +536,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     const hits = globalSessionSearch(query, 30);
     this.lastSearch = { query, hits };
     this.refresh();
-    this.setActiveTabFromHost('search');
+    // 'search' is a sub-view of the new 'history' tab; the webview migrates
+    // legacy 'search' to 'history' but we set history+sub-view explicitly so
+    // the user lands on Session search, not Chat exports.
+    this.view?.webview.postMessage({ type: 'setHistorySubview', subview: 'search' });
+    this.setActiveTabFromHost('history');
   }
 
   private watchActive(): void {
@@ -604,11 +647,13 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       case 'addPrompt':
         if (msg.promptTitle && msg.promptBody) {
           const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+          const category = msg.promptCategory || classifyPrompt(msg.promptBody);
           prompts.push({
             id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
             title: msg.promptTitle.slice(0, 80),
             body: msg.promptBody,
             createdAt: Date.now(),
+            category,
           });
           await this.globalState.update(PROMPTS_KEY, prompts);
           this.refresh();
@@ -629,6 +674,44 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           void vscode.window.setStatusBarMessage('Prompt copied — paste into Claude', 1800);
         }
         return;
+      case 'updatePromptCategory':
+        if (msg.promptId && msg.promptCategory) {
+          const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+          const idx = prompts.findIndex((p) => p.id === msg.promptId);
+          if (idx >= 0) {
+            prompts[idx] = { ...prompts[idx], category: msg.promptCategory };
+            await this.globalState.update(PROMPTS_KEY, prompts);
+            this.refresh();
+          }
+        }
+        return;
+      case 'minePrompts': {
+        const existing = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+        const seen = new Set(
+          existing.map((p) => p.body.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80)),
+        );
+        const mined = minePrompts(60).filter((m) => !seen.has(m.fingerprint));
+        this.view?.webview.postMessage({ type: 'minedPrompts', prompts: mined });
+        return;
+      }
+      case 'savePromptsBatch': {
+        if (!Array.isArray(msg.promptBatch) || msg.promptBatch.length === 0) return;
+        const prompts = this.globalState.get<PromptEntry[]>(PROMPTS_KEY, []);
+        for (const entry of msg.promptBatch) {
+          if (!entry.title || !entry.body) continue;
+          const category = entry.category || classifyPrompt(entry.body);
+          prompts.push({
+            id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+            title: entry.title.slice(0, 80),
+            body: entry.body,
+            createdAt: Date.now(),
+            category,
+          });
+        }
+        await this.globalState.update(PROMPTS_KEY, prompts);
+        this.refresh();
+        return;
+      }
       case 'pinMemory':
         if (msg.filename) {
           const pins = this.globalState.get<string[]>(PINS_KEY, []);
@@ -725,6 +808,65 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         this.refresh();
         return;
       }
+      case 'fetchHN': {
+        const win = msg.window ?? 'day';
+        try {
+          const items = await fetchHackerNews(win);
+          this.discoverHN = { window: win, fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverHN = { window: win, fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'fetchProductHunt': {
+        try {
+          const items = await fetchProductHunt();
+          this.discoverPH = { fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverPH = { fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'fetchCustomFeed': {
+        if (!msg.feedName || !msg.feedUrl) return;
+        const feed: CustomFeed = { name: msg.feedName, url: msg.feedUrl };
+        try {
+          const items = await fetchCustomFeed(feed);
+          this.discoverCustom[feed.name] = { fetchedAt: Date.now(), items, error: undefined };
+        } catch (err) {
+          this.discoverCustom[feed.name] = { fetchedAt: Date.now(), items: [], error: String(err instanceof Error ? err.message : err) };
+        }
+        this.refresh();
+        return;
+      }
+      case 'addCustomFeed': {
+        if (!msg.feedName || !msg.feedUrl) return;
+        if (!/^https?:\/\//i.test(msg.feedUrl)) {
+          void vscode.window.showErrorMessage('Custom feed URL must start with http:// or https://');
+          return;
+        }
+        const feeds = this.globalState.get<CustomFeed[]>(CUSTOM_FEEDS_KEY, []);
+        if (feeds.some((f) => f.name === msg.feedName)) {
+          void vscode.window.showErrorMessage(`A custom feed named "${msg.feedName}" already exists.`);
+          return;
+        }
+        feeds.push({ name: msg.feedName.slice(0, 60), url: msg.feedUrl });
+        await this.globalState.update(CUSTOM_FEEDS_KEY, feeds);
+        this.refresh();
+        return;
+      }
+      case 'removeCustomFeed': {
+        if (!msg.feedName) return;
+        const feeds = this.globalState
+          .get<CustomFeed[]>(CUSTOM_FEEDS_KEY, [])
+          .filter((f) => f.name !== msg.feedName);
+        await this.globalState.update(CUSTOM_FEEDS_KEY, feeds);
+        delete this.discoverCustom[msg.feedName];
+        this.refresh();
+        return;
+      }
       case 'fetchRoadmap': {
         const enabled = vscode.workspace
           .getConfiguration('claudeCockpit')
@@ -768,6 +910,81 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         };
         await this.globalState.update(USER_PREFS_KEY, next);
         this.refresh();
+        return;
+      }
+      case 'runSecurityScan': {
+        if (this.securityInflight) return;
+        this.securityInflight = (async () => {
+          try {
+            // Run scan off the event loop; readFile calls are sync but cheap.
+            this.security = await new Promise((resolve) => {
+              setImmediate(() => resolve(scanSecurity(cwd)));
+            });
+          } catch (err) {
+            logger.warn(`security scan failed: ${String(err)}`);
+          } finally {
+            this.securityInflight = undefined;
+            this.refresh();
+          }
+        })();
+        return;
+      }
+      case 'launchCsoSkill': {
+        const term = vscode.window.createTerminal({ name: 'cso security audit' });
+        term.show();
+        // /cso is a gstack skill — runs from the user's claude session in this folder.
+        term.sendText('claude /cso');
+        return;
+      }
+      case 'talkToClaude': {
+        const text = (msg.talkText || '').trim();
+        if (!text) return;
+        const mode = msg.talkMode || 'new-session';
+        // Pipe the message into a fresh `claude` invocation in a terminal.
+        // Using a heredoc keeps quoting safe even when the message contains
+        // special characters. Mode controls flag args.
+        const flag = mode === 'resume' ? ' --continue' : mode === 'background' ? ' --print' : '';
+        const term = vscode.window.createTerminal({ name: `talk: ${text.slice(0, 40)}` });
+        term.show();
+        // We send the message via stdin so quoting is bulletproof.
+        const heredoc = `claude${flag} <<'COCKPIT_EOF'\n${text}\nCOCKPIT_EOF`;
+        term.sendText(heredoc);
+        return;
+      }
+      case 'triggerWisprFlow': {
+        // Wispr Flow on macOS uses a global shortcut. We can't directly hook
+        // into Wispr's IPC, but we can fire its default shortcut via
+        // AppleScript (Fn-Fn double-tap by default — varies by user). Most
+        // users will just press the shortcut themselves, but this surfaces
+        // the option for one-click activation when they've remapped to a
+        // synthesizable key.
+        if (process.platform !== 'darwin') {
+          void vscode.window.showInformationMessage('Wispr Flow handoff is macOS-only.');
+          return;
+        }
+        const userShortcut = vscode.workspace
+          .getConfiguration('claudeCockpit')
+          .get<string>('wisprShortcut', '');
+        if (!userShortcut) {
+          void vscode.window.showInformationMessage(
+            'Set claudeCockpit.wisprShortcut in settings to your Wispr key combo (e.g. "control+option+space"). Or just press your Wispr shortcut directly — Cockpit will pick up the dictated text from the active text input.',
+          );
+          return;
+        }
+        // Translate "control+option+space" → AppleScript form. Keep it
+        // narrow — we only support common modifiers + a single key.
+        const parts = userShortcut.toLowerCase().split('+').map((s) => s.trim());
+        const keyPart = parts.pop();
+        if (!keyPart) return;
+        const mods: string[] = [];
+        if (parts.includes('control') || parts.includes('ctrl')) mods.push('control down');
+        if (parts.includes('option') || parts.includes('alt')) mods.push('option down');
+        if (parts.includes('command') || parts.includes('cmd')) mods.push('command down');
+        if (parts.includes('shift')) mods.push('shift down');
+        const using = mods.length ? ` using {${mods.join(', ')}}` : '';
+        const ascript = `tell application "System Events" to keystroke "${keyPart}"${using}`;
+        const term = vscode.window.createTerminal({ name: 'wispr trigger' });
+        term.sendText(`osascript -e '${ascript.replace(/'/g, "'\\''")}'`);
         return;
       }
       case 'startUsageDashboard': {
@@ -847,7 +1064,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; connect-src 'none'; form-action 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; media-src 'self' blob:; connect-src 'none'; form-action 'none';" />
   <link rel="stylesheet" href="${cssUri}" />
   <title>Claude Cockpit</title>
 </head>

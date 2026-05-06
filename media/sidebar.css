@@ -1969,3 +1969,202 @@ body[data-theme="light"] .manage-group-head {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Prompt library category chips + mined prompt UI */
+.chip-count {
+  opacity: 0.6;
+  font-size: 10px;
+  margin-left: 2px;
+}
+.prompt-cat-select {
+  font-size: 10px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+select[data-prompt-cat-new] {
+  font-size: 11px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin: 4px 0;
+  width: 100%;
+}
+.tag-legal { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+.tag-build { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.tag-review { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.tag-plan { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.tag-research { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+.tag-infra { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+.tag-other { background: rgba(115, 115, 115, 0.2); color: var(--vscode-descriptionForeground); }
+
+.mined-block {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: var(--vscode-editor-inactiveSelectionBackground);
+}
+.mined-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.mined-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.mined-row input[type="checkbox"] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.mined-content {
+  flex: 1;
+  min-width: 0;
+}
+.mined-preview {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 80px;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sub-tab bar (used by merged tabs like Library) */
+.sub-tab-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding-bottom: 0;
+}
+.sub-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 12px;
+  margin-bottom: -1px;
+}
+.sub-tab:hover {
+  color: var(--vscode-foreground);
+}
+.sub-tab-active {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-focusBorder, var(--vscode-button-background));
+}
+.sub-tab-panel {
+  padding-top: 2px;
+}
+
+.custom-feed-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+.custom-feed-form input {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.custom-feed-block {
+  margin: 8px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.custom-feed-block:first-child { border-top: none; }
+
+.sec-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
+.sec-tile {
+  padding: 10px;
+  border-radius: 4px;
+  text-align: center;
+}
+.sec-tile-num {
+  font-size: 22px;
+  font-weight: 600;
+}
+.sec-tile-label {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+}
+.sec-tile-clean { background: rgba(34, 197, 94, 0.1); color: #4ade80; }
+.sec-tile-warn  { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+.sec-tile-high  { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.tag-warn { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+/* Talk tab — particle viz + voice */
+.talk-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.talk-canvas-wrap {
+  position: relative;
+  width: 100%;
+  height: 240px;
+  background: #080c18;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.talk-canvas-wrap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.talk-status {
+  position: absolute;
+  bottom: 6px;
+  left: 8px;
+  right: 8px;
+  text-align: center;
+  font-size: 11px;
+  color: rgba(180, 200, 255, 0.85);
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.talk-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.talk-text {
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 8px;
+  border-radius: 4px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 80px;
+}
+.talk-send-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}

@@ -2,6 +2,19 @@
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
   let lastSnapshot = null;
+  let minedPromptsState = null; // { prompts: MinedPrompt[], selected: Set<fingerprint> }
+
+  const PROMPT_CATEGORIES = ['legal', 'build', 'review', 'plan', 'research', 'infra', 'other'];
+  const PROMPT_CATEGORY_LABELS = {
+    all: 'All',
+    legal: 'Legal',
+    build: 'Build',
+    review: 'Review',
+    plan: 'Plan',
+    research: 'Research',
+    infra: 'Infra',
+    other: 'Other',
+  };
 
   function basename(p) {
     if (!p) return '';
@@ -789,85 +802,185 @@
     if (!d.enabled) {
       return `
         <h2>Discover</h2>
-        <p class="empty" style="font-size: 11px;">Discover surfaces top GitHub projects and RSS feeds. Both are <strong>off by default</strong> because Cockpit's privacy stance is local-first. Turning Discover on will allow Cockpit to fetch <code>api.github.com</code> when you click <strong>Refresh</strong>. RSS reads from your Obsidian vault — no network call.</p>
+        <p class="empty" style="font-size: 11px;">Discover surfaces top GitHub projects, Hacker News, Product Hunt, and your custom RSS feeds. <strong>Off by default</strong> — local-first stance. Turning Discover on lets Cockpit make outbound HTTPS calls only when you click <strong>Refresh</strong> on each source.</p>
         <button class="office-btn" data-action="enable-discover">Enable Discover (opt-in)</button>
       `;
     }
 
+    const state = vscode.getState() || {};
+    const view = state.discoverView || 'github';
+    const customFeeds = d.customFeeds || [];
+    const customCount = customFeeds.length;
+
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'github' ? 'sub-tab-active' : ''}" data-discover-view="github">GitHub</button>
+        <button class="sub-tab ${view === 'hn' ? 'sub-tab-active' : ''}" data-discover-view="hn">HN</button>
+        <button class="sub-tab ${view === 'producthunt' ? 'sub-tab-active' : ''}" data-discover-view="producthunt">Product Hunt</button>
+        <button class="sub-tab ${view === 'obsidian' ? 'sub-tab-active' : ''}" data-discover-view="obsidian">Obsidian RSS</button>
+        <button class="sub-tab ${view === 'custom' ? 'sub-tab-active' : ''}" data-discover-view="custom">Custom${customCount ? ' <span class="chip-count">' + customCount + '</span>' : ''}</button>
+      </div>
+    `;
+
+    let body = '';
+    if (view === 'github') body = discoverGithubBody(d);
+    else if (view === 'hn') body = discoverHNBody(d);
+    else if (view === 'producthunt') body = discoverPHBody(d);
+    else if (view === 'obsidian') body = discoverObsidianBody(d);
+    else if (view === 'custom') body = discoverCustomBody(d);
+
+    return `<h2>Discover</h2>${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function feedItemCard(item) {
+    const ageStr = item.publishedAt ? fmtAge(item.publishedAt) : '';
+    const score = item.score ? `<span class="tag tag-used">▲ ${item.score}</span>` : '';
+    const sourceTag = `<span class="tag">${escapeHtml(item.source)}</span>`;
+    return `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <a class="left link" data-open-url="${escapeHtml(item.url)}" title="${escapeHtml(item.title)}"><strong>${escapeHtml(item.title)}</strong></a>
+          <span class="right">${score}${sourceTag}</span>
+        </div>
+        ${item.description ? `<div class="note-excerpt">${escapeHtml(item.description)}</div>` : ''}
+        ${ageStr ? `<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">${escapeHtml(ageStr)}</div>` : ''}
+      </div>
+    </li>`;
+  }
+
+  function discoverGithubBody(d) {
     const win = (vscode.getState() || {}).discoverWindow || 'week';
     const ghCache = d.github;
     const ghError = ghCache && ghCache.error;
     const ghRepos = (ghCache && ghCache.repos) || [];
     const ghAge = ghCache ? fmtAge(ghCache.fetchedAt) : '';
-    const ghHeader = `
+    const header = `
       <div class="row">
         <h3 class="sub-h left">GitHub trending <span class="cost-rate">${ghRepos.length}</span></h3>
-        <span class="right">
-          <button class="office-btn" data-action="discover-refresh">Refresh</button>
-        </span>
+        <span class="right"><button class="office-btn" data-action="discover-refresh">Refresh</button></span>
       </div>
       <div class="filter-chips">
-        ${['day', 'week', 'month']
-          .map(
-            (w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-discover-window="${w}">${
-              w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
-            }</button>`,
-          )
-          .join('')}
+        ${['day', 'week', 'month'].map((w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-discover-window="${w}">${
+          w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
+        }</button>`).join('')}
       </div>
       ${ghCache ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(ghAge)} · window: ${escapeHtml(ghCache.window)}</p>` : '<p class="empty">Click Refresh to fetch top repos.</p>'}
     `;
-    const ghBody = ghError
+    const list = ghError
       ? `<p class="empty">${escapeHtml(ghError)}</p>`
       : !ghRepos.length
       ? ''
-      : `<ul class="list" style="list-style: none; padding: 0;">${ghRepos
-          .map(
-            (r) => `<li>
-              <div class="watch-card" style="display: block;">
-                <div class="row">
-                  <a class="left link" data-open-url="${escapeHtml(r.url)}" title="${escapeHtml(r.fullName)}"><strong>${escapeHtml(r.fullName)}</strong></a>
-                  <span class="right">
-                    ${r.language ? `<span class="tag">${escapeHtml(r.language)}</span>` : ''}
-                    <span class="tag">★ ${r.stars.toLocaleString()}</span>
-                  </span>
-                </div>
-                ${r.description ? `<div class="note-excerpt">${escapeHtml(r.description)}</div>` : ''}
-              </div>
-            </li>`,
-          )
-          .join('')}</ul>`;
+      : `<ul class="list" style="list-style: none; padding: 0;">${ghRepos.map((r) => `<li>
+          <div class="watch-card" style="display: block;">
+            <div class="row">
+              <a class="left link" data-open-url="${escapeHtml(r.url)}" title="${escapeHtml(r.fullName)}"><strong>${escapeHtml(r.fullName)}</strong></a>
+              <span class="right">${r.language ? `<span class="tag">${escapeHtml(r.language)}</span>` : ''}<span class="tag">★ ${r.stars.toLocaleString()}</span></span>
+            </div>
+            ${r.description ? `<div class="note-excerpt">${escapeHtml(r.description)}</div>` : ''}
+          </div>
+        </li>`).join('')}</ul>`;
+    return `${header}${list}`;
+  }
 
+  function discoverHNBody(d) {
+    const win = (vscode.getState() || {}).hnWindow || 'day';
+    const hn = d.hn;
+    const items = (hn && hn.items) || [];
+    const err = hn && hn.error;
+    const age = hn ? fmtAge(hn.fetchedAt) : '';
+    const header = `
+      <div class="row">
+        <h3 class="sub-h left">Hacker News <span class="cost-rate">${items.length}</span></h3>
+        <span class="right"><button class="office-btn" data-action="hn-refresh">Refresh</button></span>
+      </div>
+      <div class="filter-chips">
+        ${['day', 'week', 'month'].map((w) => `<button class="filter-chip ${win === w ? 'on' : ''}" data-hn-window="${w}">${
+          w === 'day' ? 'Today' : w === 'week' ? 'This week' : 'This month'
+        }</button>`).join('')}
+      </div>
+      ${hn ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(age)}</p>` : '<p class="empty">Click Refresh to fetch front page stories.</p>'}
+    `;
+    const body = err
+      ? `<p class="empty">${escapeHtml(err)}</p>`
+      : !items.length
+      ? ''
+      : `<ul class="list" style="list-style: none; padding: 0;">${items.map(feedItemCard).join('')}</ul>`;
+    return `${header}${body}`;
+  }
+
+  function discoverPHBody(d) {
+    const ph = d.producthunt;
+    const items = (ph && ph.items) || [];
+    const err = ph && ph.error;
+    const age = ph ? fmtAge(ph.fetchedAt) : '';
+    const header = `
+      <div class="row">
+        <h3 class="sub-h left">Product Hunt <span class="cost-rate">${items.length}</span></h3>
+        <span class="right"><button class="office-btn" data-action="ph-refresh">Refresh</button></span>
+      </div>
+      ${ph ? `<p class="empty" style="font-size: 10px;">Cached ${escapeHtml(age)}</p>` : '<p class="empty">Click Refresh to fetch today\'s products.</p>'}
+    `;
+    const body = err
+      ? `<p class="empty">${escapeHtml(err)}</p>`
+      : !items.length
+      ? ''
+      : `<ul class="list" style="list-style: none; padding: 0;">${items.map(feedItemCard).join('')}</ul>`;
+    return `${header}${body}`;
+  }
+
+  function discoverObsidianBody(d) {
     const rss = d.rss || { entries: [] };
-    const rssBody = rss.error
+    const header = `<h3 class="sub-h">RSS from Obsidian ${rss.folder ? `<span class="cost-rate">${rss.entries.length}</span>` : ''}</h3>
+      ${rss.folder ? `<p class="empty" style="font-size: 10px;">Reading: <code>${escapeHtml(rss.folder)}</code></p>` : ''}`;
+    const body = rss.error
       ? `<p class="empty">${escapeHtml(rss.error)}</p>`
       : !rss.entries.length
       ? `<p class="empty">No RSS notes found yet. The <code>rss-feed-obsidian</code> routine should populate them.</p>`
-      : `<ul class="list" style="list-style: none; padding: 0;">${rss.entries
-          .slice(0, 30)
-          .map(
-            (e) => `<li>
-              <div class="watch-card" style="display: block;">
-                <div class="row">
-                  <a class="left link" data-open-file="${escapeHtml(e.filePath)}" title="${escapeHtml(e.filePath)}"><strong>${escapeHtml(e.title)}</strong></a>
-                  <span class="right"><span class="tag">${escapeHtml(e.vault)}</span></span>
-                </div>
-                <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">
-                  ${e.source ? escapeHtml(e.source) + ' · ' : ''}${escapeHtml(fmtAge(e.mtimeMs))}
-                </div>
-              </div>
-            </li>`,
-          )
-          .join('')}</ul>`;
+      : `<ul class="list" style="list-style: none; padding: 0;">${rss.entries.slice(0, 30).map((e) => `<li>
+          <div class="watch-card" style="display: block;">
+            <div class="row">
+              <a class="left link" data-open-file="${escapeHtml(e.filePath)}" title="${escapeHtml(e.filePath)}"><strong>${escapeHtml(e.title)}</strong></a>
+              <span class="right"><span class="tag">${escapeHtml(e.vault)}</span></span>
+            </div>
+            <div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">${e.source ? escapeHtml(e.source) + ' · ' : ''}${escapeHtml(fmtAge(e.mtimeMs))}</div>
+          </div>
+        </li>`).join('')}</ul>`;
+    return `${header}${body}`;
+  }
 
-    return `
-      <h2>Discover</h2>
-      ${ghHeader}
-      ${ghBody}
-      <h3 class="sub-h">RSS from Obsidian ${rss.folder ? `<span class="cost-rate">${rss.entries.length}</span>` : ''}</h3>
-      ${rss.folder ? `<p class="empty" style="font-size: 10px;">Reading: <code>${escapeHtml(rss.folder)}</code></p>` : ''}
-      ${rssBody}
+  function discoverCustomBody(d) {
+    const feeds = d.customFeeds || [];
+    const cache = d.custom || {};
+    const addForm = `
+      <div class="custom-feed-form">
+        <input data-custom-feed-name placeholder="Feed name (e.g. 'My X via Nitter')" />
+        <input data-custom-feed-url placeholder="https://..." type="url" />
+        <button class="office-btn" data-add-custom-feed>+ Add feed</button>
+      </div>
+      <p class="empty" style="font-size: 10px;">X and LinkedIn don't expose RSS directly. Use a bridge: <code>https://nitter.net/{user}/rss</code> for X, or your own RSS-Bridge instance.</p>
     `;
+    if (!feeds.length) {
+      return `<h3 class="sub-h">Custom feeds</h3><p class="empty">No custom feeds yet. Add any RSS/Atom URL.</p>${addForm}`;
+    }
+    const cards = feeds.map((f) => {
+      const c = cache[f.name];
+      const items = (c && c.items) || [];
+      const err = c && c.error;
+      const age = c ? fmtAge(c.fetchedAt) : '';
+      return `<div class="custom-feed-block">
+        <div class="row">
+          <h4 class="sub-h left">${escapeHtml(f.name)} <span class="cost-rate">${items.length}</span></h4>
+          <span class="right">
+            <button class="watch-action" data-fetch-custom-feed="${escapeHtml(f.name)}" data-feed-url="${escapeHtml(f.url)}">Refresh</button>
+            <button class="watch-action" data-remove-custom-feed="${escapeHtml(f.name)}" style="color: var(--vscode-errorForeground);">Remove</button>
+          </span>
+        </div>
+        <p class="empty" style="font-size: 10px;"><code>${escapeHtml(f.url)}</code>${c ? ' · cached ' + escapeHtml(age) : ''}</p>
+        ${err ? `<p class="empty">${escapeHtml(err)}</p>` : ''}
+        ${items.length ? `<ul class="list" style="list-style: none; padding: 0;">${items.slice(0, 15).map(feedItemCard).join('')}</ul>` : ''}
+      </div>`;
+    }).join('');
+    return `<h3 class="sub-h">Custom feeds <span class="cost-rate">${feeds.length}</span></h3>${cards}${addForm}`;
   }
 
   function routinesSection(snap) {
@@ -1194,31 +1307,141 @@
   }
 
   function promptsSection(snap) {
-    const prompts = snap.prompts || [];
-    const cards = prompts.length
-      ? prompts
+    const prompts = (snap.prompts || []).map((p) => ({
+      ...p,
+      category: p.category || 'other',
+    }));
+    const state = vscode.getState() || {};
+    const activeFilter = state.promptFilter || 'all';
+    // Count per category for chip labels.
+    const counts = { all: prompts.length };
+    for (const c of PROMPT_CATEGORIES) counts[c] = 0;
+    for (const p of prompts) counts[p.category] = (counts[p.category] || 0) + 1;
+
+    const chipFilters = ['all', ...PROMPT_CATEGORIES.filter((c) => counts[c] > 0)];
+    const chips = chipFilters
+      .map(
+        (f) => `<button class="filter-chip ${activeFilter === f ? 'on' : ''}" data-prompt-filter="${f}">${
+          PROMPT_CATEGORY_LABELS[f]
+        }${counts[f] ? ` <span class="chip-count">${counts[f]}</span>` : ''}</button>`,
+      )
+      .join('');
+
+    const filtered = activeFilter === 'all' ? prompts : prompts.filter((p) => p.category === activeFilter);
+
+    const search = prompts.length
+      ? '<input type="search" class="search" data-search="prompts" placeholder="Search prompts…" style="margin-top: 6px;" />'
+      : '';
+
+    const cards = filtered.length
+      ? `<ul class="list" data-search-target="prompts" style="list-style: none; padding: 0;">${filtered
           .map(
-            (p) => `
-            <div class="prompt-card">
-              <div class="prompt-title">${escapeHtml(p.title)}</div>
-              <div class="prompt-body">${escapeHtml(p.body)}</div>
-              <div class="prompt-actions">
-                <button class="watch-action" data-prompt-use="${escapeHtml(p.id)}">Copy</button>
-                <button class="watch-action" data-prompt-delete="${escapeHtml(p.id)}" style="color: var(--vscode-errorForeground);">Delete</button>
+            (p) => `<li data-search-text="${escapeHtml((p.title + ' ' + p.body).toLowerCase())}">
+              <div class="prompt-card">
+                <div class="row">
+                  <div class="prompt-title left">${escapeHtml(p.title)}</div>
+                  <span class="right">
+                    <select class="prompt-cat-select" data-prompt-cat-id="${escapeHtml(p.id)}" title="Category">
+                      ${PROMPT_CATEGORIES.map(
+                        (c) => `<option value="${c}" ${p.category === c ? 'selected' : ''}>${PROMPT_CATEGORY_LABELS[c]}</option>`,
+                      ).join('')}
+                    </select>
+                  </span>
+                </div>
+                <div class="prompt-body">${escapeHtml(p.body)}</div>
+                <div class="prompt-actions">
+                  <button class="watch-action" data-prompt-use="${escapeHtml(p.id)}">Copy</button>
+                  <button class="watch-action" data-prompt-delete="${escapeHtml(p.id)}" style="color: var(--vscode-errorForeground);">Delete</button>
+                </div>
               </div>
-            </div>`,
+            </li>`,
           )
-          .join('')
-      : '<p class="empty">No saved prompts yet. Add one below.</p>';
+          .join('')}</ul>`
+      : prompts.length
+      ? `<p class="empty">No prompts in <strong>${escapeHtml(PROMPT_CATEGORY_LABELS[activeFilter])}</strong>. Switch filter or add one below.</p>`
+      : `<p class="empty">No saved prompts yet. Click <strong>Mine recent prompts</strong> to scan your sessions, or add one manually below.</p>`;
+
+    const minedBlock = renderMinedPromptsBlock();
+
     return `
-      <h2>Prompt library <span class="cost-rate">${prompts.length}</span></h2>
+      <h2>Prompt library <span class="cost-rate">${prompts.length}</span>
+        <button class="office-btn" data-prompt-mine style="float: right;">⛏ Mine recent prompts</button>
+      </h2>
+      ${prompts.length ? `<div class="filter-chips">${chips}</div>` : ''}
+      ${search}
+      ${minedBlock}
       ${cards}
       <div class="prompt-form">
         <input data-prompt-title placeholder="Prompt title (e.g. 'plan-review')" />
+        <select data-prompt-cat-new>
+          <option value="">Auto-classify</option>
+          ${PROMPT_CATEGORIES.map((c) => `<option value="${c}">${PROMPT_CATEGORY_LABELS[c]}</option>`).join('')}
+        </select>
         <textarea data-prompt-body placeholder="Prompt body — gets copied to clipboard"></textarea>
         <button class="office-btn" data-prompt-add>Save prompt</button>
       </div>
     `;
+  }
+
+  function renderMinedPromptsBlock() {
+    if (!minedPromptsState) return '';
+    const { prompts, selected } = minedPromptsState;
+    if (!prompts.length) {
+      return `
+        <div class="mined-block">
+          <div class="row">
+            <h3 class="sub-h left">Mined prompts</h3>
+            <button class="watch-action right" data-prompt-mine-close>Dismiss</button>
+          </div>
+          <p class="empty">No reusable prompts found in your recent sessions. Once you've reused a prompt across sessions, it'll show up here.</p>
+        </div>
+      `;
+    }
+    const rows = prompts
+      .map((p, idx) => {
+        const fp = p.fingerprint;
+        const checked = selected.has(fp) ? 'checked' : '';
+        const preview = p.body.length > 220 ? p.body.slice(0, 220) + '…' : p.body;
+        const occ = p.occurrences > 1 ? `<span class="tag tag-used">×${p.occurrences}</span>` : '';
+        const proj = p.projectHint ? `<span class="tag">${escapeHtml(p.projectHint)}</span>` : '';
+        return `<li>
+          <label class="mined-row">
+            <input type="checkbox" data-mined-toggle="${escapeHtml(fp)}" ${checked} />
+            <div class="mined-content">
+              <div class="row">
+                <span class="left"><strong>${escapeHtml(deriveTitle(p.body, idx))}</strong> <span class="tag tag-${escapeHtml(p.category)}">${escapeHtml(PROMPT_CATEGORY_LABELS[p.category])}</span></span>
+                <span class="right">${occ}${proj}</span>
+              </div>
+              <div class="mined-preview">${escapeHtml(preview)}</div>
+            </div>
+          </label>
+        </li>`;
+      })
+      .join('');
+    const selCount = selected.size;
+    return `
+      <div class="mined-block">
+        <div class="row">
+          <h3 class="sub-h left">Mined prompts <span class="cost-rate">${prompts.length}</span></h3>
+          <span class="right">
+            <button class="watch-action" data-prompt-mine-select-all>${selCount === prompts.length ? 'Deselect all' : 'Select all'}</button>
+            <button class="office-btn" data-prompt-mine-save ${selCount ? '' : 'disabled'}>Save ${selCount || ''} selected</button>
+            <button class="watch-action" data-prompt-mine-close>Dismiss</button>
+          </span>
+        </div>
+        <p class="empty" style="font-size: 11px;">Found ${prompts.length} reusable prompts across your recent sessions. Tick the ones to add to your library.</p>
+        <ul class="list" style="list-style: none; padding: 0;">${rows}</ul>
+      </div>
+    `;
+  }
+
+  function deriveTitle(body, idx) {
+    // First line, capped at 60 chars. If first line is too generic, fall back
+    // to a numbered title.
+    const first = body.split(/\n/)[0].trim();
+    if (first.length >= 8 && first.length <= 80) return first;
+    if (first.length > 80) return first.slice(0, 77) + '…';
+    return `Mined prompt ${idx + 1}`;
   }
 
   function budgetSection(snap) {
@@ -1868,6 +2091,540 @@
     `;
   }
 
+  // ===========================================================================
+  // Talk tab — particle viz + mic level + send-to-claude. Self-contained
+  // module that owns its canvas, AudioContext, and SpeechRecognition state.
+  // ===========================================================================
+  const Talk = (() => {
+    let audioCtx = null;
+    let analyser = null;
+    let micStream = null;
+    let level = 0;          // smoothed RMS, 0..1
+    let levelTarget = 0;
+    let listening = false;
+    let recognition = null;
+    let canvas = null;
+    let ctx2d = null;
+    let rafHandle = null;
+    let particles = null;
+    let rotation = 0;
+    let interimText = '';
+
+    // Fibonacci sphere — produces N evenly-distributed unit vectors. Used
+    // once on first paint; particles are rotated each frame, not regenerated.
+    function buildParticles(n) {
+      const out = new Array(n);
+      const phi = Math.PI * (3 - Math.sqrt(5));
+      for (let i = 0; i < n; i++) {
+        const y = 1 - (i / (n - 1)) * 2;
+        const radius = Math.sqrt(1 - y * y);
+        const theta = phi * i;
+        out[i] = {
+          x: Math.cos(theta) * radius,
+          y,
+          z: Math.sin(theta) * radius,
+          // Per-particle jitter so motion isn't uniform.
+          jitter: Math.random() * 0.15,
+        };
+      }
+      return out;
+    }
+
+    function ensureCanvas() {
+      const c = document.querySelector('canvas[data-talk-canvas]');
+      if (c && c !== canvas) {
+        canvas = c;
+        ctx2d = c.getContext('2d');
+        // Track size in case sidebar resizes.
+        const resize = () => {
+          if (!canvas) return;
+          const dpr = window.devicePixelRatio || 1;
+          const w = canvas.clientWidth;
+          const h = canvas.clientHeight;
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+        };
+        resize();
+        // Re-resize when the panel is resized.
+        new ResizeObserver(resize).observe(canvas);
+      }
+      if (!particles) particles = buildParticles(420);
+    }
+
+    function startAnimation() {
+      if (rafHandle) return;
+      const tick = () => {
+        rafHandle = requestAnimationFrame(tick);
+        sampleMic();
+        draw();
+      };
+      tick();
+    }
+
+    function stopAnimation() {
+      if (rafHandle) cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+
+    function sampleMic() {
+      // Smooth toward levelTarget. Without active mic, decay to 0.
+      level += (levelTarget - level) * 0.18;
+      if (!analyser) {
+        levelTarget *= 0.92;
+        return;
+      }
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buf.length);
+      // Boost so quiet speech still moves the viz.
+      levelTarget = Math.min(1, rms * 4);
+    }
+
+    function draw() {
+      if (!ctx2d || !canvas) return;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      // Trail effect — fade prior frame instead of clearing.
+      ctx2d.fillStyle = 'rgba(8, 12, 24, 0.18)';
+      ctx2d.fillRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const baseR = Math.min(w, h) * 0.32;
+      const expand = baseR * (1 + level * 0.6);
+      rotation += 0.0035 + level * 0.012;
+
+      const cosR = Math.cos(rotation);
+      const sinR = Math.sin(rotation);
+      const cosT = Math.cos(rotation * 0.6);
+      const sinT = Math.sin(rotation * 0.6);
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        // Rotate around Y then X.
+        const x1 = p.x * cosR + p.z * sinR;
+        const z1 = -p.x * sinR + p.z * cosR;
+        const y1 = p.y * cosT - z1 * sinT;
+        const z2 = p.y * sinT + z1 * cosT;
+        // Project (perspective).
+        const persp = 1 / (1.4 - z2 * 0.4);
+        const r = expand * (1 + p.jitter * level);
+        const px = cx + x1 * r * persp;
+        const py = cy + y1 * r * persp;
+        // Particles further away dim + shrink.
+        const depth = (z2 + 1) / 2; // 0..1
+        const size = (0.6 + depth * 1.6) * (1 + level * 0.5);
+        const alpha = 0.25 + depth * 0.7;
+        // Hot core when audio level is high; cool blue when quiet.
+        const hue = 200 + level * 60;
+        ctx2d.fillStyle = `hsla(${hue}, 80%, ${50 + depth * 30}%, ${alpha})`;
+        ctx2d.beginPath();
+        ctx2d.arc(px, py, size, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+      // Soft center glow.
+      const grad = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, expand);
+      grad.addColorStop(0, `rgba(140, 180, 255, ${0.05 + level * 0.15})`);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx2d.fillStyle = grad;
+      ctx2d.fillRect(0, 0, w, h);
+    }
+
+    async function startListening() {
+      if (listening) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = audioCtx.createMediaStreamSource(micStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        listening = true;
+        // Try to start speech recognition (Chromium-based VSCode supports it).
+        startRecognition();
+        updateButtons();
+      } catch (err) {
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'Mic access denied or unavailable: ' + (err && err.message ? err.message : String(err));
+      }
+    }
+
+    function stopListening() {
+      if (!listening) return;
+      if (micStream) {
+        for (const t of micStream.getTracks()) t.stop();
+        micStream = null;
+      }
+      analyser = null;
+      stopRecognition();
+      listening = false;
+      levelTarget = 0;
+      updateButtons();
+    }
+
+    function startRecognition() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'Listening (no transcription — Speech API unavailable in this VSCode build)';
+        return;
+      }
+      try {
+        recognition = new SR();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.onresult = (e) => {
+          let finalText = '';
+          let interim = '';
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i];
+            if (r.isFinal) finalText += r[0].transcript;
+            else interim += r[0].transcript;
+          }
+          const ta = document.querySelector('textarea[data-talk-text]');
+          if (finalText && ta) {
+            ta.value = (ta.value ? ta.value + ' ' : '') + finalText.trim();
+          }
+          interimText = interim;
+          const out = document.querySelector('[data-talk-status]');
+          if (out) out.textContent = interim ? 'hearing: "' + interim + '"' : 'listening…';
+        };
+        recognition.onerror = (e) => {
+          const out = document.querySelector('[data-talk-status]');
+          if (out) out.textContent = 'Recognition error: ' + (e.error || 'unknown');
+        };
+        recognition.onend = () => {
+          // Auto-restart while still listening (continuous mode drops out periodically).
+          if (listening && recognition) {
+            try { recognition.start(); } catch (_) { /* ignore */ }
+          }
+        };
+        recognition.start();
+        const out = document.querySelector('[data-talk-status]');
+        if (out) out.textContent = 'listening…';
+      } catch (err) {
+        recognition = null;
+      }
+    }
+
+    function stopRecognition() {
+      if (recognition) {
+        try { recognition.stop(); } catch (_) { /* ignore */ }
+        recognition = null;
+      }
+      const out = document.querySelector('[data-talk-status]');
+      if (out) out.textContent = '';
+      interimText = '';
+    }
+
+    function updateButtons() {
+      const startBtn = document.querySelector('button[data-talk-start]');
+      const stopBtn = document.querySelector('button[data-talk-stop]');
+      if (startBtn) startBtn.style.display = listening ? 'none' : '';
+      if (stopBtn) stopBtn.style.display = listening ? '' : 'none';
+    }
+
+    function send(mode) {
+      const ta = document.querySelector('textarea[data-talk-text]');
+      if (!ta) return;
+      const text = ta.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'talkToClaude', talkText: text, talkMode: mode });
+      ta.value = '';
+      const out = document.querySelector('[data-talk-status]');
+      if (out) out.textContent = 'Sent → terminal opened. Review & press Enter.';
+    }
+
+    function init() {
+      ensureCanvas();
+      startAnimation();
+    }
+
+    function teardown() {
+      stopListening();
+      stopAnimation();
+      // Don't close audioCtx — re-opening one is expensive and the user
+      // may flip back to the tab.
+    }
+
+    return { init, teardown, startListening, stopListening, send };
+  })();
+
+  function talkSection(snap) {
+    return `
+      <div class="talk-shell">
+        <div class="talk-canvas-wrap">
+          <canvas data-talk-canvas></canvas>
+          <div class="talk-status" data-talk-status></div>
+        </div>
+        <div class="talk-controls">
+          <button class="office-btn" data-talk-start>🎙 Start listening</button>
+          <button class="office-btn" data-talk-stop style="display: none;">■ Stop</button>
+          <button class="watch-action" data-talk-wispr title="Trigger Wispr Flow shortcut (configure in settings)">Wispr</button>
+        </div>
+        <textarea class="talk-text" data-talk-text rows="4" placeholder="Type or dictate. Speech recognition fills this in as you talk."></textarea>
+        <div class="talk-send-row">
+          <button class="office-btn" data-talk-send="new-session">Send → new session</button>
+          <button class="watch-action" data-talk-send="resume">Resume last</button>
+          <button class="watch-action" data-talk-send="background">Background (--print)</button>
+        </div>
+        <p class="empty" style="font-size: 11px;">
+          The particle sphere reacts to your voice in real time. Speech is transcribed via your browser's Web Speech API (works in Chromium/VSCode). When you hit Send, Cockpit pipes the message into a fresh <code>claude</code> session in a terminal — review and press Enter to confirm. Voice never leaves your machine.
+        </p>
+      </div>
+    `;
+  }
+
+  function securitySection(snap) {
+    const sec = snap.security;
+    const summary = sec && sec.summary;
+    const state = vscode.getState() || {};
+    const view = state.securityView || 'overview';
+
+    const headerBtns = `
+      <span class="right">
+        <button class="office-btn" data-action="security-scan">${sec ? 'Re-scan' : 'Scan now'}</button>
+        <button class="office-btn" data-action="launch-cso" title="Run the gstack /cso skill — deeper audit, dependency CVEs, etc.">/cso</button>
+      </span>
+    `;
+
+    if (!sec) {
+      return `
+        <div class="row"><h2 class="left">Security</h2>${headerBtns}</div>
+        <p class="empty">No scan run yet. Click <strong>Scan now</strong> to audit this workspace for: tracked .env files, hardcoded API keys/tokens in source, MCP servers with inline secrets, git remote exposure. <strong>Local-only — nothing leaves your machine.</strong></p>
+        <p class="empty" style="font-size: 11px;">For deeper audits (dependency CVEs, GitHub repo settings, edge-function exposure, OWASP Top 10), use the <code>/cso</code> skill — runs in a terminal here.</p>
+      `;
+    }
+
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'overview' ? 'sub-tab-active' : ''}" data-security-view="overview">Overview</button>
+        <button class="sub-tab ${view === 'secrets' ? 'sub-tab-active' : ''}" data-security-view="secrets">Secrets <span class="chip-count">${(sec.secrets || []).length}</span></button>
+        <button class="sub-tab ${view === 'env' ? 'sub-tab-active' : ''}" data-security-view="env">.env <span class="chip-count">${(sec.envFiles || []).length}</span></button>
+        <button class="sub-tab ${view === 'git' ? 'sub-tab-active' : ''}" data-security-view="git">Git <span class="chip-count">${(sec.gitRemotes || []).length}</span></button>
+        <button class="sub-tab ${view === 'mcp' ? 'sub-tab-active' : ''}" data-security-view="mcp">MCP <span class="chip-count">${(sec.mcpServers || []).length}</span></button>
+      </div>
+    `;
+
+    let body = '';
+    if (view === 'overview') body = securityOverviewBody(sec, summary);
+    else if (view === 'secrets') body = securitySecretsBody(sec);
+    else if (view === 'env') body = securityEnvBody(sec);
+    else if (view === 'git') body = securityGitBody(sec);
+    else if (view === 'mcp') body = securityMcpBody(sec);
+
+    const truncatedNote = sec.truncated
+      ? `<p class="empty" style="font-size: 10px;">⚠ Scan capped — repo is large. Findings shown are partial.</p>`
+      : '';
+
+    return `
+      <div class="row"><h2 class="left">Security</h2>${headerBtns}</div>
+      <p class="empty" style="font-size: 10px;">Last scan: ${escapeHtml(fmtAge(sec.scannedAt))} · root: <code>${escapeHtml(sec.scanRoot || '—')}</code></p>
+      ${truncatedNote}
+      ${subBar}
+      <div class="sub-tab-panel">${body}</div>
+    `;
+  }
+
+  function severityChip(sev) {
+    if (sev === 'high') return '<span class="tag tag-warn">high</span>';
+    return '<span class="tag">medium</span>';
+  }
+
+  function securityOverviewBody(sec, summary) {
+    if (!summary) return '<p class="empty">No findings.</p>';
+    const tiles = `
+      <div class="sec-tiles">
+        <div class="sec-tile ${summary.high ? 'sec-tile-high' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.high}</div>
+          <div class="sec-tile-label">high-severity secrets</div>
+        </div>
+        <div class="sec-tile ${summary.medium ? 'sec-tile-warn' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.medium}</div>
+          <div class="sec-tile-label">medium-severity secrets</div>
+        </div>
+        <div class="sec-tile ${summary.envTracked ? 'sec-tile-high' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.envTracked}</div>
+          <div class="sec-tile-label">.env files tracked in git</div>
+        </div>
+        <div class="sec-tile ${summary.mcpInline ? 'sec-tile-warn' : 'sec-tile-clean'}">
+          <div class="sec-tile-num">${summary.mcpInline}</div>
+          <div class="sec-tile-label">MCP servers with inline secrets</div>
+        </div>
+      </div>
+    `;
+    const verdict = summary.total === 0
+      ? '<p class="empty"><strong>✓ Clean scan.</strong> No obvious leaks. Run /cso for deeper audit.</p>'
+      : `<p class="empty">${summary.total} finding${summary.total === 1 ? '' : 's'} below. <strong>${summary.high} need urgent action.</strong></p>`;
+    return `${tiles}${verdict}`;
+  }
+
+  function securitySecretsBody(sec) {
+    const list = sec.secrets || [];
+    if (!list.length) return '<p class="empty">✓ No hardcoded secrets matched.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((s) => `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <a class="left link" data-open-file="${escapeHtml(s.absoluteFile)}" title="${escapeHtml(s.absoluteFile)}"><strong>${escapeHtml(s.file)}</strong>:${s.line}</a>
+          <span class="right">${severityChip(s.severity)}<span class="tag">${escapeHtml(s.rule)}</span></span>
+        </div>
+        <div class="note-excerpt"><code>${escapeHtml(s.excerpt)}</code></div>
+      </div>
+    </li>`).join('')}</ul>`;
+  }
+
+  function securityEnvBody(sec) {
+    const list = sec.envFiles || [];
+    if (!list.length) return '<p class="empty">No .env files in this workspace.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((e) => {
+      const danger = e.trackedInGit && !e.ignored;
+      const status = danger
+        ? '<span class="tag tag-warn">tracked in git</span>'
+        : e.ignored
+        ? '<span class="tag tag-used">gitignored ✓</span>'
+        : '<span class="tag">untracked</span>';
+      return `<li>
+        <div class="watch-card" style="display: block;">
+          <div class="row">
+            <a class="left link" data-open-file="${escapeHtml(e.absoluteFile)}"><strong>${escapeHtml(e.file)}</strong></a>
+            <span class="right">${status}<span class="tag">${(e.sizeBytes / 1024).toFixed(1)} KB</span></span>
+          </div>
+          ${danger ? '<div class="note-excerpt" style="color: var(--vscode-errorForeground);">⚠ This .env file is being tracked. Add it to .gitignore and rotate any secrets it contains.</div>' : ''}
+        </div>
+      </li>`;
+    }).join('')}</ul>`;
+  }
+
+  function securityGitBody(sec) {
+    const list = sec.gitRemotes || [];
+    if (!list.length) return '<p class="empty">Not a git repo (or no remotes configured).</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((r) => `<li>
+      <div class="watch-card" style="display: block;">
+        <div class="row">
+          <span class="left"><strong>${escapeHtml(r.name)}</strong></span>
+          <span class="right">${r.isGithub ? '<span class="tag">GitHub</span>' : ''}</span>
+        </div>
+        <div class="note-excerpt"><code>${escapeHtml(r.url)}</code></div>
+      </div>
+    </li>`).join('')}</ul>
+    <p class="empty" style="font-size: 11px; margin-top: 8px;">For repo visibility / branch protection / secret scanning audit, run <code>/cso</code>.</p>`;
+  }
+
+  function securityMcpBody(sec) {
+    const list = sec.mcpServers || [];
+    if (!list.length) return '<p class="empty">No MCP servers configured in <code>~/.claude/settings.json</code>.</p>';
+    return `<ul class="list" style="list-style: none; padding: 0;">${list.map((m) => {
+      const inlineWarn = m.hasInlineSecret
+        ? '<span class="tag tag-warn">inline secret</span>'
+        : '<span class="tag tag-used">env-var only ✓</span>';
+      return `<li>
+        <div class="watch-card" style="display: block;">
+          <div class="row">
+            <span class="left"><strong>${escapeHtml(m.serverName)}</strong></span>
+            <span class="right">${inlineWarn}</span>
+          </div>
+          ${m.envKeys.length ? `<div class="note-excerpt">env keys: ${m.envKeys.map((k) => '<code>' + escapeHtml(k) + '</code>').join(', ')}</div>` : '<div class="note-excerpt" style="font-size: 10px;">No env config.</div>'}
+          ${m.hasInlineSecret ? '<div class="note-excerpt" style="color: var(--vscode-errorForeground);">⚠ A literal secret value appears to be set inline. Move it to <code>${</code> env var reference and rotate.</div>' : ''}
+        </div>
+      </li>`;
+    }).join('')}</ul>`;
+  }
+
+  function browseSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.browseView === 'files' ? 'files' : 'projects';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'projects' ? 'sub-tab-active' : ''}" data-browse-view="projects">Projects</button>
+        <button class="sub-tab ${view === 'files' ? 'sub-tab-active' : ''}" data-browse-view="files">Files (~/.claude)</button>
+      </div>
+    `;
+    const body = view === 'files' ? filesSection(snap) : projectsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function historySection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.historyView === 'chat' ? 'chat' : 'search';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'search' ? 'sub-tab-active' : ''}" data-history-view="search">Session search</button>
+        <button class="sub-tab ${view === 'chat' ? 'sub-tab-active' : ''}" data-history-view="chat">claude.ai exports</button>
+      </div>
+    `;
+    const body = view === 'chat' ? chatExportSection(snap) : searchSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function timelineSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.timelineView === 'changelog' ? 'changelog' : 'roadmap';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'roadmap' ? 'sub-tab-active' : ''}" data-timeline-view="roadmap">Roadmap (planned)</button>
+        <button class="sub-tab ${view === 'changelog' ? 'sub-tab-active' : ''}" data-timeline-view="changelog">Changelog (shipped)</button>
+      </div>
+    `;
+    let body = '';
+    if (view === 'roadmap') {
+      body = roadmapSection(snap);
+      maybeAutoFetchRoadmap();
+    } else {
+      body = changelogSection(snap);
+    }
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function unifiedSettingsSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.settingsView || 'budget';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'budget' ? 'sub-tab-active' : ''}" data-settings-view="budget">Budget</button>
+        <button class="sub-tab ${view === 'rtk' ? 'sub-tab-active' : ''}" data-settings-view="rtk">RTK</button>
+        <button class="sub-tab ${view === 'tunnels' ? 'sub-tab-active' : ''}" data-settings-view="tunnels">Tunnels</button>
+        <button class="sub-tab ${view === 'office' ? 'sub-tab-active' : ''}" data-settings-view="office">Office</button>
+        <button class="sub-tab ${view === 'manage' ? 'sub-tab-active' : ''}" data-settings-view="manage">Manage</button>
+        <button class="sub-tab ${view === 'usage' ? 'sub-tab-active' : ''}" data-settings-view="usage">Usage</button>
+        <button class="sub-tab ${view === 'disk' ? 'sub-tab-active' : ''}" data-settings-view="disk">Disk</button>
+        <button class="sub-tab ${view === 'hooks' ? 'sub-tab-active' : ''}" data-settings-view="hooks">Hooks</button>
+      </div>
+    `;
+    let body = '';
+    if (view === 'budget') body = budgetSection(snap);
+    else if (view === 'rtk') body = rtkSection(snap);
+    else if (view === 'tunnels') body = tunnelsSection(snap);
+    else if (view === 'office') body = officeSection(snap);
+    else if (view === 'manage') body = manageSection(snap);
+    else if (view === 'usage') body = usageDashboardSection(snap);
+    else if (view === 'disk') body = diskUsageSection(snap);
+    else if (view === 'hooks') body = settingsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
+  function librarySection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.libraryView === 'memory' ? 'memory' : 'prompts';
+    const memCount = (snap.memory || []).length;
+    const promptCount = (snap.prompts || []).length;
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'prompts' ? 'sub-tab-active' : ''}" data-library-view="prompts">Prompts <span class="chip-count">${promptCount}</span></button>
+        <button class="sub-tab ${view === 'memory' ? 'sub-tab-active' : ''}" data-library-view="memory">Memory <span class="chip-count">${memCount}</span></button>
+      </div>
+    `;
+    const body = view === 'memory' ? memorySection(snap) : promptsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function memorySection(snap) {
     const list = snap.memory || [];
     const pinned = new Set(snap.pinnedMemory || []);
@@ -1983,31 +2740,15 @@
     return `Recs (${recs.length})`;
   }
 
-  function emptyTabBar(snap) {
-    const chatLabel = snap.chatExport && snap.chatExport.installed
-      ? `Chat (${snap.chatExport.conversationCount})`
-      : 'Chat ◌';
-    const macLabel = snap.macHealth && snap.macHealth.available ? 'Mac' : 'Mac ◌';
-    return [
-      { id: 'now', label: 'Now' },
-      { id: 'recs', label: recsLabel(snap) },
-      { id: 'mac', label: macLabel },
-      { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
-      { id: 'office', label: `Office (${(snap.officeFloor || []).length})` },
-      { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
-      { id: 'routines', label: `Routines (${((snap.routines || {}).local || []).length})` },
-      { id: 'chat', label: chatLabel },
-      { id: 'search', label: 'Search' },
-      { id: 'obsidian', label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌' },
-      { id: 'skills', label: `Skills (${snap.skills.length})` },
-      { id: 'projects', label: `Projects (${snap.projects.length})` },
-      { id: 'config', label: 'Config' },
-      { id: 'self', label: 'Self' },
-      { id: 'help', label: '? Help' },
-    ];
+  function secLabel(snap) {
+    const s = snap.security && snap.security.summary;
+    if (!s) return 'Security';
+    if (s.high > 0) return `Security (${s.high}!)`;
+    if (s.total > 0) return `Security (${s.total})`;
+    return 'Security ✓';
   }
 
-  // ===========================================================================
+// ===========================================================================
   // Component registry — every reusable widget is addressable by id so the
   // Custom tab can compose any combination of them. category groups them in
   // the picker UI; requiresCwd hides components that need an active session.
@@ -2142,21 +2883,41 @@
       { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
       { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
-      { id: 'roadmap',    label: `Roadmap${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Mirror of roadmap.dashable.dev — every project, filters, links' },
-      { id: 'changelog',  label: 'Changelog',                                                         pinned: false, requiresCwd: false, hint: 'What shipped, when, plus update check' },
-      { id: 'manage',     label: 'Manage',                                                            pinned: false, requiresCwd: false, hint: 'All Claude settings — open in editor to modify' },
-      { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
-      { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
+      { id: 'timeline',   label: `Timeline${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Roadmap (planned) + Changelog (shipped) — what happened and what is next' },
+      { id: 'settings',   label: 'Settings',                                                          pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins, dashboards' },
+      { id: 'history',    label: chatLabel.replace('Chat', 'History'),                                pinned: false, requiresCwd: false, hint: 'Search every Claude session + browse claude.ai chat exports' },
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
-      { id: 'memory',     label: `Memory (${snap.memory.length})`,                                    pinned: false, requiresCwd: true,  hint: 'Per-project memory entries' },
-      { id: 'prompts',    label: `Prompts (${(snap.prompts || []).length})`,                          pinned: false, requiresCwd: false, hint: 'Personal prompt library' },
+      { id: 'library',    label: `Library (${(snap.memory || []).length + ((snap.prompts || []).length)})`, pinned: false, requiresCwd: false, hint: 'Memory + Prompts — reusable text Claude can pull from' },
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
-      { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
-      { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
-      { id: 'config',     label: 'Config',                                                            pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins' },
+      { id: 'browse',     label: `Browse (${snap.projects.length})`,                                  pinned: false, requiresCwd: false, hint: 'Recent projects + ~/.claude/ filesystem' },
+      { id: 'talk',       label: 'Talk',                                                              pinned: false, requiresCwd: false, hint: 'Voice + text → Claude. Particle visualization reacts to your voice.' },
+      { id: 'security',   label: secLabel(snap),                                                      pinned: false, requiresCwd: false, hint: 'Local secret scan, .env audit, MCP credential check, /cso launcher' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
+  }
+
+  // Tab merges remap old IDs onto new ones so persisted enabledTabs still
+  // surface the right tab. Update this when consolidating tabs.
+  const TAB_MIGRATIONS = {
+    memory: 'library',
+    prompts: 'library',
+    manage: 'settings',
+    config: 'settings',
+    roadmap: 'timeline',
+    changelog: 'timeline',
+    chat: 'history',
+    search: 'history',
+    projects: 'browse',
+    files: 'browse',
+  };
+
+  function migrateEnabledTabIds(ids) {
+    const out = new Set();
+    for (const id of ids) {
+      out.add(TAB_MIGRATIONS[id] || id);
+    }
+    return out;
   }
 
   function getEnabledTabIds(snap) {
@@ -2170,7 +2931,7 @@
       return true;
     });
     if (Array.isArray(prefs.enabledTabs) && prefs.enabledTabs.length) {
-      const set = new Set(prefs.enabledTabs);
+      const set = migrateEnabledTabIds(prefs.enabledTabs);
       return filtered.filter((t) => t.pinned || set.has(t.id));
     }
     // First-launch default: every tab visible (preserves prior UX).
@@ -2381,7 +3142,8 @@
         type: 'memory',
         title: m.title || m.filename,
         subtitle: `${m.filename}${m.isStale ? ' · stale' : ''}`,
-        tab: 'memory',
+        tab: 'library',
+        librarySubview: 'memory',
         action: 'open-memory-file',
         payload: m.filename,
         keywords: `${m.title || ''} ${m.filename} ${(m.preview || '').slice(0, 200)}`.toLowerCase(),
@@ -2405,7 +3167,8 @@
         type: 'prompt',
         title: p.title,
         subtitle: (p.body || '').slice(0, 120),
-        tab: 'prompts',
+        tab: 'library',
+        librarySubview: 'prompts',
         action: 'use-prompt',
         payload: p.id,
         promptBody: p.body,
@@ -2442,7 +3205,7 @@
         type: 'project',
         title: p.decodedPath ? p.decodedPath.split('/').slice(-1)[0] : p.dirName,
         subtitle: p.decodedPath || p.dirName,
-        tab: 'projects',
+        tab: 'browse',
         action: 'open-project',
         payload: p.decodedPath,
         keywords: `${p.decodedPath || ''} ${p.dirName || ''}`.toLowerCase(),
@@ -2466,7 +3229,8 @@
         type: 'tunnel',
         title: t.name,
         subtitle: `${t.hostname || '—'} → ${t.service || '—'}`,
-        tab: 'config',
+        tab: 'settings',
+        settingsSubview: 'tunnels',
         action: 'open-file',
         payload: t.configPath,
         keywords: `${t.name} ${t.hostname || ''} ${t.service || ''}`.toLowerCase(),
@@ -2475,13 +3239,13 @@
 
     const settings = snap.settings || {};
     if (settings.hooksCount) {
-      out.push({ type: 'setting', title: `${settings.hooksCount} hooks configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'hooks settings.json' });
+      out.push({ type: 'setting', title: `${settings.hooksCount} hooks configured`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'hooks settings.json' });
     }
     if (settings.mcpServerCount) {
-      out.push({ type: 'setting', title: `${settings.mcpServerCount} MCP servers configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'mcp servers settings' });
+      out.push({ type: 'setting', title: `${settings.mcpServerCount} MCP servers configured`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'mcp servers settings' });
     }
     if (settings.pluginCount) {
-      out.push({ type: 'setting', title: `${settings.pluginCount} plugins enabled`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'plugins settings' });
+      out.push({ type: 'setting', title: `${settings.pluginCount} plugins enabled`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'plugins settings' });
     }
 
     return out;
@@ -2540,6 +3304,8 @@
           data-search-action="${escapeHtml(r.action)}"
           data-search-payload="${escapeHtml(r.payload || '')}"
           data-search-tab="${escapeHtml(r.tab || '')}"
+          data-search-subview="${escapeHtml(r.librarySubview || r.settingsSubview || '')}"
+          data-search-subview-key="${escapeHtml(r.librarySubview ? 'libraryView' : r.settingsSubview ? 'settingsView' : '')}"
           data-search-prompt-body="${escapeHtml(r.promptBody || '')}"
           title="${escapeHtml((r.subtitle || '') + ' — opens ' + (r.tab || ''))}">
           <div class="row">
@@ -2667,17 +3433,17 @@
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'routines') body = routinesSection(snap);
       else if (activeTab === 'discover') body = discoverSection(snap);
-      else if (activeTab === 'roadmap') { body = roadmapSection(snap); maybeAutoFetchRoadmap(); }
-      else if (activeTab === 'changelog') body = changelogSection(snap);
-      else if (activeTab === 'manage') body = manageSection(snap);
-      else if (activeTab === 'chat') body = chatExportSection(snap);
-      else if (activeTab === 'search') body = searchSection(snap);
+      else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') body = timelineSection(snap);
+      else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') body = unifiedSettingsSection(snap);
+      else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') body = historySection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
       else if (activeTab === 'skills') body = skillsSection(snap);
-      else if (activeTab === 'projects') body = projectsSection(snap);
+      else if (activeTab === 'library' || activeTab === 'memory' || activeTab === 'prompts') body = librarySection(snap);
+      else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') body = browseSection(snap);
+      else if (activeTab === 'security') body = securitySection(snap);
+      else if (activeTab === 'talk') body = talkSection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
-      else if (activeTab === 'config') body = `${budgetSection(snap)}${rtkSection(snap)}${tunnelsSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
       else body = `
         ${greetingSection(snap)}
         ${notificationsSection(snap)}
@@ -2691,6 +3457,8 @@
       `;
       root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
       bindEvents();
+      if (activeTab === 'talk') Talk.init();
+      else Talk.teardown();
       return;
     }
     const s = snap.stats;
@@ -2785,55 +3553,43 @@
       body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
     } else if (activeTab === 'office') {
       body = `${officeFloorSection(snap)}${officeSection(snap)}`;
-    } else if (activeTab === 'chat') {
-      body = chatExportSection(snap);
-    } else if (activeTab === 'search') {
-      body = searchSection(snap);
+    } else if (activeTab === 'history' || activeTab === 'chat' || activeTab === 'search') {
+      body = historySection(snap);
     } else if (activeTab === 'obsidian') {
       body = obsidianSection(snap);
-    } else if (activeTab === 'memory') {
-      body = memorySection(snap);
-    } else if (activeTab === 'prompts') {
-      body = promptsSection(snap);
+    } else if (activeTab === 'memory' || activeTab === 'prompts' || activeTab === 'library') {
+      body = librarySection(snap);
     } else if (activeTab === 'skills') {
       body = skillsSection(snap);
-    } else if (activeTab === 'projects') {
-      body = projectsSection(snap);
-    } else if (activeTab === 'files') {
-      body = filesSection(snap);
+    } else if (activeTab === 'browse' || activeTab === 'projects' || activeTab === 'files') {
+      body = browseSection(snap);
+    } else if (activeTab === 'security') {
+      body = securitySection(snap);
+    } else if (activeTab === 'talk') {
+      body = talkSection(snap);
     } else if (activeTab === 'agents') {
       body = agentsSection(snap);
     } else if (activeTab === 'routines') {
       body = routinesSection(snap);
     } else if (activeTab === 'discover') {
       body = discoverSection(snap);
-    } else if (activeTab === 'roadmap') {
-      body = roadmapSection(snap);
-      maybeAutoFetchRoadmap();
-    } else if (activeTab === 'changelog') {
-      body = changelogSection(snap);
-    } else if (activeTab === 'manage') {
-      body = manageSection(snap);
+    } else if (activeTab === 'timeline' || activeTab === 'roadmap' || activeTab === 'changelog') {
+      body = timelineSection(snap);
+    } else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') {
+      body = unifiedSettingsSection(snap);
     } else if (activeTab === 'mac') {
       body = macHealthSection(snap);
     } else if (activeTab === 'help') {
       body = helpSection();
     } else if (activeTab === 'self') {
       body = selfTelemetrySection(snap);
-    } else if (activeTab === 'config') {
-      body = `
-        ${budgetSection(snap)}
-        ${rtkSection(snap)}
-        ${tunnelsSection(snap)}
-        ${usageDashboardSection(snap)}
-        ${officeSection(snap)}
-        ${settingsSection(snap)}
-        ${diskUsageSection(snap)}
-      `;
     }
 
     root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
     bindEvents();
+    // Talk tab lifecycle: init the canvas/raf when active, tear down otherwise.
+    if (activeTab === 'talk') Talk.init();
+    else Talk.teardown();
   }
 
   function ensureValidActiveTab(active, tabs) {
@@ -2902,7 +3658,9 @@
           if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'goto-changelog') {
-          setActiveTab('changelog');
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, timelineView: 'changelog' });
+          setActiveTab('timeline');
           if (lastSnapshot) render(lastSnapshot);
         }
         if (action === 'check-update') {
@@ -3009,9 +3767,16 @@
         const action = btn.getAttribute('data-search-action');
         const payload = btn.getAttribute('data-search-payload') || '';
         const targetTab = btn.getAttribute('data-search-tab') || '';
+        const subview = btn.getAttribute('data-search-subview') || '';
+        const subviewKey = btn.getAttribute('data-search-subview-key') || '';
         const promptBody = btn.getAttribute('data-search-prompt-body') || '';
         // Always close the overlay first.
         setSearchState({ searchOpen: false, searchQuery: '' });
+        // Sub-view: set before navigation so render picks it up.
+        if (subviewKey && subview) {
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, [subviewKey]: subview });
+        }
         if (action === 'goto-tab') {
           setActiveTab(payload || targetTab);
         } else if (action === 'goto-customize') {
@@ -3075,6 +3840,65 @@
     root.querySelectorAll('button[data-action="enable-discover"]').forEach((btn) => {
       btn.addEventListener('click', () => {
         persistUserPrefs({ discoverEnabled: true });
+      });
+    });
+
+    root.querySelectorAll('button[data-discover-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-discover-view');
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, discoverView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-hn-window]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const w = btn.getAttribute('data-hn-window');
+        if (!w) return;
+        const cur = vscode.getState() || {};
+        vscode.setState({ ...cur, hnWindow: w });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-action="hn-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cur = vscode.getState() || {};
+        const w = cur.hnWindow || 'day';
+        vscode.postMessage({ type: 'fetchHN', window: w });
+      });
+    });
+    root.querySelectorAll('button[data-action="ph-refresh"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'fetchProductHunt' });
+      });
+    });
+    root.querySelectorAll('button[data-fetch-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-fetch-custom-feed');
+        const url = btn.getAttribute('data-feed-url');
+        if (!name || !url) return;
+        vscode.postMessage({ type: 'fetchCustomFeed', feedName: name, feedUrl: url });
+      });
+    });
+    root.querySelectorAll('button[data-remove-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-remove-custom-feed');
+        if (!name) return;
+        vscode.postMessage({ type: 'removeCustomFeed', feedName: name });
+      });
+    });
+    root.querySelectorAll('button[data-add-custom-feed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nameEl = root.querySelector('input[data-custom-feed-name]');
+        const urlEl = root.querySelector('input[data-custom-feed-url]');
+        if (!nameEl || !urlEl) return;
+        const name = nameEl.value.trim();
+        const url = urlEl.value.trim();
+        if (!name || !url) return;
+        vscode.postMessage({ type: 'addCustomFeed', feedName: name, feedUrl: url });
+        nameEl.value = '';
+        urlEl.value = '';
       });
     });
 
@@ -3318,13 +4142,16 @@
       btn.addEventListener('click', () => {
         const titleEl = root.querySelector('input[data-prompt-title]');
         const bodyEl = root.querySelector('textarea[data-prompt-body]');
+        const catEl = root.querySelector('select[data-prompt-cat-new]');
         if (!titleEl || !bodyEl) return;
         const title = titleEl.value.trim();
         const body = bodyEl.value.trim();
         if (!title || !body) return;
-        vscode.postMessage({ type: 'addPrompt', promptTitle: title, promptBody: body });
+        const category = catEl && catEl.value ? catEl.value : undefined;
+        vscode.postMessage({ type: 'addPrompt', promptTitle: title, promptBody: body, promptCategory: category });
         titleEl.value = '';
         bodyEl.value = '';
+        if (catEl) catEl.value = '';
       });
     });
 
@@ -3345,6 +4172,157 @@
         vscode.postMessage({ type: 'deletePrompt', promptId: btn.getAttribute('data-prompt-delete') });
       });
     });
+
+    root.querySelectorAll('button[data-prompt-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.getAttribute('data-prompt-filter');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, promptFilter: f });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-library-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-library-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, libraryView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-settings-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-settings-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, settingsView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-timeline-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-timeline-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, timelineView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-history-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-history-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, historyView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-browse-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-browse-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, browseView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-security-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-security-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, securityView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+    root.querySelectorAll('button[data-action="security-scan"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        btn.textContent = 'Scanning…';
+        vscode.postMessage({ type: 'runSecurityScan' });
+      });
+    });
+    root.querySelectorAll('button[data-action="launch-cso"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'launchCsoSkill' });
+      });
+    });
+
+    // Talk tab — wire mic / send / wispr buttons. Lifecycle is managed
+    // separately in the post-render hook below so the canvas keeps painting.
+    const startBtn = root.querySelector('button[data-talk-start]');
+    if (startBtn) startBtn.addEventListener('click', () => Talk.startListening());
+    const stopBtn = root.querySelector('button[data-talk-stop]');
+    if (stopBtn) stopBtn.addEventListener('click', () => Talk.stopListening());
+    root.querySelectorAll('button[data-talk-send]').forEach((btn) => {
+      btn.addEventListener('click', () => Talk.send(btn.getAttribute('data-talk-send')));
+    });
+    const wisprBtn = root.querySelector('button[data-talk-wispr]');
+    if (wisprBtn) wisprBtn.addEventListener('click', () => vscode.postMessage({ type: 'triggerWisprFlow' }));
+
+    root.querySelectorAll('select[data-prompt-cat-id]').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const id = sel.getAttribute('data-prompt-cat-id');
+        vscode.postMessage({ type: 'updatePromptCategory', promptId: id, promptCategory: sel.value });
+      });
+    });
+
+    const mineBtn = root.querySelector('button[data-prompt-mine]');
+    if (mineBtn) {
+      mineBtn.addEventListener('click', () => {
+        mineBtn.disabled = true;
+        mineBtn.textContent = '⛏ Mining…';
+        vscode.postMessage({ type: 'minePrompts' });
+      });
+    }
+
+    root.querySelectorAll('input[data-mined-toggle]').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        if (!minedPromptsState) return;
+        const fp = cb.getAttribute('data-mined-toggle');
+        if (cb.checked) minedPromptsState.selected.add(fp);
+        else minedPromptsState.selected.delete(fp);
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    const selectAllBtn = root.querySelector('button[data-prompt-mine-select-all]');
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', () => {
+        if (!minedPromptsState) return;
+        if (minedPromptsState.selected.size === minedPromptsState.prompts.length) {
+          minedPromptsState.selected.clear();
+        } else {
+          minedPromptsState.selected = new Set(minedPromptsState.prompts.map((p) => p.fingerprint));
+        }
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    }
+
+    const saveSelBtn = root.querySelector('button[data-prompt-mine-save]');
+    if (saveSelBtn) {
+      saveSelBtn.addEventListener('click', () => {
+        if (!minedPromptsState || !minedPromptsState.selected.size) return;
+        const batch = minedPromptsState.prompts
+          .filter((p) => minedPromptsState.selected.has(p.fingerprint))
+          .map((p, idx) => ({
+            title: deriveTitle(p.body, idx),
+            body: p.body,
+            category: p.category,
+          }));
+        vscode.postMessage({ type: 'savePromptsBatch', promptBatch: batch });
+        minedPromptsState = null;
+        // Re-render will happen on next snapshot from backend.
+      });
+    }
+
+    const closeBtn = root.querySelector('button[data-prompt-mine-close]');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        minedPromptsState = null;
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    }
 
     const searchInput = root.querySelector('input[data-search-input]');
     if (searchInput) {
@@ -3382,6 +4360,15 @@
     } else if (msg && msg.type === 'setTab') {
       setActiveTab(msg.tab);
       if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'minedPrompts') {
+      minedPromptsState = {
+        prompts: msg.prompts || [],
+        selected: new Set((msg.prompts || []).filter((p) => p.occurrences >= 2).map((p) => p.fingerprint)),
+      };
+      if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'setHistorySubview') {
+      const cur = vscode.getState() || {};
+      vscode.setState({ ...cur, historyView: msg.subview });
     }
   });
 

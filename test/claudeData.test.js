@@ -26,6 +26,8 @@ const {
   computeRecommendations,
   computeCostByTool,
   globalSessionSearch,
+  classifyPrompt,
+  minePrompts,
 } = require('../out/claudeData.js');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -485,6 +487,101 @@ test('computeOfficeFloor surfaces last tool, current file, and subagent name per
 test('globalSessionSearch rejects queries shorter than 2 chars', () => {
   assert.deepEqual(globalSessionSearch(''), []);
   assert.deepEqual(globalSessionSearch('a'), []);
+});
+
+test('classifyPrompt returns expected category for keyword-bearing bodies', () => {
+  assert.equal(classifyPrompt('Please draft an NDA clause for HAQQ Legal'), 'legal');
+  assert.equal(classifyPrompt('Ship a PR refactoring the auth middleware'), 'build');
+  assert.equal(classifyPrompt('Review this design for accessibility'), 'review');
+  assert.equal(classifyPrompt('Plan the architecture for the lead pipeline'), 'plan');
+  assert.equal(classifyPrompt('Investigate why the build is slow'), 'research');
+  assert.equal(classifyPrompt('Configure the kubernetes deploy pipeline'), 'infra');
+  assert.equal(classifyPrompt('hi there'), 'other');
+});
+
+test('scanSecurity flags hardcoded API keys and tracked .env files', () => {
+  const { scanSecurity } = require('../out/security.js');
+  const ws = makeWorkspace('sec-' + Date.now());
+  fs.mkdirSync(ws.cwd, { recursive: true });
+  // Plant a fake hardcoded GitHub token.
+  fs.writeFileSync(path.join(ws.cwd, 'app.js'), 'const token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";\nconsole.log(token);\n');
+  // Plant an .env file (no git ops here, so it'll show as untracked, not "danger").
+  fs.writeFileSync(path.join(ws.cwd, '.env'), 'DB_PASSWORD=hunter2\n');
+
+  const snap = scanSecurity(ws.cwd);
+  const ghHit = snap.secrets.find((s) => s.rule === 'GitHub Token (classic)');
+  assert.ok(ghHit, 'GitHub token rule should fire');
+  assert.equal(ghHit.severity, 'high');
+  // Excerpt must redact — never contain the full token.
+  assert.ok(!ghHit.excerpt.includes('ghp_abcdefghijklmnopqrstuvwxyz0123456789'), 'excerpt must redact the secret');
+
+  const envHit = snap.envFiles.find((e) => e.file === '.env');
+  assert.ok(envHit, '.env file should be enumerated');
+});
+
+test('parseRss extracts title/link/description from an RSS feed', () => {
+  const { parseRss } = require('../out/discover.js');
+  const xml = `<?xml version="1.0"?><rss><channel>
+    <item>
+      <title>Test story</title>
+      <link>https://example.com/a</link>
+      <description><![CDATA[<p>Hello world</p>]]></description>
+      <pubDate>Wed, 06 May 2026 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Another</title>
+      <link>https://example.com/b</link>
+      <description>Plain text</description>
+      <pubDate>Tue, 05 May 2026 10:00:00 +0000</pubDate>
+    </item>
+  </channel></rss>`;
+  const items = parseRss(xml);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].title, 'Test story');
+  assert.equal(items[0].link, 'https://example.com/a');
+  assert.equal(items[0].description, 'Hello world');
+  assert.ok(items[0].pubDate);
+});
+
+test('parseRss handles Atom <entry> with link href attribute', () => {
+  const { parseRss } = require('../out/discover.js');
+  const xml = `<?xml version="1.0"?><feed>
+    <entry>
+      <title>Atom story</title>
+      <link href="https://example.com/atom" />
+      <summary>An atom summary</summary>
+      <updated>2026-05-06T10:00:00Z</updated>
+    </entry>
+  </feed>`;
+  const items = parseRss(xml);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, 'Atom story');
+  assert.equal(items[0].link, 'https://example.com/atom');
+  assert.equal(items[0].description, 'An atom summary');
+});
+
+test('minePrompts dedupes recurring prompts and surfaces reuse signal', () => {
+  // Build a fake project dir with a JSONL that contains the same prompt twice
+  // and a one-shot. minePrompts should return the recurring one with
+  // occurrences=2, and the one-shot only if it's substantial enough.
+  const ws = makeWorkspace('mine-' + Date.now());
+  fs.mkdirSync(ws.projectDir, { recursive: true });
+  const reused = 'Review the latest diff for SQL injection risks and tell me if any user input flows unescaped into a query.';
+  const oneShot = 'short prompt';
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: '2026-05-01T10:00:00Z', message: { content: reused } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-05-02T10:00:00Z', message: { content: reused } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-05-03T10:00:00Z', message: { content: oneShot } }),
+  ].join('\n');
+  fs.writeFileSync(path.join(ws.projectDir, 'sess.jsonl'), lines);
+
+  const mined = minePrompts(20);
+  const reusedHit = mined.find((p) => p.body.startsWith('Review the latest diff'));
+  assert.ok(reusedHit, 'reused prompt should be mined');
+  assert.equal(reusedHit.occurrences, 2);
+  assert.equal(reusedHit.category, 'review');
+  // One-shot below 80 chars should be filtered.
+  assert.ok(!mined.some((p) => p.body === oneShot));
 });
 
 test('readPlans parses checkboxes from tasks/todo.md', () => {
