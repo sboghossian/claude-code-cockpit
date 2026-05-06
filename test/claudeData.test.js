@@ -20,6 +20,7 @@ const {
   snapshot,
   formatTokens,
   computeWatchtower,
+  computeOfficeFloor,
   computeBudget,
   computeNotifications,
   computeRecommendations,
@@ -453,6 +454,32 @@ test('computeWatchtower returns recent sessions sorted by mtime', () => {
     assert.ok(['live', 'recent', 'idle', 'stale'].includes(w.status));
     assert.equal(typeof w.ageSeconds, 'number');
   }
+});
+
+test('computeOfficeFloor surfaces last tool, current file, and subagent name per project', () => {
+  const ws = makeWorkspace('floor-' + Date.now());
+  const session = path.join(ws.projectDir, 'session.jsonl');
+  fs.mkdirSync(ws.projectDir, { recursive: true });
+  // Hand-crafted JSONL: a Task tool call (subagent) then a tool_use Edit on a.ts
+  // then its tool_result success.
+  const lines = [
+    JSON.stringify({type:'user',timestamp:'2026-05-06T10:00:00.000Z',sessionId:'s1',message:{content:'hi'}}),
+    JSON.stringify({type:'assistant',timestamp:'2026-05-06T10:00:01.000Z',sessionId:'s1',message:{model:'claude-opus-4-7',usage:{input_tokens:10,output_tokens:5},content:[{type:'tool_use',id:'tu_1',name:'Task',input:{subagent_type:'general-purpose',description:'find bug'}}]}}),
+    JSON.stringify({type:'assistant',timestamp:'2026-05-06T10:00:02.000Z',sessionId:'s1',message:{content:[{type:'tool_use',id:'tu_2',name:'Edit',input:{file_path:'/repo/a.ts'}}]}}),
+    JSON.stringify({type:'user',timestamp:'2026-05-06T10:00:03.000Z',sessionId:'s1',message:{content:[{type:'tool_result',tool_use_id:'tu_2',is_error:false,content:'ok'}]}}),
+  ];
+  fs.writeFileSync(session, lines.join('\n') + '\n');
+  const future = new Date(Date.now() + 5 * 60_000);
+  fs.utimesSync(session, future, future);
+  const tiles = computeOfficeFloor();
+  const mine = tiles.find((t) => t.sessionFile === session);
+  assert.ok(mine, 'expected a floor tile for the freshly-touched session');
+  assert.equal(mine.lastTool, 'Edit');
+  assert.equal(mine.currentFile, '/repo/a.ts');
+  assert.equal(mine.lastToolResult, 'ok');
+  assert.equal(mine.subAgentName, 'general-purpose');
+  assert.equal(mine.subAgentDescription, 'find bug');
+  assert.ok(['live', 'recent', 'idle', 'stale'].includes(mine.status));
 });
 
 test('globalSessionSearch rejects queries shorter than 2 chars', () => {

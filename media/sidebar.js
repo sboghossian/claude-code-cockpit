@@ -1609,6 +1609,76 @@
     `;
   }
 
+  function officeFloorSection(snap) {
+    const tiles = snap.officeFloor || [];
+    if (!tiles.length) {
+      return '<h2>Office floor</h2><p class="empty">No agents on the floor. Open Claude Code in a project — they\'ll show up here.</p>';
+    }
+    const live = tiles.filter((t) => t.status === 'live').length;
+    const recent = tiles.filter((t) => t.status === 'recent').length;
+    const idle = tiles.filter((t) => t.status === 'idle' || t.status === 'stale').length;
+    const summary = `<div class="today-pill">
+      <span><strong>${tiles.length}</strong> projects</span>
+      <span><strong>${live}</strong> live</span>
+      <span><strong>${recent}</strong> recent</span>
+      <span><strong>${idle}</strong> idle</span>
+    </div>`;
+    const cards = tiles.map((t) => floorTile(t)).join('');
+    return `
+      <h2>Office floor <span class="cost-rate">${tiles.length} project${tiles.length === 1 ? '' : 's'}</span></h2>
+      ${summary}
+      <div class="floor-grid">${cards}</div>
+    `;
+  }
+
+  function floorTile(t) {
+    const ageLabel = formatFloorAge(t.ageSeconds);
+    const subAgent = t.subAgentName
+      ? `<div class="floor-subagent" title="${escapeHtml(t.subAgentDescription || t.subAgentName)}">
+           <span class="floor-tag agent">${escapeHtml(t.subAgentName)}</span>
+           ${t.subAgentDescription ? `<span class="floor-subagent-desc">${escapeHtml(t.subAgentDescription)}</span>` : ''}
+         </div>`
+      : '';
+    const tool = t.lastTool
+      ? `<div class="floor-action">
+           <span class="floor-tool floor-result-${escapeHtml(t.lastToolResult || 'pending')}">${escapeHtml(t.lastTool)}</span>
+           ${t.lastToolArgs ? `<span class="floor-tool-args" title="${escapeHtml(t.lastToolArgs)}">${escapeHtml(truncateFloor(t.lastToolArgs, 60))}</span>` : ''}
+         </div>`
+      : '<div class="floor-action floor-quiet">idle</div>';
+    const file = t.currentFile
+      ? `<div class="floor-file" title="${escapeHtml(t.currentFile)}">📄 ${escapeHtml(basename(t.currentFile))}</div>`
+      : '';
+    const modelTag = t.modelFamily && t.modelFamily !== 'unknown'
+      ? `<span class="floor-tag model-${escapeHtml(t.modelFamily)}">${escapeHtml(t.modelFamily)}</span>`
+      : '';
+    return `
+      <div class="floor-card floor-status-${escapeHtml(t.status)}" data-watch-session="${escapeHtml(t.sessionFile)}" data-watch-project="${escapeHtml(t.decodedPath)}" title="Click to open this session">
+        <div class="floor-head">
+          <span class="floor-status-dot ${escapeHtml(t.status)}"></span>
+          <span class="floor-name">${escapeHtml(t.name)}</span>
+          ${modelTag}
+          <span class="floor-age">${escapeHtml(ageLabel)}</span>
+        </div>
+        ${subAgent}
+        ${tool}
+        ${file}
+      </div>
+    `;
+  }
+
+  function formatFloorAge(s) {
+    if (s == null) return '—';
+    if (s < 10) return 'now';
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m`;
+    return `${Math.floor(s / 3600)}h`;
+  }
+
+  function truncateFloor(str, n) {
+    if (!str) return '';
+    return str.length > n ? str.slice(0, n - 1) + '…' : str;
+  }
+
   function toolHistogramSection(s) {
     const list = s.toolHistogram || [];
     if (!list.length) return '';
@@ -1923,6 +1993,7 @@
       { id: 'recs', label: recsLabel(snap) },
       { id: 'mac', label: macLabel },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})` },
+      { id: 'office', label: `Office (${(snap.officeFloor || []).length})` },
       { id: 'agents', label: `Agents (${(snap.agents || []).length})` },
       { id: 'routines', label: `Routines (${((snap.routines || {}).local || []).length})` },
       { id: 'chat', label: chatLabel },
@@ -1984,6 +2055,7 @@
     tunnels:         { label: 'Tunnels',            category: 'Config',   requiresCwd: false, render: (s) => tunnelsSection(s) },
     usageDashboard:  { label: 'Usage dashboard',    category: 'Config',   requiresCwd: false, render: (s) => usageDashboardSection(s) },
     office:          { label: 'Office visualizer',  category: 'Config',   requiresCwd: false, render: (s) => officeSection(s) },
+    officeFloor:     { label: 'Office floor',       category: 'Cross',    requiresCwd: false, render: (s) => officeFloorSection(s) },
     settings:        { label: 'Global settings',    category: 'Config',   requiresCwd: false, render: (s) => settingsSection(s) },
     diskUsage:       { label: 'Disk usage',         category: 'Config',   requiresCwd: false, render: (s) => diskUsageSection(s) },
   };
@@ -2066,6 +2138,7 @@
       { id: 'recs',       label: recsLabel(snap),                                                     pinned: false, requiresCwd: false, hint: 'Recommendations across your setup' },
       { id: 'mac',        label: macLabel,                                                            pinned: false, requiresCwd: false, hint: 'macOS system health' },
       { id: 'watchtower', label: `Watchtower (${snap.watchtower.length})`,                            pinned: false, requiresCwd: false, hint: 'Every Claude session in the last hour' },
+      { id: 'office',     label: `Office (${(snap.officeFloor || []).length})`,                       pinned: false, requiresCwd: false, hint: 'Live floor: every project agent and what each is doing right now' },
       { id: 'agents',     label: `Agents (${(snap.agents || []).length})`,                            pinned: false, requiresCwd: false, hint: 'Agent definitions (global + workspace)' },
       { id: 'routines',   label: `Routines (${((snap.routines || {}).local || []).length})`,          pinned: false, requiresCwd: false, hint: 'Scheduled Claude Code runs' },
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
@@ -2589,6 +2662,7 @@
       if (activeTab === 'custom') body = customTabBody(snap);
       else if (activeTab === 'recs') body = recommendationsSection(snap);
       else if (activeTab === 'watchtower') body = watchtowerSection(snap);
+      else if (activeTab === 'office') body = `${officeFloorSection(snap)}${officeSection(snap)}`;
       else if (activeTab === 'mac') body = macHealthSection(snap);
       else if (activeTab === 'agents') body = agentsSection(snap);
       else if (activeTab === 'routines') body = routinesSection(snap);
@@ -2709,6 +2783,8 @@
       body = recommendationsSection(snap);
     } else if (activeTab === 'watchtower') {
       body = `${watchtowerSection(snap)}${watchtowerSection(snap, { idleOnly: true })}`;
+    } else if (activeTab === 'office') {
+      body = `${officeFloorSection(snap)}${officeSection(snap)}`;
     } else if (activeTab === 'chat') {
       body = chatExportSection(snap);
     } else if (activeTab === 'search') {
@@ -3223,7 +3299,7 @@
       });
     });
 
-    root.querySelectorAll('button[data-watch-session]').forEach((btn) => {
+    root.querySelectorAll('[data-watch-session]').forEach((btn) => {
       btn.addEventListener('click', () => {
         vscode.postMessage({
           type: 'openFile',

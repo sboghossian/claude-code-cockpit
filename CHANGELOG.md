@@ -2,6 +2,18 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — 2026-05-06
+
+### Added
+
+- **Office floor tab.** Live grid of every Claude Code project active in the last hour, with one card per project showing the agent's current activity: subagent type (general-purpose, code-reviewer, Plan, etc.), last tool call with args + result (ok/error/pending), current file under edit, model family, and live-pulse status dot. Click any card to jump to that session. Built on a 64KB tail-read of each project's session JSONL — cheap enough to refresh every snapshot. Sits next to Watchtower and shows the "what's happening right now" view that Watchtower's row layout couldn't.
+- New `OfficeFloorTile` interface and `computeOfficeFloor()` extractor in `claudeData.ts`. Tail-reads only, walks blocks forward, reconciles tool_use ↔ tool_result by id.
+- New `officeFloor` component registered in the section catalogue under category `Cross`. Available in Custom tab.
+
+### Changed
+
+- Cross-element click handler for `[data-watch-session]` no longer requires a `<button>` wrapper — any element with the attribute (e.g. floor cards) is now clickable.
+
 ## [0.15.0] — 2026-05-06
 
 ### Added
