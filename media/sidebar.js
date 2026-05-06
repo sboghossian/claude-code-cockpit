@@ -1991,6 +1991,33 @@
     `;
   }
 
+  function unifiedSettingsSection(snap) {
+    const state = vscode.getState() || {};
+    const view = state.settingsView || 'budget';
+    const subBar = `
+      <div class="sub-tab-bar">
+        <button class="sub-tab ${view === 'budget' ? 'sub-tab-active' : ''}" data-settings-view="budget">Budget</button>
+        <button class="sub-tab ${view === 'rtk' ? 'sub-tab-active' : ''}" data-settings-view="rtk">RTK</button>
+        <button class="sub-tab ${view === 'tunnels' ? 'sub-tab-active' : ''}" data-settings-view="tunnels">Tunnels</button>
+        <button class="sub-tab ${view === 'office' ? 'sub-tab-active' : ''}" data-settings-view="office">Office</button>
+        <button class="sub-tab ${view === 'manage' ? 'sub-tab-active' : ''}" data-settings-view="manage">Manage</button>
+        <button class="sub-tab ${view === 'usage' ? 'sub-tab-active' : ''}" data-settings-view="usage">Usage</button>
+        <button class="sub-tab ${view === 'disk' ? 'sub-tab-active' : ''}" data-settings-view="disk">Disk</button>
+        <button class="sub-tab ${view === 'hooks' ? 'sub-tab-active' : ''}" data-settings-view="hooks">Hooks</button>
+      </div>
+    `;
+    let body = '';
+    if (view === 'budget') body = budgetSection(snap);
+    else if (view === 'rtk') body = rtkSection(snap);
+    else if (view === 'tunnels') body = tunnelsSection(snap);
+    else if (view === 'office') body = officeSection(snap);
+    else if (view === 'manage') body = manageSection(snap);
+    else if (view === 'usage') body = usageDashboardSection(snap);
+    else if (view === 'disk') body = diskUsageSection(snap);
+    else if (view === 'hooks') body = settingsSection(snap);
+    return `${subBar}<div class="sub-tab-panel">${body}</div>`;
+  }
+
   function librarySection(snap) {
     const state = vscode.getState() || {};
     const view = state.libraryView === 'memory' ? 'memory' : 'prompts';
@@ -2282,7 +2309,7 @@
       { id: 'discover',   label: 'Discover',                                                          pinned: false, requiresCwd: false, hint: 'Top GitHub projects + RSS from Obsidian (opt-in)' },
       { id: 'roadmap',    label: `Roadmap${snap.roadmap && snap.roadmap.totalProjects ? ' (' + snap.roadmap.totalProjects + ')' : ''}`, pinned: false, requiresCwd: false, hint: 'Mirror of roadmap.dashable.dev — every project, filters, links' },
       { id: 'changelog',  label: 'Changelog',                                                         pinned: false, requiresCwd: false, hint: 'What shipped, when, plus update check' },
-      { id: 'manage',     label: 'Manage',                                                            pinned: false, requiresCwd: false, hint: 'All Claude settings — open in editor to modify' },
+      { id: 'settings',   label: 'Settings',                                                          pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins, dashboards' },
       { id: 'chat',       label: chatLabel,                                                           pinned: false, requiresCwd: false, hint: 'Conversations from claude.ai export' },
       { id: 'search',     label: 'Search',                                                            pinned: false, requiresCwd: false, hint: 'Grep across every session JSONL' },
       { id: 'obsidian',   label: snap.obsidian && snap.obsidian.installed ? 'Obsidian' : 'Obsidian ◌', pinned: false, requiresCwd: false, hint: 'Obsidian vaults + recent notes' },
@@ -2290,7 +2317,6 @@
       { id: 'skills',     label: `Skills (${snap.skills.length})`,                                    pinned: false, requiresCwd: false, hint: 'Available skills + usage' },
       { id: 'projects',   label: `Projects (${snap.projects.length})`,                                pinned: false, requiresCwd: false, hint: 'Recent projects with Claude Code history' },
       { id: 'files',      label: 'Files',                                                             pinned: false, requiresCwd: false, hint: 'Browse ~/.claude/ + project folder' },
-      { id: 'config',     label: 'Config',                                                            pinned: false, requiresCwd: false, hint: 'Budget, RTK, tunnels, MCP, hooks, plugins' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
@@ -2301,6 +2327,8 @@
   const TAB_MIGRATIONS = {
     memory: 'library',
     prompts: 'library',
+    manage: 'settings',
+    config: 'settings',
   };
 
   function migrateEnabledTabIds(ids) {
@@ -2620,7 +2648,8 @@
         type: 'tunnel',
         title: t.name,
         subtitle: `${t.hostname || '—'} → ${t.service || '—'}`,
-        tab: 'config',
+        tab: 'settings',
+        settingsSubview: 'tunnels',
         action: 'open-file',
         payload: t.configPath,
         keywords: `${t.name} ${t.hostname || ''} ${t.service || ''}`.toLowerCase(),
@@ -2629,13 +2658,13 @@
 
     const settings = snap.settings || {};
     if (settings.hooksCount) {
-      out.push({ type: 'setting', title: `${settings.hooksCount} hooks configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'hooks settings.json' });
+      out.push({ type: 'setting', title: `${settings.hooksCount} hooks configured`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'hooks settings.json' });
     }
     if (settings.mcpServerCount) {
-      out.push({ type: 'setting', title: `${settings.mcpServerCount} MCP servers configured`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'mcp servers settings' });
+      out.push({ type: 'setting', title: `${settings.mcpServerCount} MCP servers configured`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'mcp servers settings' });
     }
     if (settings.pluginCount) {
-      out.push({ type: 'setting', title: `${settings.pluginCount} plugins enabled`, subtitle: '~/.claude/settings.json', tab: 'config', action: 'goto-tab', payload: 'config', keywords: 'plugins settings' });
+      out.push({ type: 'setting', title: `${settings.pluginCount} plugins enabled`, subtitle: '~/.claude/settings.json', tab: 'settings', settingsSubview: 'hooks', action: 'goto-tab', payload: 'settings', keywords: 'plugins settings' });
     }
 
     return out;
@@ -2694,7 +2723,8 @@
           data-search-action="${escapeHtml(r.action)}"
           data-search-payload="${escapeHtml(r.payload || '')}"
           data-search-tab="${escapeHtml(r.tab || '')}"
-          data-search-subview="${escapeHtml(r.librarySubview || '')}"
+          data-search-subview="${escapeHtml(r.librarySubview || r.settingsSubview || '')}"
+          data-search-subview-key="${escapeHtml(r.librarySubview ? 'libraryView' : r.settingsSubview ? 'settingsView' : '')}"
           data-search-prompt-body="${escapeHtml(r.promptBody || '')}"
           title="${escapeHtml((r.subtitle || '') + ' — opens ' + (r.tab || ''))}">
           <div class="row">
@@ -2824,7 +2854,7 @@
       else if (activeTab === 'discover') body = discoverSection(snap);
       else if (activeTab === 'roadmap') { body = roadmapSection(snap); maybeAutoFetchRoadmap(); }
       else if (activeTab === 'changelog') body = changelogSection(snap);
-      else if (activeTab === 'manage') body = manageSection(snap);
+      else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') body = unifiedSettingsSection(snap);
       else if (activeTab === 'chat') body = chatExportSection(snap);
       else if (activeTab === 'search') body = searchSection(snap);
       else if (activeTab === 'obsidian') body = obsidianSection(snap);
@@ -2833,7 +2863,6 @@
       else if (activeTab === 'projects') body = projectsSection(snap);
       else if (activeTab === 'help') body = helpSection();
       else if (activeTab === 'self') body = selfTelemetrySection(snap);
-      else if (activeTab === 'config') body = `${budgetSection(snap)}${rtkSection(snap)}${tunnelsSection(snap)}${usageDashboardSection(snap)}${settingsSection(snap)}${diskUsageSection(snap)}`;
       else body = `
         ${greetingSection(snap)}
         ${notificationsSection(snap)}
@@ -2966,24 +2995,14 @@
       maybeAutoFetchRoadmap();
     } else if (activeTab === 'changelog') {
       body = changelogSection(snap);
-    } else if (activeTab === 'manage') {
-      body = manageSection(snap);
+    } else if (activeTab === 'manage' || activeTab === 'config' || activeTab === 'settings') {
+      body = unifiedSettingsSection(snap);
     } else if (activeTab === 'mac') {
       body = macHealthSection(snap);
     } else if (activeTab === 'help') {
       body = helpSection();
     } else if (activeTab === 'self') {
       body = selfTelemetrySection(snap);
-    } else if (activeTab === 'config') {
-      body = `
-        ${budgetSection(snap)}
-        ${rtkSection(snap)}
-        ${tunnelsSection(snap)}
-        ${usageDashboardSection(snap)}
-        ${officeSection(snap)}
-        ${settingsSection(snap)}
-        ${diskUsageSection(snap)}
-      `;
     }
 
     root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
@@ -3164,13 +3183,14 @@
         const payload = btn.getAttribute('data-search-payload') || '';
         const targetTab = btn.getAttribute('data-search-tab') || '';
         const subview = btn.getAttribute('data-search-subview') || '';
+        const subviewKey = btn.getAttribute('data-search-subview-key') || '';
         const promptBody = btn.getAttribute('data-search-prompt-body') || '';
         // Always close the overlay first.
         setSearchState({ searchOpen: false, searchQuery: '' });
-        // Library sub-view: set before navigation so render picks it up.
-        if (targetTab === 'library' && subview) {
+        // Sub-view: set before navigation so render picks it up.
+        if (subviewKey && subview) {
           const cur = vscode.getState() || {};
-          vscode.setState({ ...cur, libraryView: subview });
+          vscode.setState({ ...cur, [subviewKey]: subview });
         }
         if (action === 'goto-tab') {
           setActiveTab(payload || targetTab);
@@ -3523,6 +3543,15 @@
         const v = btn.getAttribute('data-library-view');
         const state = vscode.getState() || {};
         vscode.setState({ ...state, libraryView: v });
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
+
+    root.querySelectorAll('button[data-settings-view]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.getAttribute('data-settings-view');
+        const state = vscode.getState() || {};
+        vscode.setState({ ...state, settingsView: v });
         if (lastSnapshot) render(lastSnapshot);
       });
     });
