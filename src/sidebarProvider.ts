@@ -462,10 +462,17 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private dismissedRecs = new Set<string>();
   // Track previous approval pending count so we can fire a notification on
   // the 0 → 1 (or higher) transition without spamming on every snapshot.
+  // Seeded in resolveWebviewView() to whatever's already on disk so a cold
+  // boot of VS Code doesn't replay every stale pending entry as a popup.
   private prevApprovalPending = 0;
   // Same for the audit blocked-event signature; we only fire when a NEW
   // tool.invoke event lands with outcome:'blocked' since the last refresh.
+  // Seeded to Date.now() in resolveWebviewView() so cold boots don't replay
+  // events from the last session.
   private prevAuditLastBlockedTs = 0;
+  // Internal flag — the very first pushSnapshot after activation skips the
+  // notify pass entirely. Belt-and-braces alongside the seeding above.
+  private notificationsArmed = false;
   // Cost-warning gate: fire once per "today" once we cross 80% of cap.
   private prevCostWarnDate: string | undefined;
 
@@ -492,6 +499,17 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       this.watcher?.close();
       this.watcher = undefined;
     });
+    // Seed the notification trackers so cold boots don't replay stale state
+    // as popups. evaluateNotifications() short-circuits until notificationsArmed
+    // flips, AND we prime the prev-* fields so the first armed evaluation has
+    // a sensible baseline.
+    try {
+      this.prevApprovalPending = this.ensureApprovalQueue().pendingCount();
+    } catch {
+      this.prevApprovalPending = 0;
+    }
+    this.prevAuditLastBlockedTs = Date.now();
+    this.notificationsArmed = false;
     this.refresh();
     this.watchActive();
     // Kick off RTK probe (may take 0-4s); refresh when done so cache is populated.
@@ -910,6 +928,15 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   // the just-built snapshot, compares against the prev* fields, and fires
   // through the debounced notify() helpers when a new edge is detected.
   private evaluateNotifications(snap: CockpitSnapshot): void {
+    // The first snapshot push after activation only seeds the trackers — we
+    // never fire popups for state that already existed before VS Code came up.
+    if (!this.notificationsArmed) {
+      this.prevApprovalPending = snap.approvalCounts?.pending ?? this.prevApprovalPending;
+      // prevAuditLastBlockedTs was seeded to Date.now() in resolveWebviewView,
+      // so any blocked event already on disk is older than that and won't fire.
+      this.notificationsArmed = true;
+      return;
+    }
     // 1. Approval queue: 0 → ≥1 transition.
     const pending = snap.approvalCounts?.pending ?? 0;
     if (pending > 0 && this.prevApprovalPending === 0) {

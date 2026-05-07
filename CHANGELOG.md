@@ -2,6 +2,50 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] — 2026-05-07
+
+The v1.0 launch wave. 11 feature PRs landed across three phases (foundation → parallel features → polish). Every new feature is opt-in or default-off where safety matters; v0.21.0 users see byte-identical behavior until they enable a feature.
+
+### Added — Phase 0 (foundation)
+
+- **Plugin API (`src/plugin.ts`)** — formal extension contract. `CockpitWidget`, `CockpitTab`, `CockpitTrigger` extension points. Shared `WorktreeAction`, `SnapshotRef`, `AuditEvent` types. `registerWidget` / `registerTab` / `registerTrigger` / `registerSidebarScript` / `registerSidebarStyle`. Webview bridge: `window.cockpit.registerComponent(id, def)` populates an `EXTERNAL_COMPONENTS` map adjacent to the existing `COMPONENTS` registry. Sibling scripts are emitted as nonce-tagged `<script>` tags by `sidebarProvider.html()`. CSP `connect-src 'none'` preserved.
+
+### Added — Phase 1 (seven parallel features)
+
+- **Approval queue (Approve tab) + content-addressed snapshots + atomic revert.** `~/.claude/.cockpit/queue.json` (atomic write + fsync), `~/.claude/.cockpit/snapshots/<id>/files/<sha256>` for content-addressed pre-action blobs. Per-action sha256 drift detection on revert; drifted files skipped unless user explicitly forces. The existing jarvis.ts boo-mesh approval flow becomes one of N sources — approve/reject from the new tab forwards to `decideApproval()` so v0.21.0 notification path keeps working. The trust-gate feature aligning with the LeCun world-model stance: no autonomous multi-step LLM action without lookahead + scoring + rollback + human gate. New commands: `claudeCockpit.approval.openQueue`, `bulkApprove`, `bulkReject`, `revertLast`. New settings: `claudeCockpit.approval.autoSnapshot`, `snapshotMaxBytes`, `requireForToolNames`.
+- **Session replay timeline + diff + cost projection (Replay tab).** Scrub backwards through every event of the active session JSONL. Reconstructs file states at each step from `Edit` / `Write` / `MultiEdit` blocks. Unified diffs between any two scrub points. Forks the JSONL prefix into `~/.claude/.cockpit/forks/` (read-only — never mutates the original session JSONL). Subsumes the launch wave's "cost telemetry + budgets": `replayCostProjection` widget surfaces spent / per-event / projected USD over the next 50 events with a warning banner against `claudeCockpit.budget.dailyCapUsd`. Diff engine caches by `(sessionFile, mtime, size)` so repeated renders never re-read the JSONL. Tolerates truncated last-line. New setting: `claudeCockpit.replay.maxEventsPerSession` (default 5000). New commands: `replay.openCurrent`, `replay.exportDiff`.
+- **Permissions audit log + Security sub-views (Keys / Outbound / Audit-log).** NDJSON log at `~/.claude/.cockpit/audit.log` with append-and-fsync atomicity, 50 MB rotation across five archives, 8 KB per-line cap, redaction enforced at call sites. Six outbound wrap sites (`discover.fetchGithubTrending`, `discover.httpGet`, `updateCheck.fetchLatestRelease`, `integrations.ping`, `integrations.httpsHead`, `roadmap.getJson`) emit `kind: 'net.outbound'` with host + method + purpose only. Keys sub-view backed by VSCode SecretStorage — values never serialized to webview. Setting `claudeCockpit.audit.enabled` (default `true`); zero-cost no-op when off.
+- **Skill / agent gallery + clipboard share + install-by-URL (Gallery tab).** Lists every skill in `~/.claude/skills/` and agent in `~/.claude/agents/` (global + workspace). Reuses existing `listSkills` and `readAgents` readers. Search by name/description/origin, filter by kind. Share button copies a portable manifest to clipboard. Install-from-URL: HTTPS only, SHA256 + 1 KB excerpt preview before write, drift-detection on confirm. New commands: `gallery.openTab`, `gallery.installFromUrl`. Public registry deferred to v1.1.
+- **Tab system v2 — pin / hide / drag-reorder + named layout presets + pop-out fullscreen + cmd+1..9.** Right-click any tab for `Pin tab` / `Hide tab` / `Save current layout as…` / `Load <preset>` / `Pop out fullscreen`. Drag any tab onto another to reorder; persists via globalState. Layout presets capture order + pin set + hidden set under a name. Pop-out via `vscode.window.createWebviewPanel` (no new viewsContainer); both views share one provider + globalState-backed prefs so a preset loaded in either updates both. `cmd/ctrl+1..9` jumps tabs in current visible order. 14 new commands.
+- **Obsidian graph view (Obsidian tab).** Replaces the old recent-notes list with a real-time d3-force vault graph. Vendored 63 KB d3 build at `media/vendor/d3.min.js` (no CDN, no new npm runtime dep). Wikilink parser handles `[[link]]`, `[[link|alias]]`, `[[link#section]]`, fenced-code-block exclusion. `~/.claude/.cockpit/graph-cache-<vaultId>.json` keyed on highest `.md` mtime — sub-10 ms warm loads on 5 k-note vaults. Pan/zoom/drag. Click-through opens in Obsidian via `obsidian://`. Files Claude touched in the active session render in the accent color. New command: `obsidian.refreshGraph`.
+- **WCAG AA palettes + reduced-motion + screen-reader pass.** New `media/sidebar.themes.css` with three palettes: contrast-strengthened light (AA on white), strengthened dark, brand-new `high-contrast` palette (AA+ across the board, AAA on most pairs). `prefers-reduced-motion: reduce` honored across all CSS animations + Talk's `requestAnimationFrame` particle viz (paints a static frame instead). Global `:focus-visible` ring. Tab bar gets `role="tablist"` + `aria-label`s; header gets `role="banner"` + `role="search"`; theme picker gets `role="radiogroup"`. New `.cockpit-a11y-sr-only` utility class for Phase-1 features.
+
+### Added — Phase 2 (polish)
+
+- **Tutorial tab + status bar + desktop notifications + first-run sandbox demo.** New Tutorial tab with `tutorialRecs` (re-renders `snap.recommendations` as actionable cards) and `tutorialNudges` (synthesizes prompt-pattern suggestions from `minePrompts`). Status bar gains pending-approval badge, audit-events-24h pill, Talk launcher (each hides when its signal is empty). `notify()` helper with 30 s per-key debounce — three triggers: pending approvals 0 → ≥ 1, audit `tool.invoke` blocked, today's spend crossing 80 % of daily cap. `claudeCockpit.notifications.enabled` (default `true`) gates the surface. First-run sandbox synthesizes a fake project at `~/.claude/.cockpit/sandbox/demo-project/` with a 30-event JSONL transcript that passes the existing parser; tour-mode flag in globalState; SANDBOX pill at the top of every tab while active. Six new commands.
+- **Mobile companion — read-only phone mirror via Cloudflare Access.** Static page at `landing/mobile/` deployable to `cockpit.dashable.dev/mobile/`. When `claudeCockpit.mobile.enabled = true` (default `false`), the extension writes a strict-whitelist sanitized snapshot to `~/.claude/.cockpit/queue.public.json` (atomic, mode 0600). Output fields: id, tool, ageSeconds, agentName (≤ 8 chars), expectedDiffBytes, status, fileCount. Never written: file paths, args, decision notes, secrets. User serves the file via their existing Cloudflare Tunnel + Access SSO; the mobile page rides the Access cookie via `credentials: 'include'`. Cockpit makes zero outbound calls. v1.0 is read-only; mobile-side approve lands in v1.1. Two new commands: `mobile.copyPath`, `mobile.openSetup`.
+- **Opt-in PostHog telemetry + crash reporting.** Default OFF on three independent gates: `claudeCockpit.telemetry.enabled`, `crashReports`, `projectId`. Until all three are non-default the module is byte-identical no-op. Hand-rolled `https.request` client (zero new deps). Event taxonomy: `cockpit.session.start/end`, `cockpit.tab.view`, `cockpit.command.invoke`, `cockpit.crash.report`. Envelope: extensionVersion, vsCodeVersion, platform, $lib, salted-SHA256-of-hostname distinctId. Detail redaction at module boundary (paths → `~`, API key shapes stripped, forbidden keys hard-dropped at depth ≤ 5). Activation + message handler now wrapped in try/catch under `wrapAsync` — a single bad message no longer crashes the webview message bus. Every PostHog POST is mirrored to `~/.claude/.cockpit/audit.log`. Project ID 92178 (HAQQ Legal AI customer telemetry) explicitly refused. New command: `telemetry.toggle`. PRIVACY.md updated.
+
+### Changed
+
+- **`media/sidebar.js`** — adds `EXTERNAL_COMPONENTS` map adjacent to `COMPONENTS`. `tabBodyComposed`, `getTabComponentIds`, and `customizePanel` consult both maps so externally-registered widgets are first-class. Tab system v2 preserves byte-identical default rendering when no layout pref is active.
+- **Obsidian tab** replaces the recent-notes list with the new graph view. This is the only intentional v0.21.0 → v1.0.0 visible default-state change.
+
+### Removed
+
+- Nothing.
+
+### Notes
+
+- Total diff: ~16,400 LOC added across 11 feature PRs + housekeeping. 139 tests passing.
+- `.vscodeignore` now excludes `.claude/`, `.gstack/`, `.wrangler/` so the `.vsix` ships only the production tree.
+- Approval queue is observability + revert; ENFORCEMENT (blocking the underlying agent at PreToolUse) is left to user-configured hooks. v1.1 will ship a stock hook recipe.
+- Replay's "fork" is an EXPORT, not a Claude Code session handoff — the user must `cp` the file into `~/.claude/projects/<encoded-cwd>/` under a new uuid to actually resume from a fork.
+- Manual cleanup if rolling back v1.0: `rm -rf ~/.claude/.cockpit/`. The dir is self-contained and inert without the extension running.
+
+<details>
+<summary>Original per-worktree drafts (kept for archaeology — collapsed)</summary>
+
 ## [Unreleased] — feat/launch-onboarding-sandbox
 
 ### Added
@@ -137,6 +181,8 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - Approval queue is observability + revert; ENFORCEMENT (blocking the underlying agent at PreToolUse) is left to user-configured hooks. v1.1 will ship a stock hook recipe.
 - Manual cleanup if reverting the queue feature: `rm -rf ~/.claude/.cockpit/snapshots/ ~/.claude/.cockpit/queue.json`. The dir is self-contained and inert without the extension running.
 - Replay's "fork" is an EXPORT, not a Claude Code session handoff. Claude Code's session loader walks `~/.claude/projects/<encoded-cwd>/` only — to actually resume from a fork the user must `cp` the file into their project dir under a new uuid (or wait for `claude --resume <fork-path>` if/when it lands). The fork file is a faithful transcript prefix the user can replay, audit, share, or graft.
+
+</details>
 
 ## [0.21.0] — 2026-05-06
 

@@ -1,5 +1,8 @@
 .vscode/**
 .vscode-test/**
+.claude/**
+.gstack/**
+.wrangler/**
 src/**
 .gitignore
 tsconfig.json
