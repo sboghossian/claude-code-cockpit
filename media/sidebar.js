@@ -3443,6 +3443,33 @@
     welcomeBanner:   { label: 'Welcome / setup',    category: 'Config',   requiresCwd: false, render: (s) => welcomeBannerSection(s) },
   };
 
+  // ===========================================================================
+  // Plugin API (Phase 0): EXTERNAL_COMPONENTS is populated by sibling scripts
+  // injected via sidebarProvider.html() — Phase-1 worktrees own their own JS
+  // file (e.g. media/sidebar.approval.js) and register their widgets here so
+  // they never touch the COMPONENTS literal above. Same shape as a COMPONENTS
+  // entry: { label, category, requiresCwd, render: (snap) => htmlString }.
+  // ===========================================================================
+  const EXTERNAL_COMPONENTS = {};
+  function registerExternalComponent(id, def) {
+    if (typeof id !== 'string' || !id) return;
+    if (Object.prototype.hasOwnProperty.call(COMPONENTS, id)) {
+      console.warn(`registerComponent: id "${id}" is shadowed by a built-in COMPONENTS key; ignoring.`);
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(EXTERNAL_COMPONENTS, id)) {
+      console.warn(`registerComponent: duplicate id "${id}"; ignoring second registration.`);
+      return;
+    }
+    EXTERNAL_COMPONENTS[id] = def;
+  }
+  // Public bridge for sibling scripts. Defined once; subsequent sidebar.js
+  // reloads (e.g. webview restore) just re-bind the same handle.
+  if (typeof window !== 'undefined') {
+    window.cockpit = window.cockpit || {};
+    window.cockpit.registerComponent = registerExternalComponent;
+  }
+
   // Fragments used as components but not standalone sections — they get
   // rendered as HTML snippets stitched into the active session view.
   function sessionTokensFragment(snap) {
@@ -3678,9 +3705,10 @@
   function getTabComponentIds(snap, tabId) {
     const prefs = (snap && snap.userPrefs) || {};
     const tabPrefs = prefs.tabComponents;
+    const known = (id) => COMPONENTS[id] || EXTERNAL_COMPONENTS[id];
     if (tabPrefs && Object.prototype.hasOwnProperty.call(tabPrefs, tabId)) {
       const list = tabPrefs[tabId];
-      if (Array.isArray(list)) return list.filter((id) => COMPONENTS[id]);
+      if (Array.isArray(list)) return list.filter(known);
     }
     // Legacy migration: prior versions stored a single `customComponents`
     // list that drove the Custom tab. Honor it for backward compat until the
@@ -3688,11 +3716,11 @@
     if (tabId === 'custom') {
       const legacy = prefs.customComponents;
       if (Array.isArray(legacy) && legacy.length) {
-        return legacy.filter((id) => COMPONENTS[id]);
+        return legacy.filter(known);
       }
     }
     const def = DEFAULT_TAB_COMPOSITIONS[tabId];
-    if (Array.isArray(def)) return def.filter((id) => COMPONENTS[id]);
+    if (Array.isArray(def)) return def.filter(known);
     return [];
   }
 
@@ -3707,7 +3735,7 @@
     const blocked = [];
     const rendered = ids
       .map((id) => {
-        const c = COMPONENTS[id];
+        const c = COMPONENTS[id] || EXTERNAL_COMPONENTS[id];
         if (!c) return '';
         if (c.requiresCwd && !hasCwd) {
           blocked.push(c.label);
@@ -3766,7 +3794,9 @@
     const activeSet = new Set(getTabComponentIds(snap, editingTabId));
 
     const compsByCat = {};
-    for (const [id, c] of Object.entries(COMPONENTS)) {
+    // COMPONENTS spread first so a colliding id is shadowed by the built-in
+    // (matches lookup precedence in tabBodyComposed).
+    for (const [id, c] of Object.entries({ ...EXTERNAL_COMPONENTS, ...COMPONENTS })) {
       if (!compsByCat[c.category]) compsByCat[c.category] = [];
       compsByCat[c.category].push({ id, ...c });
     }

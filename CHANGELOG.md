@@ -2,6 +2,17 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Plugin API foundation
+
+### Added
+
+- **Plugin API (`src/plugin.ts`)** — Phase 0 of the v1.0 launch wave. Defines the formal extension contract every Phase-1 feature consumes: `CockpitWidget`, `CockpitTab`, `CockpitTrigger` extension points plus the shared `WorktreeAction`, `SnapshotRef`, `AuditEvent` types that approval-queue, replay-timeline, and permissions-audit will all import. Includes `registerWidget`, `registerTab`, `registerTrigger`, and `registerSidebarScript` functions backed by module-private append-only registries. Zero external dependencies.
+- **Webview bridge for sibling scripts.** `media/sidebar.js` now exposes `window.cockpit.registerComponent(id, def)` and an `EXTERNAL_COMPONENTS` map adjacent to the existing `COMPONENTS` registry. `tabBodyComposed()` falls back to `EXTERNAL_COMPONENTS` so Phase-1 features can register widgets without editing the COMPONENTS literal. The sidebar provider's `html()` walks `listSidebarScripts()` and emits one nonce-tagged `<script>` per registered path, preserving the existing CSP (`connect-src 'none'`).
+
+### Notes
+
+- Phase 0 is pure plumbing — no new tabs, widgets, or message types. Until a Phase-1 worktree registers something, every existing tab renders byte-identical to v0.21.0.
+
 ## [0.21.0] — 2026-05-06
 
 ### Fixed

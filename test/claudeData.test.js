@@ -6,6 +6,17 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Auto-discover sibling test files so Phase-1 worktrees can drop a new
+// `test/<feature>.test.js` and have it picked up without touching this
+// file (or package.json — the launch brief locks both). node:test
+// registers test() calls during the require, so they run under the same
+// `npm test` invocation.
+for (const f of fs.readdirSync(__dirname)) {
+  if (f.endsWith('.test.js') && f !== path.basename(__filename)) {
+    require(path.join(__dirname, f));
+  }
+}
+
 // Pin HOME to an isolated tmp dir BEFORE loading claudeData — the module
 // captures `os.homedir()` at import time. Each test scopes its own subdir
 // underneath so they don't collide.
