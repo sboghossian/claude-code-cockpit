@@ -3,34 +3,40 @@
 // Status-bar update tests — covers the brief's acceptance criterion:
 // "status-bar update on approval-count change."
 //
-// The vscode stub doesn't ship a createStatusBarItem mock; we patch it in
-// for this file only and assert text/visibility per snapshot shape.
+// IMPORTANT: this file is auto-discovered by test/claudeData.test.js BEFORE
+// it pins process.env.HOME. statusBar.ts imports claudeData (for
+// formatTokens), which captures `os.homedir()` at module load. We MUST
+// require statusBar lazily inside test bodies. Same pattern as
+// test/replay.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const vscodeStub = require('./vscodeStub.js');
-
-// Spy factory that emulates the StatusBarItem surface statusBar.ts needs.
+let statusBar;
+let vscodeStub;
 const created = [];
-function makeItem() {
-  const item = {
-    text: '',
-    tooltip: '',
-    command: undefined,
-    visible: false,
-    show() { this.visible = true; },
-    hide() { this.visible = false; },
-    dispose() { this.visible = false; },
+
+function loadStatusBar() {
+  if (statusBar) return;
+  vscodeStub = require('./vscodeStub.js');
+  // Patch the stub with a StatusBarItem factory + alignment enum so the
+  // module-under-test compiles without a real VS Code host.
+  vscodeStub.StatusBarAlignment = { Left: 1, Right: 2 };
+  vscodeStub.window.createStatusBarItem = () => {
+    const item = {
+      text: '',
+      tooltip: '',
+      command: undefined,
+      visible: false,
+      show() { this.visible = true; },
+      hide() { this.visible = false; },
+      dispose() { this.visible = false; },
+    };
+    created.push(item);
+    return item;
   };
-  created.push(item);
-  return item;
+  statusBar = require('../out/statusBar.js');
 }
-
-vscodeStub.StatusBarAlignment = { Left: 1, Right: 2 };
-vscodeStub.window.createStatusBarItem = () => makeItem();
-
-const statusBar = require('../out/statusBar.js');
 
 function emptyStats() {
   return {
@@ -60,6 +66,7 @@ function makeSnap(overrides) {
 }
 
 test('status-bar shows approval count when pending > 0', () => {
+  loadStatusBar();
   created.length = 0;
   const sb = statusBar.createStatusBar();
   // approvalItem is the 4th item created (cwd, token, files, approval).
@@ -80,11 +87,10 @@ test('status-bar shows approval count when pending > 0', () => {
 });
 
 test('status-bar hides every dynamic item when snapshot is undefined', () => {
+  loadStatusBar();
   created.length = 0;
   const sb = statusBar.createStatusBar();
   sb.update(undefined);
-  // cwd hidden (no projects fallback), token hidden, files hidden, approval
-  // hidden (no snap), audit hidden, talk hidden.
   for (const item of created) {
     assert.equal(item.visible, false, 'all items hidden');
   }
@@ -92,6 +98,7 @@ test('status-bar hides every dynamic item when snapshot is undefined', () => {
 });
 
 test('status-bar surfaces audit dot when last24h > 0', () => {
+  loadStatusBar();
   created.length = 0;
   const sb = statusBar.createStatusBar();
   // auditItem is the 5th (cwd, token, files, approval, audit).

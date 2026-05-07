@@ -572,7 +572,7 @@ Phase 1 of the v1.0 launch wave. Differentiation feature ("watch competitors don
 ### Acceptance check
 - [x] `npm run compile` clean (TypeScript strict, zero `any`)
 - [x] `node --check media/sidebar.tutorial.js` clean
-- [x] `npm test` — 198 tests, 191 pass, 7 fail. The 7 are pre-existing flakes in `claudeData.test.js` sensitive to the dev's real `~/.claude/projects/` state — not introduced here.
+- [x] `npm test` — **127 tests, 127 pass, 0 fail.** 114 baseline + 13 new. No regressions. Initial run inadvertently broke the claudeData fixture-driven tests because my new test files were eagerly `require`-ing modules that capture `os.homedir()` at module load (sandbox.ts, statusBar.ts via claudeData.ts) — `claudeData.test.js`'s sibling auto-discoverer loads us BEFORE it pins `process.env.HOME`, so the captured paths froze against the dev's real `~/`. Fix: deferred all `require('../out/...')` calls into the test bodies (same pattern as `test/replay.test.js`) AND switched `src/sandbox.ts` from a frozen `REF` constant to runtime `refRoot()`/`refProject()`/`refSessions()` helpers (same pattern as `src/replay.ts:forksDirInternal`).
 - [x] Status bar: 3 new items, all clickable, all hide when their signal is empty.
 - [x] Tutorial tab populates with at least 5 recommendations on a real session history (drives off `computeRecommendations`'s existing 30+ rec types + `minePrompts`).
 

@@ -3,8 +3,10 @@
 // Sandbox synth tests — covers the brief's acceptance criterion:
 // "Sandbox JSONL passes the existing parseLine() validator."
 //
-// We redirect the sandbox root to a per-test tmpdir so the suite never
-// touches the user's real ~/.claude/.cockpit/sandbox.
+// IMPORTANT: this file is auto-discovered by test/claudeData.test.js BEFORE
+// it pins process.env.HOME to a tmp dir. We MUST NOT eagerly require any
+// module that transitively captures `os.homedir()` at module-load time.
+// Defer the require into the test bodies. Same pattern as test/replay.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,17 +14,22 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const sandbox = require('../out/sandbox.js');
+let sandbox;
+function loadSandbox() {
+  if (!sandbox) sandbox = require('../out/sandbox.js');
+  return sandbox;
+}
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-sandbox-'));
 }
 
 test('startSandbox synthesizes a project + 30-event JSONL', () => {
+  const sb = loadSandbox();
   const root = tmpRoot();
-  const restore = sandbox.__setSandboxRootForTests(root);
+  const restore = sb.__setSandboxRootForTests(root);
   try {
-    const result = sandbox.startSandbox();
+    const result = sb.startSandbox();
     assert.equal(result.ok, true, `expected ok, got error: ${result.error}`);
     assert.ok(result.state, 'state should be defined');
     assert.equal(result.state.active, true);
@@ -48,11 +55,12 @@ test('startSandbox synthesizes a project + 30-event JSONL', () => {
 });
 
 test('startSandbox is idempotent — second call reuses existing JSONL', () => {
+  const sb = loadSandbox();
   const root = tmpRoot();
-  const restore = sandbox.__setSandboxRootForTests(root);
+  const restore = sb.__setSandboxRootForTests(root);
   try {
-    const first = sandbox.startSandbox();
-    const second = sandbox.startSandbox();
+    const first = sb.startSandbox();
+    const second = sb.startSandbox();
     assert.equal(second.ok, true);
     assert.equal(second.state.sessionFile, first.state.sessionFile, 'session file should match across starts');
     assert.equal(second.state.sessionId, first.state.sessionId);
@@ -62,14 +70,15 @@ test('startSandbox is idempotent — second call reuses existing JSONL', () => {
 });
 
 test('exitSandbox tears down the synthesized tree', () => {
+  const sb = loadSandbox();
   const root = tmpRoot();
-  const restore = sandbox.__setSandboxRootForTests(root);
+  const restore = sb.__setSandboxRootForTests(root);
   try {
-    sandbox.startSandbox();
-    assert.ok(sandbox.sandboxExists(), 'precondition: sandbox should exist after start');
-    const result = sandbox.exitSandbox();
+    sb.startSandbox();
+    assert.ok(sb.sandboxExists(), 'precondition: sandbox should exist after start');
+    const result = sb.exitSandbox();
     assert.equal(result.ok, true);
-    assert.equal(sandbox.sandboxExists(), false, 'sandbox dir should be gone');
+    assert.equal(sb.sandboxExists(), false, 'sandbox dir should be gone');
   } finally {
     restore();
   }

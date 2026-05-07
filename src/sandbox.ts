@@ -38,13 +38,21 @@ import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
 
-// Mutable refs so tests can redirect to a tmp dir without monkey-patching fs.
-// Production callers go through the public functions and never read these.
-const REF: { root: string; project: string; sessions: string } = {
-  root: path.join(os.homedir(), '.claude', '.cockpit', 'sandbox'),
-  project: path.join(os.homedir(), '.claude', '.cockpit', 'sandbox', 'demo-project'),
-  sessions: path.join(os.homedir(), '.claude', '.cockpit', 'sandbox', 'sessions'),
-};
+// Mutable override for tests — when set, ALL paths derive from this root.
+// When undefined, paths are recomputed from `os.homedir()` on every call so a
+// test that pins HOME via process.env.HOME after this module loads still gets
+// the right resolution. (Same pattern as src/replay.ts:forksDirInternal.)
+const TEST_OVERRIDE: { root: string | undefined } = { root: undefined };
+
+function refRoot(): string {
+  return TEST_OVERRIDE.root ?? path.join(os.homedir(), '.claude', '.cockpit', 'sandbox');
+}
+function refProject(): string {
+  return path.join(refRoot(), 'demo-project');
+}
+function refSessions(): string {
+  return path.join(refRoot(), 'sessions');
+}
 
 export interface SandboxState {
   /** True while the user is inside the tour. */
@@ -68,13 +76,13 @@ export interface SandboxStartResult {
 /** Idempotent: provision the sandbox dir + JSONL if missing, return the state. */
 export function startSandbox(): SandboxStartResult {
   try {
-    fs.mkdirSync(REF.project, { recursive: true, mode: 0o755 });
-    fs.mkdirSync(REF.sessions, { recursive: true, mode: 0o755 });
+    fs.mkdirSync(refProject(), { recursive: true, mode: 0o755 });
+    fs.mkdirSync(refSessions(), { recursive: true, mode: 0o755 });
   } catch (err) {
     return { ok: false, error: `mkdir failed: ${String(err)}` };
   }
 
-  const claudeMd = path.join(REF.project, 'CLAUDE.md');
+  const claudeMd = path.join(refProject(), 'CLAUDE.md');
   if (!fs.existsSync(claudeMd)) {
     fs.writeFileSync(
       claudeMd,
@@ -99,7 +107,7 @@ export function startSandbox(): SandboxStartResult {
     );
   }
 
-  const readme = path.join(REF.project, 'README.md');
+  const readme = path.join(refProject(), 'README.md');
   if (!fs.existsSync(readme)) {
     fs.writeFileSync(
       readme,
@@ -112,13 +120,13 @@ export function startSandbox(): SandboxStartResult {
   // restarts of `startSandbox` so users don't accumulate orphaned files.
   let sessionFile: string | undefined;
   try {
-    const existing = fs.readdirSync(REF.sessions).filter((f) => f.endsWith('.jsonl'));
+    const existing = fs.readdirSync(refSessions()).filter((f) => f.endsWith('.jsonl'));
     if (existing.length > 0) {
       // Newest wins.
       const newest = existing
         .map((f) => ({
-          file: path.join(REF.sessions, f),
-          mtime: fs.statSync(path.join(REF.sessions, f)).mtimeMs,
+          file: path.join(refSessions(), f),
+          mtime: fs.statSync(path.join(refSessions(), f)).mtimeMs,
         }))
         .sort((a, b) => b.mtime - a.mtime)[0];
       sessionFile = newest.file;
@@ -130,9 +138,9 @@ export function startSandbox(): SandboxStartResult {
     ? path.basename(sessionFile, '.jsonl')
     : crypto.randomUUID();
   if (!sessionFile) {
-    sessionFile = path.join(REF.sessions, `${sessionId}.jsonl`);
+    sessionFile = path.join(refSessions(), `${sessionId}.jsonl`);
     try {
-      fs.writeFileSync(sessionFile, synthSessionLines(sessionId, REF.project), 'utf8');
+      fs.writeFileSync(sessionFile, synthSessionLines(sessionId, refProject()), 'utf8');
     } catch (err) {
       return { ok: false, error: `session write failed: ${String(err)}` };
     }
@@ -140,22 +148,22 @@ export function startSandbox(): SandboxStartResult {
 
   const state: SandboxState = {
     active: true,
-    projectRoot: REF.project,
+    projectRoot: refProject(),
     sessionFile,
     sessionId,
     createdAt: Date.now(),
   };
-  logger.info(`sandbox: started at ${REF.project} (session id ${sessionId.slice(0, 8)})`);
+  logger.info(`sandbox: started at ${refProject()} (session id ${sessionId.slice(0, 8)})`);
   return { ok: true, state };
 }
 
 /** Walk the sandbox dir; preserves nothing. */
 export function exitSandbox(): { ok: boolean; error?: string } {
-  if (!fs.existsSync(REF.root)) {
+  if (!fs.existsSync(refRoot())) {
     return { ok: true };
   }
   try {
-    fs.rmSync(REF.root, { recursive: true, force: true });
+    fs.rmSync(refRoot(), { recursive: true, force: true });
     logger.info('sandbox: removed sandbox tree');
     return { ok: true };
   } catch (err) {
@@ -165,9 +173,9 @@ export function exitSandbox(): { ok: boolean; error?: string } {
 
 /** True iff the sandbox dir + session jsonl exist. */
 export function sandboxExists(): boolean {
-  if (!fs.existsSync(REF.project)) return false;
+  if (!fs.existsSync(refProject())) return false;
   try {
-    const sessions = fs.readdirSync(REF.sessions).filter((f) => f.endsWith('.jsonl'));
+    const sessions = fs.readdirSync(refSessions()).filter((f) => f.endsWith('.jsonl'));
     return sessions.length > 0;
   } catch {
     return false;
@@ -175,11 +183,11 @@ export function sandboxExists(): boolean {
 }
 
 export function sandboxRoot(): string {
-  return REF.root;
+  return refRoot();
 }
 
 export function sandboxProjectDir(): string {
-  return REF.project;
+  return refProject();
 }
 
 // -----------------------------------------------------------------------------
@@ -298,15 +306,12 @@ function synthSessionLines(sessionId: string, projectRoot: string): string {
 }
 
 // Test helpers — redirect the sandbox dirs without touching the user's real
-// ~/.claude/.cockpit/sandbox/. Returns a restore fn.
-export function __setSandboxRootForTests(p: string): () => void {
-  const orig = { ...REF };
-  REF.root = p;
-  REF.project = path.join(p, 'demo-project');
-  REF.sessions = path.join(p, 'sessions');
+// ~/.claude/.cockpit/sandbox/. Returns a restore fn. Pass undefined to clear
+// the override (back to os.homedir()-derived paths, recomputed on each call).
+export function __setSandboxRootForTests(p: string | undefined): () => void {
+  const orig = TEST_OVERRIDE.root;
+  TEST_OVERRIDE.root = p;
   return () => {
-    REF.root = orig.root;
-    REF.project = orig.project;
-    REF.sessions = orig.sessions;
+    TEST_OVERRIDE.root = orig;
   };
 }

@@ -426,7 +426,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js test/replay.test.js test/gallery.test.js test/graph.test.js test/tabLayout.test.js test/sandbox.test.js test/notifications.test.js test/statusBar.test.js test/tutorial.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/replay.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

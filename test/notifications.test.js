@@ -3,41 +3,48 @@
 // Notifications debounce test — covers the brief's acceptance criterion:
 // "Notifications fire at most once per 30s window."
 //
-// We patch the vscode stub at module-resolution time so notify() actually
-// invokes a spy instead of a real VS Code dialog.
+// IMPORTANT: this file is auto-discovered by test/claudeData.test.js BEFORE
+// it pins process.env.HOME. We must not eagerly require any module that
+// transitively captures `os.homedir()` at module load. Notifications module
+// itself doesn't, but we still defer the require + the vscode stub mutation
+// into the test bodies so we never even risk module-load side effects firing
+// before claudeData.test.js has finished setting up its tmp HOME.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
 
-// Override the vscode stub for THIS file BEFORE we require notifications.
-// The shared register.js routes `require('vscode')` to test/vscodeStub.js;
-// we mutate that exported object so subsequent requires see the spy.
-const vscodeStub = require('./vscodeStub.js');
-
+let notifications;
+let vscodeStub;
 let infoCalls = [];
 let warnCalls = [];
 
-vscodeStub.window.showInformationMessage = async (message, ...labels) => {
-  infoCalls.push({ message, labels });
-  return labels[0]; // user "clicks" first action by default
-};
-vscodeStub.window.showWarningMessage = async (message, ...labels) => {
-  warnCalls.push({ message, labels });
-  return labels[0];
-};
-vscodeStub.workspace = {
-  getConfiguration: () => ({
-    get: (_key, fallback) => (fallback === undefined ? true : fallback),
-  }),
-};
-
-// Now require the module under test.
-const notifications = require('../out/notifications.js');
+function load() {
+  if (vscodeStub) return;
+  vscodeStub = require('./vscodeStub.js');
+  // Patch the stub with the spies + a default-on workspace.getConfiguration.
+  vscodeStub.window.showInformationMessage = async (message, ...labels) => {
+    infoCalls.push({ message, labels });
+    return undefined; // simulate user dismissing without action choice
+  };
+  vscodeStub.window.showWarningMessage = async (message, ...labels) => {
+    warnCalls.push({ message, labels });
+    return undefined;
+  };
+  vscodeStub.workspace = {
+    getConfiguration: () => ({
+      get: (_key, fallback) => (fallback === undefined ? true : fallback),
+    }),
+  };
+  notifications = require('../out/notifications.js');
+}
 
 test('notify() fires once, then drops duplicates within the debounce window', async () => {
+  load();
   notifications.__resetForTests();
   infoCalls = [];
+  vscodeStub.workspace.getConfiguration = () => ({
+    get: (_key, fallback) => (fallback === undefined ? true : fallback),
+  });
 
   const a = await notifications.notify({
     key: 'test.dupe',
@@ -57,23 +64,25 @@ test('notify() fires once, then drops duplicates within the debounce window', as
 
   assert.equal(infoCalls.length, 1, 'exactly one underlying showInformationMessage call');
   assert.equal(infoCalls[0].message, 'first');
-  // First call returns whatever the spy "chose" (no labels → undefined).
   assert.equal(a, undefined);
   assert.equal(b, undefined);
   assert.equal(c, undefined);
 });
 
 test('notify() honors a custom debounce window', async () => {
+  load();
   notifications.__resetForTests();
   infoCalls = [];
+  vscodeStub.workspace.getConfiguration = () => ({
+    get: (_key, fallback) => (fallback === undefined ? true : fallback),
+  });
 
   await notifications.notify({
     key: 'test.window',
     level: 'info',
     message: 'first',
-    debounceMs: 1, // very small
+    debounceMs: 1,
   });
-  // Wait past the window.
   await new Promise((r) => setTimeout(r, 10));
   await notifications.notify({
     key: 'test.window',
@@ -85,8 +94,13 @@ test('notify() honors a custom debounce window', async () => {
 });
 
 test('notify() respects level: warn → showWarningMessage', async () => {
+  load();
   notifications.__resetForTests();
   warnCalls = [];
+  vscodeStub.workspace.getConfiguration = () => ({
+    get: (_key, fallback) => (fallback === undefined ? true : fallback),
+  });
+
   await notifications.notify({
     key: 'test.warn',
     level: 'warn',
@@ -99,9 +113,9 @@ test('notify() respects level: warn → showWarningMessage', async () => {
 });
 
 test('notify() returns undefined when settings disable notifications', async () => {
+  load();
   notifications.__resetForTests();
   infoCalls = [];
-  // Flip the toggle off.
   vscodeStub.workspace.getConfiguration = () => ({
     get: (_key, fallback) => (typeof fallback === 'boolean' ? false : fallback),
   });
@@ -112,7 +126,7 @@ test('notify() returns undefined when settings disable notifications', async () 
   });
   assert.equal(result, undefined);
   assert.equal(infoCalls.length, 0);
-  // Restore.
+  // Restore default-on for any later tests.
   vscodeStub.workspace.getConfiguration = () => ({
     get: (_key, fallback) => (fallback === undefined ? true : fallback),
   });

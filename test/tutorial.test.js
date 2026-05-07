@@ -3,16 +3,20 @@
 // Tutorial recommendation ordering / filtering tests — covers the brief's
 // acceptance criterion: "tutorial recommendation ordering".
 //
-// We exercise computeRecommendations directly with a curated context and
-// assert: (a) high impact ranks before med ranks before low; (b) the
-// dismissal filter (a plain Set) drops dismissed ids without re-ordering
-// the survivors; (c) the synthesized nudge ids start with `tutorial-mined-`
-// so the dismissal contract holds across reloads.
+// IMPORTANT: this file is auto-discovered by test/claudeData.test.js BEFORE
+// it pins process.env.HOME. claudeData captures `os.homedir()` at module
+// load, so we must require it lazily inside test bodies (same pattern as
+// test/replay.test.js). Otherwise our top-level require freezes the wrong
+// HOME and every claudeData fixture-driven test breaks downstream.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const claudeData = require('../out/claudeData.js');
+let claudeData;
+function loadClaudeData() {
+  if (!claudeData) claudeData = require('../out/claudeData.js');
+  return claudeData;
+}
 
 // Minimal context shape. computeRecommendations only reads the fields it
 // needs; everything else can stay undefined / empty arrays.
@@ -56,14 +60,16 @@ function ctx(overrides) {
 }
 
 test('computeRecommendations returns at least one high-impact rec when context is full', () => {
-  const recs = claudeData.computeRecommendations(ctx());
+  const cd = loadClaudeData();
+  const recs = cd.computeRecommendations(ctx());
   assert.ok(recs.length > 0, 'should produce recs');
   const high = recs.find((r) => r.impact === 'high');
   assert.ok(high, 'should include a high-impact rec on a 95%-full context');
 });
 
 test('dismissal filter (Set membership) drops only the targeted ids', () => {
-  const recs = claudeData.computeRecommendations(ctx());
+  const cd = loadClaudeData();
+  const recs = cd.computeRecommendations(ctx());
   assert.ok(recs.length >= 1);
   const dropId = recs[0].id;
   const dismissed = new Set([dropId]);
@@ -72,10 +78,12 @@ test('dismissal filter (Set membership) drops only the targeted ids', () => {
   assert.ok(!filtered.some((r) => r.id === dropId), 'dropped id no longer present');
 });
 
-test('minePrompts output is stable enough to drive tutorial nudge ordering', () => {
-  // Doesn't assert specific prompts (depends on the user's machine); just
-  // verifies the API shape that buildTutorialNudges consumes is intact.
-  const mined = claudeData.minePrompts(5);
+test('minePrompts output shape is stable across calls', () => {
+  // Doesn't assert specific prompts (depends on the user's machine; under
+  // tests HOME is pinned to a tmp dir so likely empty); just verifies the
+  // API shape buildTutorialNudges consumes is intact.
+  const cd = loadClaudeData();
+  const mined = cd.minePrompts(5);
   assert.ok(Array.isArray(mined));
   for (const m of mined) {
     assert.ok(typeof m.fingerprint === 'string' && m.fingerprint.length > 0);
