@@ -1,5 +1,6 @@
 import * as https from 'https';
 import { logger } from './logger';
+import { appendAuditEvent } from './auditLog';
 
 export interface UpdateStatus {
   enabled: boolean;
@@ -23,6 +24,7 @@ export async function fetchLatestRelease(): Promise<{
   publishedAt: number | undefined;
 }> {
   return new Promise((resolve, reject) => {
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host: 'api.github.com', method: 'GET', purpose: 'updateCheck' }, worktree: 'permissions-audit' });
     const req = https.get(
       RELEASE_URL,
       {

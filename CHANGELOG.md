@@ -13,6 +13,17 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 
 - Phase 0 is pure plumbing — no new tabs, widgets, or message types. Until a Phase-1 worktree registers something, every existing tab renders byte-identical to v0.21.0.
 
+## [Unreleased] — feat/launch-permissions-audit
+
+### Added
+
+- **Permissions audit log (`src/auditLog.ts`)** — Phase 1 of the v1.0 launch wave. NDJSON log at `~/.claude/.cockpit/audit.log` with append-and-fsync atomicity, 50 MB rotation across five archives, 8 KB per-line cap, and detail-level redaction guarantees enforced at call sites. Public surface: `appendAuditEvent`, `readAuditTail`, `searchAudit`, `outboundDomainTail`, `readAuditSnapshot`, `clearAuditLog`. Opt-in via `claudeCockpit.audit.enabled` (default `true`); when disabled, every append is a zero-cost no-op so v0.21.0 behaviour is preserved.
+- **Security tab Keys / Outbound / Audit-log sub-views** (`media/sidebar.audit.js`). Three new sub-tabs inside the existing Security tab, all rendered through the Phase-0 `EXTERNAL_COMPONENTS` bridge — no edits to the COMPONENTS literal, no new top-level tab. Keys uses VS Code `SecretStorage` (Keychain / libsecret / DPAPI) so values are encrypted at rest and never serialised to the webview; Outbound rolls up `outboundDomainTail()` over the audit log; Audit-log surfaces a searchable, exportable table of recent events.
+- **Outbound network monitoring at six call sites** — `discover.ts:fetchGithubTrending`, `discover.ts:httpGet`, `updateCheck.ts:fetchLatestRelease`, `integrations.ts:ping`, `integrations.ts:httpsHead`, `roadmap.ts:getJson`. Each emits a single `appendAuditEvent({ kind: 'net.outbound', ... })` immediately before the underlying `https.get / http.request` call. Detail is restricted to `host`, `method`, and `purpose` — never paths, query strings, or response bodies.
+- **Snapshot extension** — `CockpitSnapshot.audit?: { last24h: number; lastDomain?: string }`. Cheap rollup wired through `recordTime('snapshot.audit', ...)` so the Security tab can render the 24h count without a round-trip; full payload is fetched lazily via `audit.refresh`. Optional field — every existing tab in v0.21.0 still renders byte-identical when `claudeCockpit.audit.enabled = false`.
+- **Two new commands** — `claudeCockpit.audit.export` (jumps to Security tab) and `claudeCockpit.keys.add` (interactive key add via `vscode.SecretStorage`).
+- **One new setting** — `claudeCockpit.audit.enabled` (boolean, default `true`).
+
 ## [Unreleased] — feat/launch-a11y-theme
 
 ### Added

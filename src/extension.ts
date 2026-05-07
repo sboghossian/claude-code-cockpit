@@ -22,6 +22,7 @@ import {
 import { startAppUsageTracker } from './appUsage';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
+import { setAuditEnabled } from './auditLog';
 import { registerSidebarScript } from './plugin';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -52,12 +53,54 @@ export function activate(context: vscode.ExtensionContext): void {
     readBudgetConfig,
     (snap) => status.update(snap),
   );
+  // permissions-audit (Phase 1): wire the audit-log toggle + SecretStorage
+  // handle, and register the sibling sidebar script that owns the audit /
+  // keys / leaks / outbound sub-views inside the Security tab.
+  const auditEnabled = vscode.workspace
+    .getConfiguration('claudeCockpit')
+    .get<boolean>('audit.enabled', true);
+  setAuditEnabled(auditEnabled);
+  provider.setSecretStorage(context.secrets);
+  registerSidebarScript('media/sidebar.audit.js');
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(CockpitSidebarProvider.viewType, provider),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeCockpit.refresh', () => provider.refresh()),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.audit.export', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('security');
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.keys.add', async () => {
+      const name = await vscode.window.showInputBox({
+        prompt: 'Key name (e.g. ANTHROPIC_API_KEY)',
+        placeHolder: 'A-Z, 0-9, _ — up to 64 chars',
+        validateInput: (v) => /^[A-Z0-9_]{1,64}$/.test(v) ? null : 'Must match [A-Z0-9_]{1,64}',
+      });
+      if (!name) return;
+      const value = await vscode.window.showInputBox({
+        prompt: `Value for ${name}`,
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (!value) return;
+      await context.secrets.store(`claudeCockpit.audit.secret.${name}`, value);
+      const idx = context.globalState.get<string[]>('claudeCockpit.audit.keysIndex', []);
+      if (!idx.includes(name)) {
+        idx.push(name);
+        await context.globalState.update('claudeCockpit.audit.keysIndex', idx);
+      }
+      await context.globalState.update(`claudeCockpit.audit.keyAddedAt.${name}`, Date.now());
+      void vscode.window.showInformationMessage(`Stored key ${name} in SecretStorage.`);
+      provider.refresh();
+    }),
   );
 
   context.subscriptions.push(
@@ -208,6 +251,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('claudeCockpit.budget')) {
+        provider.refresh();
+      }
+      if (e.affectsConfiguration('claudeCockpit.audit.enabled')) {
+        const v = vscode.workspace
+          .getConfiguration('claudeCockpit')
+          .get<boolean>('audit.enabled', true);
+        setAuditEnabled(v);
         provider.refresh();
       }
     }),

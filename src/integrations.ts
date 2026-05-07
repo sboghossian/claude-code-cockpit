@@ -5,6 +5,7 @@ import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
+import { appendAuditEvent } from './auditLog';
 
 // ===========================================================================
 // Plans panel — parse tasks/*.md checkboxes from workspace + ancestors.
@@ -384,6 +385,7 @@ export async function detectUsageDashboard(): Promise<UsageDashboardStatus> {
 
 function ping(port: number): Promise<boolean> {
   return new Promise((resolve) => {
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host: 'localhost', port, method: 'HEAD', purpose: 'usageDashboard.ping' }, worktree: 'permissions-audit' });
     const req = http.request(
       { host: 'localhost', port, method: 'HEAD', timeout: 250, path: '/' },
       (res) => {
@@ -461,6 +463,7 @@ async function probeSubdomain(domain: string): Promise<void> {
 
 function httpsHead(host: string): Promise<{ ok: boolean; statusCode: number | undefined }> {
   return new Promise((resolve) => {
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host, method: 'HEAD', purpose: 'subdomainHealth.probe' }, worktree: 'permissions-audit' });
     const req = https.request(
       { host, method: 'HEAD', timeout: 3000, path: '/' },
       (res) => {

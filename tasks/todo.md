@@ -398,3 +398,25 @@ Goal: replace the obsidian tab's recent-notes list with a real-time vault graph.
 - [x] Falls back to "no vault detected" / "no notes found" empty states gracefully
 - [x] `npm test` 51/51 (was 47/47); `npm run compile` clean (TS strict, zero `any`)
 - [x] `node --check` clean for `media/sidebar.js`, `media/sidebar.graph.js`, and `media/vendor/d3.min.js`
+## v1.0 — permissions-audit
+
+Phase 1 of the v1.0 launch wave. Append-only audit log + Security-tab sub-views for keys (SecretStorage), leaks (existing scanSecurity), and outbound network monitor (extension-host traffic only).
+
+- [x] `src/auditLog.ts` exports `appendAuditEvent`, `readAuditTail`, `searchAudit`, `outboundDomainTail`, `readAuditSnapshot`, `clearAuditLog`, `setAuditEnabled`, `getAuditLogPath`
+- [x] Atomic append via `O_APPEND` + `fsync`; concurrent extension hosts can't tear lines
+- [x] Rotation at 50 MB across `audit.log.{1..5}`; oldest dropped when threshold tripped
+- [x] 8 KB per-line cap; oversized lines redacted to `{ truncated: true, originalBytes: n }` keeping ts + kind
+- [x] `media/sidebar.audit.js` registers four widgets (`auditKeys`, `auditLeaks`, `auditOutbound`, `auditLog`) via the Phase-0 `window.cockpit.registerComponent` bridge — zero edits to the COMPONENTS literal
+- [x] Security tab subBar gains three sub-tabs (Keys / Outbound / Audit log) plus the existing Overview / Leaks / .env / Git / MCP — single `securityFull` widget, no top-level tab change
+- [x] Six wrap sites added: `discover.ts:fetchGithubTrending` (https.get api.github.com), `discover.ts:httpGet` (lib.get arbitrary), `updateCheck.ts:fetchLatestRelease` (https.get api.github.com), `integrations.ts:ping` (http.request localhost), `integrations.ts:httpsHead` (https.request always-live subdomains), `roadmap.ts:getJson` (lib.get roadmap.dashable.dev / localhost). Each emits one `appendAuditEvent({ kind: 'net.outbound', detail: { host, method, purpose } })` immediately before the HTTP call. Detail is REDACTED — host + method + purpose only, never paths / bodies / query strings
+- [x] `security.ts:outboundDomainTail()` thin wrapper — keeps security.ts as the single import surface for the webview's security-related data
+- [x] `CockpitSnapshot` extended with `audit?: { last24h, lastDomain }`; wired in `snapshotInner` via one dedicated `recordTime('snapshot.audit', ...)` line in BOTH branches (active session + no session)
+- [x] SidebarProvider message union extended with `audit.refresh | audit.search | audit.export | audit.clearLog | audit.openLog | keys.add | keys.delete | keys.list` — namespaced per the launch plan; extra fields `auditQuery / auditTailN / keyName / keyValue`
+- [x] Keys sub-view stores values via VS Code `SecretStorage` (Keychain / libsecret / DPAPI); webview only sees count + last-added timestamp; values never leak through `postMessage`
+- [x] Two new commands in `package.json`: `claudeCockpit.audit.export`, `claudeCockpit.keys.add`
+- [x] One new setting: `claudeCockpit.audit.enabled` (bool, default `true`); flipping it fires `setAuditEnabled` so the change takes effect without restart
+- [x] `npm test` 61/61 green (54 baseline + 7 audit tests: append+read roundtrip, tail-N order across rotation, rotation threshold, search across rotated files, outbound roll-up, disabled-mode no-op, oversized-line redaction)
+- [x] `npm run compile` clean under TypeScript strict (zero `any`)
+- [x] `node --check media/sidebar.js` clean; `node --check media/sidebar.audit.js` clean
+- [x] No mutations to `~/.claude/projects/*.jsonl`; audit log lives at `~/.claude/.cockpit/audit.log` (Cockpit-owned dir)
+- [x] No exfiltration — log file is local-only; PostHog telemetry-posthog will consume aggregate counts (NEVER paths) when it merges later in Phase 2

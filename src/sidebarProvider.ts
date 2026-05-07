@@ -52,7 +52,14 @@ import {
   JarvisData,
   readJarvis,
 } from './jarvis';
-import { scanSecurity, SecuritySnapshot, summarizeFindings } from './security';
+import { outboundDomainTail, scanSecurity, SecuritySnapshot, summarizeFindings } from './security';
+import {
+  appendAuditEvent,
+  clearAuditLog,
+  getAuditLogPath,
+  readAuditTail,
+  searchAudit,
+} from './auditLog';
 
 interface InboundMessage {
   type:
@@ -107,7 +114,16 @@ interface InboundMessage {
     // === obsidian-graph ===
     | 'graph.refresh'
     | 'graph.openInObsidian'
-    | 'graph.pickVault';
+    | 'graph.pickVault'
+    // === permissions-audit ===
+    | 'audit.refresh'
+    | 'audit.search'
+    | 'audit.export'
+    | 'audit.clearLog'
+    | 'audit.openLog'
+    | 'keys.add'
+    | 'keys.delete'
+    | 'keys.list';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -137,6 +153,13 @@ interface InboundMessage {
   // === obsidian-graph ===
   graphVaultId?: string;
   graphRelPath?: string;
+  // permissions-audit fields. Key VALUES are NEVER serialized to disk in
+  // plaintext — they go into VS Code's SecretStorage on the host side and the
+  // webview only sees count + last-added timestamp.
+  auditQuery?: string;
+  auditTailN?: number;
+  keyName?: string;
+  keyValue?: string;
 }
 
 type CockpitTheme = 'auto' | 'dark' | 'light' | 'high-contrast';
@@ -176,6 +199,14 @@ const PINS_KEY = 'claudeCockpit.pinnedMemory';
 const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
 const CUSTOM_FEEDS_KEY = 'claudeCockpit.customFeeds';
 const FIRST_RUN_KEY = 'claudeCockpit.firstRunCompleted';
+// permissions-audit: index of secret-storage key NAMES (never values).
+const KEYS_INDEX_KEY = 'claudeCockpit.audit.keysIndex';
+function secretKeyFor(name: string): string {
+  return `claudeCockpit.audit.secret.${name}`;
+}
+function keyAddedAtMsKey(name: string): string {
+  return `claudeCockpit.audit.keyAddedAt.${name}`;
+}
 
 function isStringArrayMap(v: unknown): v is Record<string, string[]> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
@@ -229,6 +260,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   private jarvisWatcher: fs.FSWatcher | undefined;
   private jarvisLastPendingIds = new Set<string>();
   private lastAlwaysLive: string[] = [];
+  // permissions-audit: SecretStorage handle so the Keys sub-view can persist
+  // API keys without ever serializing values to disk in plaintext. Plumbed in
+  // via setSecretStorage() from extension.ts on activation; never serialised to
+  // the webview.
+  private secrets: vscode.SecretStorage | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -236,6 +272,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     private readonly readBudgetConfig: () => BudgetConfig,
     private readonly onSnapshot: (snap: CockpitSnapshot) => void,
   ) {}
+
+  setSecretStorage(secrets: vscode.SecretStorage): void {
+    this.secrets = secrets;
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -1102,6 +1142,129 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         // contract change.
         return;
       }
+      // === permissions-audit ===
+      case 'audit.refresh': {
+        const n = typeof msg.auditTailN === 'number' && msg.auditTailN > 0 ? Math.min(msg.auditTailN, 1000) : 200;
+        const events = readAuditTail(n);
+        const domains = outboundDomainTail(50);
+        this.view?.webview.postMessage({ type: 'audit.payload', events, domains });
+        return;
+      }
+      case 'audit.search': {
+        const q = typeof msg.auditQuery === 'string' ? msg.auditQuery : '';
+        const events = q ? searchAudit(q) : readAuditTail(200);
+        this.view?.webview.postMessage({ type: 'audit.searchResult', events, query: q });
+        return;
+      }
+      case 'audit.export': {
+        await this.exportAuditLog();
+        return;
+      }
+      case 'audit.clearLog': {
+        const choice = await vscode.window.showWarningMessage(
+          'Clear the audit log? This deletes audit.log + rotated archives. Cannot be undone.',
+          { modal: true },
+          'Clear',
+        );
+        if (choice === 'Clear') {
+          clearAuditLog();
+          this.view?.webview.postMessage({ type: 'audit.cleared' });
+          this.refresh();
+        }
+        return;
+      }
+      case 'audit.openLog': {
+        const p = getAuditLogPath();
+        if (fs.existsSync(p)) {
+          void vscode.window.showTextDocument(vscode.Uri.file(p));
+        } else {
+          void vscode.window.showInformationMessage('Audit log is empty (no events recorded yet).');
+        }
+        return;
+      }
+      case 'keys.add': {
+        if (!this.secrets) {
+          void vscode.window.showWarningMessage('SecretStorage not available; cannot store key.');
+          return;
+        }
+        const name = typeof msg.keyName === 'string' ? msg.keyName.trim() : '';
+        const value = typeof msg.keyValue === 'string' ? msg.keyValue : '';
+        if (!name || !value || !/^[A-Z0-9_]{1,64}$/.test(name)) {
+          void vscode.window.showWarningMessage('Key name must be 1-64 chars, [A-Z0-9_]; value must be non-empty.');
+          return;
+        }
+        await this.secrets.store(secretKeyFor(name), value);
+        const index = await this.readKeyIndex();
+        if (!index.includes(name)) {
+          index.push(name);
+          await this.globalState.update(KEYS_INDEX_KEY, index);
+        }
+        await this.globalState.update(keyAddedAtMsKey(name), Date.now());
+        appendAuditEvent({
+          ts: Date.now(),
+          kind: 'key.access',
+          detail: { op: 'add', name },
+          worktree: 'permissions-audit',
+        });
+        await this.postKeysList();
+        return;
+      }
+      case 'keys.delete': {
+        if (!this.secrets) return;
+        const name = typeof msg.keyName === 'string' ? msg.keyName.trim() : '';
+        if (!name || !/^[A-Z0-9_]{1,64}$/.test(name)) return;
+        await this.secrets.delete(secretKeyFor(name));
+        const index = (await this.readKeyIndex()).filter((k) => k !== name);
+        await this.globalState.update(KEYS_INDEX_KEY, index);
+        await this.globalState.update(keyAddedAtMsKey(name), undefined);
+        appendAuditEvent({
+          ts: Date.now(),
+          kind: 'key.access',
+          detail: { op: 'delete', name },
+          worktree: 'permissions-audit',
+        });
+        await this.postKeysList();
+        return;
+      }
+      case 'keys.list': {
+        await this.postKeysList();
+        return;
+      }
+    }
+  }
+
+  // permissions-audit: name + last-added timestamp ONLY. Values are never sent
+  // to the webview — they live in SecretStorage and stay there.
+  private async postKeysList(): Promise<void> {
+    const names = await this.readKeyIndex();
+    const items = names.map((name) => ({
+      name,
+      addedAtMs: this.globalState.get<number>(keyAddedAtMsKey(name)) ?? 0,
+    }));
+    this.view?.webview.postMessage({ type: 'keys.payload', keys: items });
+  }
+
+  private async readKeyIndex(): Promise<string[]> {
+    const raw = this.globalState.get<unknown>(KEYS_INDEX_KEY, []);
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((x): x is string => typeof x === 'string' && /^[A-Z0-9_]{1,64}$/.test(x));
+  }
+
+  private async exportAuditLog(): Promise<void> {
+    const tail = readAuditTail(10000);
+    const ndjson = tail.map((e) => JSON.stringify(e)).join('\n');
+    const target = await vscode.window.showSaveDialog({
+      title: 'Export Cockpit audit log',
+      defaultUri: vscode.Uri.file(path.join(os.homedir(), 'cockpit-audit.ndjson')),
+      filters: { 'NDJSON': ['ndjson', 'jsonl'], 'All files': ['*'] },
+    });
+    if (!target) return;
+    try {
+      fs.writeFileSync(target.fsPath, ndjson, 'utf8');
+      void vscode.window.showInformationMessage(`Exported ${tail.length} audit events.`);
+    } catch (err) {
+      logger.warn(`audit.export failed: ${String(err)}`);
+      void vscode.window.showErrorMessage(`Audit export failed: ${String(err)}`);
     }
   }
 
