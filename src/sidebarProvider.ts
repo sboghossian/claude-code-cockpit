@@ -60,6 +60,13 @@ import {
   readAuditTail,
   searchAudit,
 } from './auditLog';
+import {
+  formatShareManifest,
+  installFromUrl,
+  listGalleryItems,
+  previewInstall,
+  validateInstallUrl,
+} from './gallery';
 
 interface InboundMessage {
   type:
@@ -123,7 +130,14 @@ interface InboundMessage {
     | 'audit.openLog'
     | 'keys.add'
     | 'keys.delete'
-    | 'keys.list';
+    | 'keys.list'
+    // === skill-gallery (Phase 1) ===
+    | 'gallery.openLocal'
+    | 'gallery.share'
+    | 'gallery.openItem'
+    | 'gallery.installPreview'
+    | 'gallery.installConfirm'
+    | 'gallery.openPublishIssue';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -160,6 +174,10 @@ interface InboundMessage {
   auditTailN?: number;
   keyName?: string;
   keyValue?: string;
+  // === skill-gallery payloads ===
+  galleryId?: string;
+  galleryUrl?: string;
+  gallerySha256?: string;
 }
 
 type CockpitTheme = 'auto' | 'dark' | 'light' | 'high-contrast';
@@ -599,6 +617,13 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
    *  "Refresh graph" button (graph.refresh inbound message). */
   requestGraphRefresh(): void {
     void this.refreshGraph(undefined);
+  }
+
+  /** Triggered by the `claudeCockpit.gallery.installFromUrl` command. Routes
+   *  through the same preview path the webview uses, so the user sees the
+   *  SHA256 + 1KB excerpt before any disk write. */
+  previewGalleryInstall(url: string): void {
+    void this.handle({ type: 'gallery.installPreview', galleryUrl: url });
   }
 
   runSearch(query: string): void {
@@ -1228,6 +1253,115 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       }
       case 'keys.list': {
         await this.postKeysList();
+        return;
+      }
+      // === skill-gallery (Phase 1) ===
+      case 'gallery.openLocal': {
+        try {
+          const items = listGalleryItems(cwd);
+          this.view?.webview.postMessage({ type: 'gallery.localItems', items });
+        } catch (err) {
+          this.view?.webview.postMessage({
+            type: 'gallery.localError',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case 'gallery.share': {
+        if (!msg.galleryId) return;
+        const items = listGalleryItems(cwd);
+        const item = items.find((i) => i.id === msg.galleryId);
+        if (!item) {
+          void vscode.window.showWarningMessage(`Gallery item not found: ${msg.galleryId}`);
+          return;
+        }
+        try {
+          const payload = formatShareManifest(item);
+          await vscode.env.clipboard.writeText(payload.text);
+          void vscode.window.setStatusBarMessage(
+            `Copied ${item.name} share manifest`,
+            2500,
+          );
+        } catch (err) {
+          void vscode.window.showErrorMessage(
+            `Gallery share failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        return;
+      }
+      case 'gallery.openItem': {
+        if (!msg.galleryId) return;
+        const items = listGalleryItems(cwd);
+        const item = items.find((i) => i.id === msg.galleryId);
+        if (!item) return;
+        void vscode.window.showTextDocument(vscode.Uri.file(item.filePath));
+        return;
+      }
+      case 'gallery.installPreview': {
+        const u = msg.galleryUrl ?? '';
+        const validation = validateInstallUrl(u);
+        if (!validation.ok) {
+          this.view?.webview.postMessage({
+            type: 'gallery.installPreview',
+            error: validation.reason,
+          });
+          return;
+        }
+        try {
+          const preview = await previewInstall(validation.href);
+          this.view?.webview.postMessage({ type: 'gallery.installPreview', preview });
+        } catch (err) {
+          this.view?.webview.postMessage({
+            type: 'gallery.installPreview',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case 'gallery.installConfirm': {
+        if (!msg.galleryUrl || !msg.gallerySha256) return;
+        const choice = await vscode.window.showWarningMessage(
+          `Install skill from ${msg.galleryUrl}?\n\nThis writes to ~/.claude/skills/. Cockpit verifies the SHA256 you saw in the preview matches the bytes it actually receives.`,
+          { modal: true },
+          'Install',
+        );
+        if (choice !== 'Install') {
+          this.view?.webview.postMessage({
+            type: 'gallery.installResult',
+            error: 'User cancelled',
+          });
+          return;
+        }
+        try {
+          const result = await installFromUrl({
+            url: msg.galleryUrl,
+            expectedSha256: msg.gallerySha256,
+          });
+          this.view?.webview.postMessage({
+            type: 'gallery.installResult',
+            filePath: result.filePath,
+            sha256: result.sha256,
+            inferredName: result.inferredName,
+          });
+          this.refresh();
+          void vscode.window.showInformationMessage(
+            `Installed skill: ${result.inferredName}`,
+          );
+        } catch (err) {
+          this.view?.webview.postMessage({
+            type: 'gallery.installResult',
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      case 'gallery.openPublishIssue': {
+        void vscode.env.openExternal(
+          vscode.Uri.parse(
+            'https://github.com/sboghossian/cockpit-skills/issues/new?template=publish-skill.md',
+          ),
+        );
         return;
       }
     }

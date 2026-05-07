@@ -3510,6 +3510,12 @@
     // can read this getter; we don't push a stream of events because the
     // global 'message' bus already broadcasts every snapshot.
     window.cockpit.getLastSnapshot = () => lastSnapshot;
+    // Sibling scripts can't call acquireVsCodeApi() a second time; expose a
+    // proxy. Read-only — siblings can post messages and request a re-render
+    // but cannot mutate sidebar.js state directly.
+    window.cockpit.postMessage = (m) => vscode.postMessage(m);
+    window.cockpit.getSnapshot = () => lastSnapshot;
+    window.cockpit.requestRender = () => { if (lastSnapshot) render(lastSnapshot); };
   }
 
   // Fragments used as components but not standalone sections — they get
@@ -3619,6 +3625,7 @@
     security:   ['securityFull'],
     help:       ['helpDoc'],
     self:       ['selfTelemetry'],
+    gallery:    ['galleryGrid', 'galleryShareCard'],
   };
 
   // Inline SVG icons for the primary tab bar. Stroke-only, 14×14, currentColor
@@ -3645,6 +3652,7 @@
     welcome:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/></svg>',
     custom:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 7.6c.4-.4.4-1 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L14 7v3h3l2.4-2.4z"/><path d="M14 10l-9 9v3h3l9-9"/><path d="M9 4H5a2 2 0 0 0-2 2v4"/></svg>',
     help:       '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    gallery:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
   };
 
   function tabCatalogue(snap) {
@@ -3676,8 +3684,15 @@
       { id: 'talk',       label: 'Talk',                                                              pinned: false, requiresCwd: false, hint: 'Voice + text → Claude. Particle visualization reacts to your voice.' },
       { id: 'security',   label: secLabel(snap),                                                      pinned: false, requiresCwd: false, hint: 'Local secret scan, .env audit, MCP credential check, /cso launcher' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
+      { id: 'gallery',    label: galleryLabel(snap),                                                  pinned: false, requiresCwd: false, hint: 'Browse local skills + agents. Share via clipboard. Install by HTTPS URL.' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
+  }
+
+  function galleryLabel(snap) {
+    const g = snap && snap.gallery;
+    if (!g || typeof g.totalCount !== 'number') return 'Gallery';
+    return `Gallery (${g.totalCount})`;
   }
 
   // Tab merges remap old IDs onto new ones so persisted enabledTabs still

@@ -20,6 +20,7 @@ import {
   SessionDigest,
 } from './obsidian';
 import { startAppUsageTracker } from './appUsage';
+import { activateGallery } from './gallery';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
 import { setAuditEnabled } from './auditLog';
@@ -33,6 +34,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // touches it.
   registerSidebarScript('media/vendor/d3.min.js');
   registerSidebarScript('media/sidebar.graph.js');
+  // Phase-1 worktrees register their widgets / tabs via the plugin API BEFORE
+  // the webview provider mounts; activation order matters so listSidebarScripts()
+  // returns the gallery sibling script when html() runs.
+  activateGallery();
   const status = createStatusBar();
 
   function readBudgetConfig(): BudgetConfig {
@@ -260,6 +265,31 @@ export function activate(context: vscode.ExtensionContext): void {
         setAuditEnabled(v);
         provider.refresh();
       }
+    }),
+  );
+
+  // === skill-gallery (Phase 1) ===
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.gallery.openTab', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('gallery');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.gallery.installFromUrl', async () => {
+      const url = await vscode.window.showInputBox({
+        prompt: 'Public HTTPS URL to a SKILL.md (GitHub raw or registry mirror)',
+        placeHolder: 'https://raw.githubusercontent.com/.../SKILL.md',
+        validateInput: (v) => {
+          if (!v) return 'URL is required';
+          if (!/^https:\/\//.test(v)) return 'Only https:// URLs are accepted';
+          return null;
+        },
+      });
+      if (!url) return;
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('gallery');
+      provider.previewGalleryInstall(url);
     }),
   );
 
