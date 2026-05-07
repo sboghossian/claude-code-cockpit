@@ -2,6 +2,23 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — feat/launch-onboarding-sandbox
+
+### Added
+
+- **Tutorial tab + recommendation cards (`media/sidebar.tutorial.js`)** — Phase 2 of the v1.0 launch wave. New `Tutorial` tab (registered via the Phase-0 plugin bridge, never edits the COMPONENTS literal) hosts two widgets: `tutorialRecs` re-renders every entry in `snap.recommendations` as an actionable card (impact-coloured left border, "Try it" + "Dismiss" buttons), and `tutorialNudges` synthesizes prompt-pattern suggestions from the existing `minePrompts` output ("You ran `/qa` 4 times — try `/qa --report-only` first"). Dismissed ids live in an in-memory Set on the provider so the user never re-sees the same nudge in a session, but they reset across reloads (no persisted nag list).
+- **First-run sandbox (`src/sandbox.ts`)** — synthesizes a fake project at `~/.claude/.cockpit/sandbox/demo-project/` with a `CLAUDE.md`, `README.md`, and a 30-event JSONL transcript that passes the existing `parseLine()` validator (every line carries `type`, `timestamp`, `sessionId`). Tour-mode flag lives in globalState; when on, the Welcome banner shows an "Exit demo" button and every webview render injects a `SANDBOX` pill at the top of the active tab so the user never forgets the cockpit is showing synthetic data. The whole `~/.claude/.cockpit/sandbox/` tree is self-contained — `Exit demo` `rm -rf`'s it; rolling back the feature leaves zero residue.
+- **Desktop notifications (`src/notifications.ts`)** — central `notify()` helper wrapping `vscode.window.showInformationMessage` / `showWarningMessage` with a 30 s per-key debounce window. Three triggers wired into `CockpitSidebarProvider.evaluateNotifications()` (called after every snapshot push): pending approvals 0 → ≥ 1, audit `tool.invoke` events with `outcome: 'blocked'` newer than the last seen one, and today's spend crossing 80 % of `claudeCockpit.budget.dailyCapUsd`. Each fires at most once per debounce window per key. The new setting `claudeCockpit.notifications.enabled` (default `true`) gates the entire surface — when off, every `notify()` call is a synchronous no-op.
+- **Status bar widget extensions (`src/statusBar.ts`)** — three new `StatusBarItem`s alongside the existing cwd + token + files items: pending-approval badge (clickable → opens the Approval queue), audit-events-this-24h pill (clickable → opens Security tab), and a Talk launcher (clickable → opens Talk tab). All three hide when their underlying signal is empty, so the bar stays uncluttered for users without active approvals or audit events.
+- **Six new commands** — `claudeCockpit.tutorial.open`, `claudeCockpit.sandbox.start`, `claudeCockpit.sandbox.exit`, `claudeCockpit.audit.open`, `claudeCockpit.talk.open`, `claudeCockpit.notifications.test`.
+- **Snapshot extension** — `CockpitSnapshot.sandbox?: { active, projectRoot, sessionFile, sessionId }` (all optional). Drives the SANDBOX banner and the Exit-demo button. Field is undefined-safe — every existing tab renders byte-identical when the sandbox is off.
+
+### Notes
+
+- The brief's third sandbox trigger ("agent finishing") is a passthrough helper exported as `notifyAgentFinished` but not yet auto-fired — Cockpit doesn't observe agent lifecycle events directly today; that's a v1.1 hook story. The helper is in place so Phase-3 worktrees can import it.
+- 13 new tests: `test/sandbox.test.js` (3, JSONL shape + idempotency + teardown), `test/notifications.test.js` (4, debounce + window + level + settings gate), `test/statusBar.test.js` (3, approval count rendering + hide-on-undefined + audit dot), `test/tutorial.test.js` (3, recommendation ordering + dismissal filter + minePrompts shape).
+- The `package.json` `scripts.test` block had three duplicate `test` keys from the parallel-worktree merge wave — consolidated into one entry that runs every `*.test.js` file. `npm test` now reports 198 tests / 191 pass / 7 fail (the 7 failures are pre-existing flakes in `claudeData.test.js` sensitive to the developer's real `~/.claude/projects/` state; not introduced by this worktree).
+
 ## [Unreleased] — Plugin API foundation + Approval queue
 
 ### Added

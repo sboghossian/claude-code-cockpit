@@ -206,6 +206,30 @@
       {
         "command": "claudeCockpit.replay.exportDiff",
         "title": "Claude Cockpit: Reveal Replay Forks Folder"
+      },
+      {
+        "command": "claudeCockpit.tutorial.open",
+        "title": "Claude Cockpit: Open Tutorial"
+      },
+      {
+        "command": "claudeCockpit.sandbox.start",
+        "title": "Claude Cockpit: Start 3-min Sandbox Demo"
+      },
+      {
+        "command": "claudeCockpit.sandbox.exit",
+        "title": "Claude Cockpit: Exit Sandbox Demo"
+      },
+      {
+        "command": "claudeCockpit.audit.open",
+        "title": "Claude Cockpit: Open Audit (Security tab)"
+      },
+      {
+        "command": "claudeCockpit.talk.open",
+        "title": "Claude Cockpit: Open Talk"
+      },
+      {
+        "command": "claudeCockpit.notifications.test",
+        "title": "Claude Cockpit: Test Notification"
       }
     ],
     "keybindings": [
@@ -381,6 +405,11 @@
           "minimum": 100,
           "maximum": 50000,
           "description": "Maximum events the Replay tab loads per session. Larger values give finer scrub granularity but cost more memory + CPU on initial parse. Above 5000 the scrubber uniformly samples to keep the slider responsive."
+        },
+        "claudeCockpit.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show desktop notifications when the approval queue gets new entries (0 → 1), an audit event is blocked, or today's spend crosses 80% of the daily cap. Each notification is debounced 30s per key."
         }
       }
     },
@@ -397,9 +426,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/replay.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js test/replay.test.js test/gallery.test.js test/graph.test.js test/tabLayout.test.js test/sandbox.test.js test/notifications.test.js test/statusBar.test.js test/tutorial.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

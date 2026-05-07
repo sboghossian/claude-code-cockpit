@@ -32,6 +32,63 @@ import {
   registerWidget,
 } from './plugin';
 import { forksDir } from './replay';
+import { notify } from './notifications';
+
+function registerOnboardingSandboxSurface(): void {
+  // Phase-2 feat/launch-onboarding-sandbox. Registers the Tutorial tab + the
+  // two widgets surfaced by media/sidebar.tutorial.js (tutorialRecs +
+  // tutorialNudges). The sandbox itself doesn't need a tab — it's a tour-mode
+  // overlay rendered inline in Welcome + on the Tutorial tab via the
+  // sandbox-banner snippet.
+  try {
+    registerSidebarScript('media/sidebar.tutorial.js');
+    registerWidget({
+      id: 'tutorialRecs',
+      label: 'Tutorial · Try this',
+      category: 'Now',
+      requiresCwd: false,
+    });
+    registerWidget({
+      id: 'tutorialNudges',
+      label: 'Tutorial · Patterns',
+      category: 'Now',
+      requiresCwd: false,
+    });
+    registerTab({
+      id: 'tutorial',
+      label: 'Tutorial',
+      requiresCwd: false,
+      hint: 'History-based recommendations + pattern nudges from your real prompts.',
+      defaultWidgets: ['tutorialRecs', 'tutorialNudges'],
+    });
+    registerTrigger({
+      command: 'claudeCockpit.tutorial.open',
+      title: 'Claude Cockpit: Open Tutorial',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.sandbox.start',
+      title: 'Claude Cockpit: Start 3-min Sandbox Demo',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.sandbox.exit',
+      title: 'Claude Cockpit: Exit Sandbox Demo',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.audit.open',
+      title: 'Claude Cockpit: Open Audit (Security tab)',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.talk.open',
+      title: 'Claude Cockpit: Open Talk',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.notifications.test',
+      title: 'Claude Cockpit: Test Notification',
+    });
+  } catch (err) {
+    logger.warn(`onboarding-sandbox: registration failed: ${String(err)}`);
+  }
+}
 
 function registerReplaySurface(): void {
   // Phase-1 feat/launch-replay-timeline. Registers the Replay tab + the three
@@ -92,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // returns the gallery sibling script when html() runs.
   activateGallery();
   registerReplaySurface();
+  registerOnboardingSandboxSurface();
   const status = createStatusBar();
 
   function readBudgetConfig(): BudgetConfig {
@@ -451,6 +509,46 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       provider.handleHostMessage({ type: 'approval.rollback', approvalId: id });
+    }),
+  );
+
+  // === onboarding-sandbox: command palette entries. ===
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.tutorial.open', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('tutorial');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.sandbox.start', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.handleHostMessage({ type: 'sandbox.start' });
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.sandbox.exit', () => {
+      provider.handleHostMessage({ type: 'sandbox.exit' });
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.audit.open', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('security');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.talk.open', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('talk');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.notifications.test', () => {
+      void notify({
+        key: 'cockpit.notifications.test',
+        level: 'info',
+        message: 'Cockpit notifications are working.',
+      });
     }),
   );
 
