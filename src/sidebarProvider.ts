@@ -27,6 +27,12 @@ import {
   queuePath as approvalQueuePath,
 } from './approvalQueue';
 import type { WorktreeAction } from './plugin';
+import {
+  buildReplayIndex,
+  diffSessionRange,
+  forkSession,
+  loadReplayPayload,
+} from './replay';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 import { getOrBuildGraph, VaultGraph } from './graph';
 import {
@@ -164,7 +170,13 @@ interface InboundMessage {
     | 'approval.openSnapshotDir'
     | 'approval.bulkApprove'
     | 'approval.bulkReject'
-    | 'approval.enqueueDemo';
+    | 'approval.enqueueDemo'
+    // === replay-timeline ===
+    | 'replay.loadSession'
+    | 'replay.scrubTo'
+    | 'replay.fork'
+    | 'replay.exportDiff'
+    | 'cost.checkBudget';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -216,6 +228,15 @@ interface InboundMessage {
   approvalNote?: string;
   approvalForce?: boolean;
   approvalDemoFiles?: string[];
+  // === replay-timeline ===
+  /** Active session JSONL path; replay messages target a specific file. */
+  replaySessionFile?: string;
+  /** Scrub index into the parsed event list. */
+  replayIndex?: number;
+  /** Second scrub index for `replay.exportDiff`. */
+  replayIndexB?: number;
+  /** When provided, fork includes only events through this index. */
+  replayForkAtIndex?: number;
 }
 
 /**
@@ -676,8 +697,13 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       diskUsageBytes: snap.diskUsageBytes,
       cwd: snap.cwd,
     });
+    // Replay index — Phase-1 feat/launch-replay-timeline. Lazy-built; cached
+    // by sessionFile + mtime + size in src/sessionDiff.ts so this is cheap on
+    // every refresh (parse only when JSONL grew).
+    const replayIndex = buildReplayIndex(snap.localLayout.activeSessionFile);
     const payload = {
       ...snap,
+      replayIndex,
       recommendations,
       prompts,
       pinnedMemory,
@@ -1926,6 +1952,86 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         this.refresh();
         return;
       }
+      // === replay-timeline ============================================
+      case 'replay.loadSession': {
+        const file = msg.replaySessionFile ?? this.activeSessionFileFor(cwd);
+        if (!file) return;
+        const cfg = vscode.workspace.getConfiguration('claudeCockpit');
+        const max = cfg.get<number>('replay.maxEventsPerSession', 5000);
+        const budget = this.readBudgetConfig();
+        const today = snapshot(cwd, budget, false).today.totalUsd;
+        const payload = loadReplayPayload(
+          file,
+          max,
+          budget.dailyCapUsd,
+          today,
+        );
+        this.view?.webview.postMessage({ type: 'replay.session', payload });
+        return;
+      }
+      case 'replay.scrubTo': {
+        // Echo back so the webview can re-render its scrubber state in
+        // response to host-driven scrubs (e.g. command palette → "scrub to
+        // last edit"). Default scrubbing is webview-local, no-op here.
+        const file = msg.replaySessionFile ?? this.activeSessionFileFor(cwd);
+        if (!file || typeof msg.replayIndex !== 'number') return;
+        this.view?.webview.postMessage({
+          type: 'replay.scrubAck',
+          sessionFile: file,
+          index: msg.replayIndex,
+        });
+        return;
+      }
+      case 'replay.fork': {
+        const file = msg.replaySessionFile ?? this.activeSessionFileFor(cwd);
+        const at = msg.replayForkAtIndex;
+        if (!file || typeof at !== 'number') return;
+        const result = forkSession(file, at);
+        if (result.ok && result.forkPath) {
+          void vscode.window.showInformationMessage(
+            `Cockpit: forked session at event ${at} → ${result.forkPath} (${result.lineCount} lines)`,
+            'Open',
+          ).then((choice) => {
+            if (choice === 'Open' && result.forkPath) {
+              void vscode.window.showTextDocument(vscode.Uri.file(result.forkPath));
+            }
+          });
+        } else {
+          void vscode.window.showErrorMessage(`Cockpit: fork failed — ${result.error ?? 'unknown error'}`);
+        }
+        this.view?.webview.postMessage({ type: 'replay.forkResult', result });
+        return;
+      }
+      case 'replay.exportDiff': {
+        const file = msg.replaySessionFile ?? this.activeSessionFileFor(cwd);
+        const a = msg.replayIndex;
+        const b = msg.replayIndexB;
+        if (!file || typeof a !== 'number' || typeof b !== 'number') return;
+        const diffs = diffSessionRange(file, a, b);
+        this.view?.webview.postMessage({
+          type: 'replay.diff',
+          sessionFile: file,
+          indexA: a,
+          indexB: b,
+          diffs,
+        });
+        return;
+      }
+      case 'cost.checkBudget': {
+        // Cheap host-side check: re-derive today's spend + the daily cap, and
+        // tell the webview whether to surface a warning banner. The actual
+        // banner UX lives in media/sidebar.replay.js — this keeps the host
+        // as the source of truth for budget config.
+        const budget = this.readBudgetConfig();
+        const snap = snapshot(cwd, budget, false);
+        this.view?.webview.postMessage({
+          type: 'cost.budgetStatus',
+          dailyCapUsd: budget.dailyCapUsd,
+          spentTodayUsd: snap.today.totalUsd,
+          willWarn: budget.dailyCapUsd > 0 && snap.today.totalUsd >= budget.dailyCapUsd,
+        });
+        return;
+      }
     }
   }
 
@@ -2046,6 +2152,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     this.popoutPanel = panel;
     // Kick a fresh snapshot so the panel doesn't sit on "Loading…".
     this.refresh();
+  }
+
+  private activeSessionFileFor(cwd: string | undefined): string | undefined {
+    const snap = snapshot(cwd, this.readBudgetConfig(), false);
+    return snap.localLayout.activeSessionFile;
   }
 
   private openLatestJsonlInDir(dir: string): void {

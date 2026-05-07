@@ -253,6 +253,18 @@ export interface CockpitSnapshot {
 /**
  * Mirror of replay.ReplayIndex, declared here to keep claudeData.ts free of
  * upward imports. Wire-compatible with replay.ReplayIndex by shape.
+  // === replay-timeline ===
+  // Lightweight, postMessage-friendly index of the active session JSONL. The
+  // full event list + per-step file diffs are pulled lazily via the
+  // `replay.loadSession` message — this keeps the snapshot under 100KB even
+  // for 10k-event sessions.
+  replayIndex?: ReplayIndexSnapshot;
+}
+
+/**
+ * Replay snapshot — wire-compatible with replay.ReplayIndex by shape.
+ * Declared here (not imported from ./replay) to keep claudeData.ts free of
+ * any upward dependency on the replay module.
  */
 export interface ReplayIndexSnapshot {
   available: boolean;

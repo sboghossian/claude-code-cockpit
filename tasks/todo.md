@@ -518,3 +518,32 @@ v1.1 will ship a stock hook that round-trips through the queue and blocks until 
 - [x] No autonomous multi-step LLM action: queue is observe + revert; humans decide.
 - [x] Enforcement (blocking PreToolUse) deferred to v1.1.
 
+## v1.0 — replay-timeline
+
+Phase 1 of the v1.0 launch wave. Differentiation feature ("watch competitors don't have"): scrub backwards through any Claude session, see exactly what changed at each step, replay or fork from any point. Subsumes feature #3 — extends the existing Now-tab cost rollups with daily-cap projection + warning banner before expensive next steps.
+
+### Plan
+
+- [x] `src/sessionDiff.ts` — tolerant JSONL parser (skips truncated last line, drops single corrupt entries), per-step `ReplayEvent` model, `reconstructFileAt(events, filePath, upToIndex)`, `diffBetween(events, indexA, indexB)`, line-level LCS unified-diff emitter, parse cache keyed by `(sessionFile, mtime, size)` so repeated renders never re-read the JSONL
+- [x] `src/replay.ts` — `buildReplayIndex(sessionFile)` for snapshot-time previews, `loadReplayPayload(sessionFile, max, dailyCap, spentToday)` for the on-demand Replay tab payload, `forkSession(sessionFile, atIndex)` writes prefix into `~/.claude/.cockpit/forks/`, `projectCost(events, dailyCap, spentToday)` over the next 50 events with `willHitDailyCap` flag
+- [x] `media/sidebar.replay.js` — registers `replayScrubber`, `replayDiff`, `replayCostProjection` via `window.cockpit.registerComponent`; lazy-loads full event list on first Replay tab render; rerenders in-place on `replay.session` / `replay.diff` host messages
+- [x] `media/sidebar.css` — `.cockpit-replay-*` and `.cockpit-cost-*` styles appended (no global selectors changed)
+- [x] `media/sidebar.js` — replay tab in `DEFAULT_TAB_COMPOSITIONS`, `TAB_ICONS`, and `tabCatalogue()`
+- [x] `src/sidebarProvider.ts` — message types `replay.loadSession | replay.scrubTo | replay.fork | replay.exportDiff | cost.checkBudget` appended in named block; matching handler cases at end of switch; `replayIndex` folded onto the snapshot payload via `buildReplayIndex(snap.localLayout.activeSessionFile)`
+- [x] `src/extension.ts` — `registerSidebarScript('media/sidebar.replay.js')` + tab + 3 widgets registered through the Phase-0 plugin API; two new commands wired (`claudeCockpit.replay.openCurrent`, `claudeCockpit.replay.exportDiff`)
+- [x] `src/claudeData.ts` — `replayIndex?: ReplayIndexSnapshot` declared on `CockpitSnapshot` (optional; populated outside `snapshotInner` to avoid the import cycle)
+- [x] `package.json` — 2 new commands + 1 new setting `claudeCockpit.replay.maxEventsPerSession` (default 5000, min 100, max 50000)
+- [x] Tests: `test/replay.test.js` (5 sessionDiff cases — single-edit, MultiEdit ordering, write-then-edit, conflicting writes, malformed line — plus fork creation and cost-projection budget warning); `test/fixtures/replay.jsonl`
+- [x] `npm test` 61/61 (47 baseline + 5 plugin + 7 replay + 2 plugin-api duplicates) green
+- [x] `npm run compile` clean under TypeScript strict (no `any`)
+- [x] `node --check media/sidebar.js` clean
+- [x] `node --check media/sidebar.replay.js` clean
+- [x] CHANGELOG `[Unreleased]` entry appended
+- [x] No edits to `COMPONENTS` literal contents (registered via Phase-0 bridge)
+- [x] No edits to pricing constants / model-family map / COST tables (load-bearing for existing Now/budget tabs)
+
+### Open questions / scope ambiguities
+
+- **Fork semantics.** Claude Code's session loader walks `~/.claude/projects/<encoded-cwd>/` only — it does NOT auto-discover `~/.claude/.cockpit/forks/`. So `replay.fork` is currently an EXPORT, not a Claude Code session handoff. Faithful prefix the user can audit, share, or `cp` into their project dir under a fresh uuid. If Claude Code grows a `--resume <path>` flag (or honors a session-id alias dir), we drop a one-liner. Documented in `CHANGELOG.md` and the in-tab toast.
+- **Diff cache invalidation.** Cache key is `(sessionFile, mtime, size)`. JSONL is append-only so when mtime advances we re-parse the whole file from scratch (LRU-evicting at 32 entries). Future optimization: tail-append parse — skip lines we already have. Skipped for v1.
+- **Replay event sampling.** Above `claudeCockpit.replay.maxEventsPerSession` (default 5000) we sample uniformly so the slider stays usable. The full event list is still parseable via `getCachedSession` host-side; only the postMessage payload is sampled.

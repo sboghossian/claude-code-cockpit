@@ -24,7 +24,59 @@ import { activateGallery } from './gallery';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
 import { setAuditEnabled } from './auditLog';
-import { registerSidebarScript, registerSidebarStyle } from './plugin';
+import {
+  registerSidebarScript,
+  registerSidebarStyle,
+  registerTab,
+  registerTrigger,
+  registerWidget,
+} from './plugin';
+import { forksDir } from './replay';
+
+function registerReplaySurface(): void {
+  // Phase-1 feat/launch-replay-timeline. Registers the Replay tab + the three
+  // widgets (replayScrubber, replayDiff, replayCostProjection) by name in the
+  // plugin registry; rendering happens in media/sidebar.replay.js (via the
+  // EXTERNAL_COMPONENTS bridge in media/sidebar.js).
+  try {
+    registerSidebarScript('media/sidebar.replay.js');
+    registerWidget({
+      id: 'replayScrubber',
+      label: 'Replay · scrubber',
+      category: 'Replay',
+      requiresCwd: true,
+    });
+    registerWidget({
+      id: 'replayDiff',
+      label: 'Replay · diff',
+      category: 'Replay',
+      requiresCwd: true,
+    });
+    registerWidget({
+      id: 'replayCostProjection',
+      label: 'Cost projection',
+      category: 'Replay',
+      requiresCwd: true,
+    });
+    registerTab({
+      id: 'replay',
+      label: 'Replay',
+      requiresCwd: true,
+      hint: 'Scrub backwards through your active session — see what changed at each step, fork from any point.',
+      defaultWidgets: ['replayScrubber', 'replayDiff'],
+    });
+    registerTrigger({
+      command: 'claudeCockpit.replay.openCurrent',
+      title: 'Claude Cockpit: Open Replay (active session)',
+    });
+    registerTrigger({
+      command: 'claudeCockpit.replay.exportDiff',
+      title: 'Claude Cockpit: Export Replay Diff',
+    });
+  } catch (err) {
+    logger.warn(`replay: registration failed: ${String(err)}`);
+  }
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   logger.info('claude-cockpit activating');
@@ -39,6 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // the webview provider mounts; activation order matters so listSidebarScripts()
   // returns the gallery sibling script when html() runs.
   activateGallery();
+  registerReplaySurface();
   const status = createStatusBar();
 
   function readBudgetConfig(): BudgetConfig {
@@ -329,6 +382,23 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.commands.registerCommand(`claudeCockpit.tab.${i}`, () => provider.jumpToTabIndex(idx)),
     );
   }
+  // === replay-timeline =====================================================
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.replay.openCurrent', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('replay');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.replay.exportDiff', () => {
+      // Reveals the forks dir; the user picks a fork or the live JSONL and
+      // the in-tab "Export Diff" button (registered in sidebar.replay.js)
+      // takes care of the rest. Surfacing the dir lets users discover prior
+      // forks even when the tab isn't open.
+      const dir = forksDir();
+      void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
+    }),
+  );
 
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   status.update(snapshot(cwd, readBudgetConfig()));

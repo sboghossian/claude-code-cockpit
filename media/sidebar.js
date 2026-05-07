@@ -3652,6 +3652,8 @@
     gallery:    ['galleryGrid', 'galleryShareCard'],
     // === approval-queue ===
     approval:   ['approvalQueue', 'approvalDetail'],
+    // === replay-timeline ===
+    replay:     ['replayScrubber', 'replayDiff', 'replayCostProjection'],
   };
 
   // Inline SVG icons for the primary tab bar. Stroke-only, 14×14, currentColor
@@ -3681,6 +3683,8 @@
     gallery:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
     // === approval-queue: stroke-only checkmark-in-shield. ===
     approval:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><polyline points="9 12 11 14 15 10"/></svg>',
+    // === replay-timeline === (rewind / scrubber glyph)
+    replay:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',
   };
 
   function tabCatalogue(snap) {
@@ -3715,6 +3719,8 @@
       { id: 'gallery',    label: galleryLabel(snap),                                                  pinned: false, requiresCwd: false, hint: 'Browse local skills + agents. Share via clipboard. Install by HTTPS URL.' },
       // === approval-queue ===
       { id: 'approval',   label: approvalTabLabel(snap),                                              pinned: false, requiresCwd: false, hint: 'Pending Claude actions awaiting human approval. Snapshot + revert per entry.' },
+      // === replay-timeline ===
+      { id: 'replay',     label: replayLabel(snap),                                                   pinned: false, requiresCwd: true,  hint: 'Scrub backwards through your active session — see exactly what changed at each step, fork from any point.' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
   }
@@ -3732,6 +3738,15 @@
     const counts = (snap && snap.approvalCounts) || { pending: 0, recent: 0 };
     if (counts.pending > 0) return `Approve (${counts.pending})`;
     return 'Approve';
+  }
+
+  // === replay-timeline === Tab label includes the event count when known.
+  function replayLabel(snap) {
+    const idx = snap && snap.replayIndex;
+    if (idx && idx.available && idx.totalEvents > 0) {
+      return 'Replay (' + idx.totalEvents + ')';
+    }
+    return 'Replay';
   }
 
   // Tab merges remap old IDs onto new ones so persisted enabledTabs still
