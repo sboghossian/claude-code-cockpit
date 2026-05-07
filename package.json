@@ -230,6 +230,14 @@
       {
         "command": "claudeCockpit.notifications.test",
         "title": "Claude Cockpit: Test Notification"
+      },
+      {
+        "command": "claudeCockpit.mobile.copyPath",
+        "title": "Claude Cockpit: Copy Mobile Public Queue Path"
+      },
+      {
+        "command": "claudeCockpit.mobile.openSetup",
+        "title": "Claude Cockpit: Open Mobile Companion Setup"
       }
     ],
     "keybindings": [
@@ -410,6 +418,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show desktop notifications when the approval queue gets new entries (0 → 1), an audit event is blocked, or today's spend crosses 80% of the daily cap. Each notification is debounced 30s per key."
+        },
+        "claudeCockpit.mobile.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Publish a SANITIZED, read-only snapshot of the approval queue to ~/.claude/.cockpit/queue.public.json so a phone can render it via your existing Cloudflare Tunnel + Cloudflare Access SSO. Cockpit makes ZERO outbound calls — you serve the file yourself. Default off. The published payload contains only: id, tool, ageSeconds, agentName (≤8 chars), expectedDiffBytes, status, fileCount. NO file paths, NO arguments, NO secrets. v1.0 is read-only; mobile-side approve lands in v1.1."
         }
       }
     },
@@ -427,6 +440,9 @@
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
     "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/replay.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/replay.test.js test/mobileExport.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

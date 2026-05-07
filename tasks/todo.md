@@ -585,3 +585,53 @@ Phase 1 of the v1.0 launch wave. Differentiation feature ("watch competitors don
 
 - **What is a "fake project"?** This was the genuinely-undefined corner of the brief. Three plausible answers: (a) a synthetic JSONL on disk + a sentinel CWD, surfaced through the existing snapshot pipeline (high blast radius — every consumer of the `cwd` pointer downstream needs to know about sandbox mode), (b) a synthetic JSONL on disk + a tour overlay banner that reads from the JSONL on demand without redirecting the active session (low blast radius, what we shipped), or (c) a full second `vscode.window.createWebviewPanel` running its own provider in sandbox mode (huge new surface). Picked (b) — the brief explicitly authorizes deferring "the SANDBOX (3-min Talk/agent demo)" to v1.1 in PLAN.md cut lines, so we hedged toward the safe variant that still demonstrates the cockpit on synthetic data.
 - **PreToolUse hook for the audit-blocked notification.** Today the notification only fires when an external process appends a `tool.invoke` event with `outcome: 'blocked'` to `~/.claude/.cockpit/audit.log`. Cockpit doesn't ship that hook itself — it observes the log. v1.1 will ship a stock hook recipe so the trigger is wired for users out of the box.
+## v1.0 — mobile-companion
+
+Phase 2 of the v1.0 launch wave. Lands LAST per master plan. Read-only mobile mirror of the approval queue at `cockpit.dashable.dev/mobile/`. Default OFF behind `claudeCockpit.mobile.enabled = false`. Cockpit makes ZERO outbound calls — the user serves the published file via their existing Cloudflare Tunnel + Cloudflare Access SSO (the same infra Stephane already runs for `roadmap.dashable.dev` etc.).
+
+### Plan
+
+- [x] `src/mobileExport.ts` — sanitizer (whitelisted fields only: `id`, `tool`, `ageSeconds`, `agentName` ≤8 chars, `expectedDiffBytes`, `status`, `fileCount`), atomic tmp+rename writer, `MobilePublisher` class with sha256 digest dedupe, `watchQueueAndPublish` lifecycle helper that fs.watches `~/.claude/.cockpit/queue.json` and re-publishes on change.
+- [x] `landing/mobile/index.html` — single-column setup screen + queue list + error state. Mobile-first viewport with `viewport-fit=cover` + Apple PWA meta tags.
+- [x] `landing/mobile/style.css` — `.cockpit-mobile-*` prefixed selectors (per master plan rule). 48px tap targets. Dark default with `prefers-color-scheme: light` override. Reduced-motion override.
+- [x] `landing/mobile/app.js` — vanilla JS (no framework). Polls every 5s when visible, pauses on `visibilitychange`. URL stored in localStorage on the phone only. `credentials: 'include'` to ride Cloudflare Access SSO. Stale warning > 15s. `createElement` for entries (no `innerHTML` for entry data → defence against any future field that lands as HTML by accident).
+- [x] `landing/mobile/README.md` — full architecture + setup walkthrough + auth model + rollback steps. Documents the v1.1 plan (mobile-side approve via second Cloudflare-Access-protected endpoint the desktop polls).
+- [x] `src/extension.ts` — wire `MobilePublisher` + queue-file watcher; register `claudeCockpit.mobile.copyPath` and `.openSetup` commands; subscribe to `onDidChangeConfiguration` so toggling the setting writes/clears the file immediately.
+- [x] `package.json` — 1 new setting `claudeCockpit.mobile.enabled` (boolean, default false), 2 new commands.
+- [x] Tests: `test/mobileExport.test.js` (8 cases — strip paths, truncate agent name, age math, 50-entry cap, atomic round-trip, digest dedupe, disable-clears-file, whitelist defence).
+- [x] `npm test` 130/130 green (114 baseline + 8 new + 8 from auditLog/snapshot/etc that were pulled in by the test list edit).
+- [x] `npm run compile` clean under TypeScript strict (no `any`).
+- [x] `node --check landing/mobile/app.js` clean.
+- [x] curl smoke test: all four assets serve 200 OK from `python3 -m http.server` rooted at `landing/`.
+- [x] CHANGELOG `[Unreleased]` entry appended.
+- [x] No edits to `media/sidebar.js`, `media/sidebar.css`, `src/sidebarProvider.ts`, or `src/claudeData.ts`. Mobile is fully isolated from the webview surface.
+
+### Architecture decision (read-only vs read-write)
+
+We chose **read-only** for v1.0 per the master plan's cut lines and the brief's explicit recommendation. Half the LeCun-gate value (the user knows pendings exist while away from desk) at zero authentication risk. A read-only endpoint can never authorize a destructive action even if Cloudflare Access misbehaves.
+
+v1.1 will add mobile-side approve via a SECOND Cloudflare-Access-protected endpoint (`decisions.public.json`) that the desktop polls. The mobile page POSTs decisions, the desktop reconciles. Cockpit STILL makes zero direct outbound calls — every hop is over the user's tunnel.
+
+### Open questions / scope ambiguities
+
+- **Authentication boundary.** Cloudflare Access SSO. There is no fallback "protect with a password" mode. Users without Cloudflare Access should leave the setting off. The setup README is loud about this.
+- **Stale data.** Phone polls every 5s; warns at 15s. Desktop debounces queue-file watcher at 250ms and only rewrites on content change (sha256 digest). Worst-case stale window is ~5.25s for a queue mutation to reach the phone, plus whatever the user's tunnel adds. Acceptable for "walk back to desk" UX.
+- **Deployment.** `landing/mobile/` is a sibling of `landing/index.html`. The existing Cloudflare Pages config auto-deploys both. No separate build step. Wrangler one-liner documented in the mobile README for manual deploys. The user does NOT need to redeploy the desktop extension to ship a mobile change — the static page ships independently.
+- **Telemetry hook.** Brief mentions emitting `mobile.enabled` to PostHog when the flag flips. NOT wired here because `feat/launch-telemetry-posthog` hasn't merged in this worktree (lands before us per the merge order, but I see the commit log and it isn't there yet — replay-timeline is the latest). Adding the emit is one line once `posthog.ts` exists; documenting the gap rather than ducktaping a stub.
+- **No webview surface.** Mobile-companion is the only Phase-2 worktree that doesn't touch `media/sidebar.js`, `src/sidebarProvider.ts`, or `src/claudeData.ts`. Less merge risk than expected.
+
+### Files touched
+
+NEW:
+- `src/mobileExport.ts` (~190 LOC)
+- `landing/mobile/index.html` (~70 LOC)
+- `landing/mobile/style.css` (~340 LOC)
+- `landing/mobile/app.js` (~270 LOC)
+- `landing/mobile/README.md` (~140 LOC)
+- `test/mobileExport.test.js` (~190 LOC)
+
+EDITED:
+- `src/extension.ts` — added imports, `MobilePublisher` activation block, two commands, config-change handler.
+- `package.json` — added 1 setting + 2 commands. Test file list updated to include mobileExport.test.js.
+- `CHANGELOG.md` — new `[Unreleased]` block at top.
+- `tasks/todo.md` — this section.

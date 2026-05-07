@@ -33,6 +33,8 @@ import {
 } from './plugin';
 import { forksDir } from './replay';
 import { notify } from './notifications';
+import { ApprovalQueueStore, queuePath as approvalQueuePath } from './approvalQueue';
+import { MobilePublisher, publicQueuePath, watchQueueAndPublish } from './mobileExport';
 
 function registerOnboardingSandboxSurface(): void {
   // Phase-2 feat/launch-onboarding-sandbox. Registers the Tutorial tab + the
@@ -549,6 +551,54 @@ export function activate(context: vscode.ExtensionContext): void {
         level: 'info',
         message: 'Cockpit notifications are working.',
       });
+    }),
+  );
+
+  // === mobile-companion (Phase 2) ==========================================
+  // Read-only mobile mirror of the approval queue. Default OFF behind
+  // `claudeCockpit.mobile.enabled`. When enabled we publish a SANITIZED
+  // snapshot to ~/.claude/.cockpit/queue.public.json; the user is responsible
+  // for serving that file via their existing Cloudflare Tunnel + Cloudflare
+  // Access SSO. Cockpit itself makes ZERO outbound calls for this feature.
+  const mobileQueueStore = new ApprovalQueueStore();
+  const mobilePublisher = new MobilePublisher({
+    supplier: () => {
+      mobileQueueStore.reload();
+      return mobileQueueStore.list();
+    },
+    isEnabled: () =>
+      vscode.workspace
+        .getConfiguration('claudeCockpit')
+        .get<boolean>('mobile.enabled', false) === true,
+  });
+  const mobileWatcher = watchQueueAndPublish(mobilePublisher, approvalQueuePath());
+  context.subscriptions.push({ dispose: () => mobileWatcher.dispose() });
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('claudeCockpit.mobile.enabled')) {
+        // Toggle: invalidate the digest so the next publish() writes (or
+        // clears) immediately rather than waiting for a queue mutation.
+        mobilePublisher.invalidate();
+        mobilePublisher.publish();
+      }
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.mobile.copyPath', async () => {
+      await vscode.env.clipboard.writeText(publicQueuePath());
+      void vscode.window.showInformationMessage(
+        `Copied: ${publicQueuePath()}. Expose this file via your Cloudflare Tunnel + Cloudflare Access to use the mobile companion.`,
+      );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.mobile.openSetup', () => {
+      void vscode.env.openExternal(
+        vscode.Uri.parse('https://cockpit.dashable.dev/mobile/'),
+      );
     }),
   );
 
