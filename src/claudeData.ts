@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
 import { ObsidianStatus, readObsidianStatus } from './obsidian';
+import { readGraphSummaryForPrimaryVault } from './graph';
 import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
 import { RoutinesStatus, readRoutinesStatus } from './routines';
 import { record as recordTime } from './telemetry';
@@ -224,6 +225,37 @@ export interface CockpitSnapshot {
   routines: RoutinesStatus;
   gitBranch: string | undefined;
   subdomainHealth: SubdomainHealthEntry[];
+  // === obsidian-graph ===
+  // Lightweight summary only — the full {nodes, edges} payload is potentially
+  // megabytes for large vaults, so the webview lazy-loads it on tab open.
+  obsidianGraph?: { nodeCount: number; edgeCount: number; vault: string } | undefined;
+  // === replay-timeline ===
+  // Small, postMessage-friendly index of the active session JSONL. Full event
+  // list + per-step file diffs are pulled lazily via `replay.loadSession`.
+  replayIndex?: ReplayIndexSnapshot;
+}
+
+/**
+ * Mirror of replay.ReplayIndex, declared here to keep claudeData.ts free of
+ * upward imports. Wire-compatible with replay.ReplayIndex by shape.
+ */
+export interface ReplayIndexSnapshot {
+  available: boolean;
+  totalEvents: number;
+  touchedFiles: string[];
+  tailEvents: ReplayTailEvent[];
+  lastIndex: number;
+  sessionId: string | undefined;
+  totalTokens: number;
+}
+
+export interface ReplayTailEvent {
+  index: number;
+  kind: 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'meta';
+  timestamp: string | undefined;
+  toolName: string | undefined;
+  filePath: string | undefined;
+  summary: string;
 }
 
 export interface WatchtowerSession {
@@ -2134,6 +2166,12 @@ function snapshotInner(
       routines,
       gitBranch: undefined,
       subdomainHealth: readSubdomainHealthSync([]),
+      obsidianGraph: recordTime('snapshot.obsidianGraph', () => {
+        const summary = readGraphSummaryForPrimaryVault();
+        return summary
+          ? { nodeCount: summary.nodeCount, edgeCount: summary.edgeCount, vault: summary.vaultName }
+          : undefined;
+      }),
     };
   }
 
@@ -2235,6 +2273,12 @@ function snapshotInner(
     routines,
     gitBranch,
     subdomainHealth: readSubdomainHealthSync(pilot ? pilot.alwaysLive : []),
+    obsidianGraph: recordTime('snapshot.obsidianGraph', () => {
+      const summary = readGraphSummaryForPrimaryVault();
+      return summary
+        ? { nodeCount: summary.nodeCount, edgeCount: summary.edgeCount, vault: summary.vaultName }
+        : undefined;
+    }),
   };
 }
 

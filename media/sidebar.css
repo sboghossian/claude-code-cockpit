@@ -2419,3 +2419,71 @@ select[data-prompt-cat-new] {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 3px;
 }
+
+
+/* =============================================================================
+ * Obsidian graph (worktree: feat/launch-obsidian-graph)
+ * Selectors prefixed `.cockpit-graph-` per the launch plan; never collide with
+ * the existing .obsidian-* selectors.
+ * ============================================================================= */
+
+.cockpit-graph-container {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border: 1px solid rgba(127, 127, 127, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--vscode-editor-background, #0b0d10);
+  margin-top: 8px;
+}
+
+.cockpit-graph-empty {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+}
+
+.cockpit-graph-summary {
+  margin: 4px 0 0 0;
+  font-size: 11px;
+}
+
+.cockpit-graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.cockpit-graph-svg:active {
+  cursor: grabbing;
+}
+
+.cockpit-graph-link {
+  stroke: rgba(127, 127, 127, 0.35);
+  stroke-width: 1px;
+}
+
+.cockpit-graph-node {
+  fill: var(--vscode-foreground, #cfcfcf);
+  stroke: var(--vscode-editor-background, #0b0d10);
+  stroke-width: 0.75px;
+  cursor: pointer;
+}
+
+.cockpit-graph-node:hover {
+  stroke: var(--vscode-focusBorder, #6cb6ff);
+  stroke-width: 1.25px;
+}
+
+.cockpit-graph-node-isolated {
+  fill: rgba(127, 127, 127, 0.5);
+}
+
+.cockpit-graph-node-touched {
+  fill: var(--vscode-charts-orange, #f97316);
+  stroke: var(--vscode-charts-orange, #f97316);
+}
