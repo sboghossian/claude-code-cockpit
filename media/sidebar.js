@@ -3484,6 +3484,10 @@
     helpDoc:         { label: 'Help',               category: 'Config',   requiresCwd: false, render: () => helpSection() },
     selfTelemetry:   { label: 'Self · telemetry',   category: 'System',   requiresCwd: false, render: (s) => selfTelemetrySection(s) },
     welcomeBanner:   { label: 'Welcome / setup',    category: 'Config',   requiresCwd: false, render: (s) => welcomeBannerSection(s) },
+    // === approval-queue: placeholder rows; the live widgets are registered
+    // by media/sidebar.approval.js into EXTERNAL_COMPONENTS so the
+    // 'approval' tab can compose them. Listed here as null entries would
+    // cause render to throw — instead we just leave them in EXTERNAL_COMPONENTS.
   };
 
   // ===========================================================================
@@ -3507,7 +3511,11 @@
     EXTERNAL_COMPONENTS[id] = def;
   }
   // Public bridge for sibling scripts. Defined once; subsequent sidebar.js
-  // reloads (e.g. webview restore) just re-bind the same handle.
+  // reloads (e.g. webview restore) just re-bind the same handle. Sibling
+  // scripts that produce live UI (e.g. media/sidebar.approval.js) use:
+  //   window.cockpit.requestRerender()  — re-renders with the cached snap
+  //   window.cockpit.snapshot()         — read-only access to the cached snap
+  //   window.cockpit.vscode             — the acquired VSCode API handle
   if (typeof window !== 'undefined') {
     window.cockpit = window.cockpit || {};
     window.cockpit.registerComponent = registerExternalComponent;
@@ -3525,6 +3533,13 @@
     window.cockpit.postMessage = (m) => vscode.postMessage(m);
     window.cockpit.getSnapshot = () => lastSnapshot;
     window.cockpit.requestRender = () => { if (lastSnapshot) render(lastSnapshot); };
+    window.cockpit.requestRerender = function () {
+      if (lastSnapshot) render(lastSnapshot);
+    };
+    window.cockpit.snapshot = function () {
+      return lastSnapshot;
+    };
+    window.cockpit.vscode = vscode;
   }
 
   // Fragments used as components but not standalone sections — they get
@@ -3635,6 +3650,8 @@
     help:       ['helpDoc'],
     self:       ['selfTelemetry'],
     gallery:    ['galleryGrid', 'galleryShareCard'],
+    // === approval-queue ===
+    approval:   ['approvalQueue', 'approvalDetail'],
   };
 
   // Inline SVG icons for the primary tab bar. Stroke-only, 14×14, currentColor
@@ -3662,6 +3679,8 @@
     custom:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 7.6c.4-.4.4-1 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L14 7v3h3l2.4-2.4z"/><path d="M14 10l-9 9v3h3l9-9"/><path d="M9 4H5a2 2 0 0 0-2 2v4"/></svg>',
     help:       '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     gallery:    '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    // === approval-queue: stroke-only checkmark-in-shield. ===
+    approval:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><polyline points="9 12 11 14 15 10"/></svg>',
   };
 
   function tabCatalogue(snap) {
@@ -3694,6 +3713,8 @@
       { id: 'security',   label: secLabel(snap),                                                      pinned: false, requiresCwd: false, hint: 'Local secret scan, .env audit, MCP credential check, /cso launcher' },
       { id: 'self',       label: 'Self',                                                              pinned: false, requiresCwd: false, hint: 'Cockpit observing itself — refresh cost, runs, errors' },
       { id: 'gallery',    label: galleryLabel(snap),                                                  pinned: false, requiresCwd: false, hint: 'Browse local skills + agents. Share via clipboard. Install by HTTPS URL.' },
+      // === approval-queue ===
+      { id: 'approval',   label: approvalTabLabel(snap),                                              pinned: false, requiresCwd: false, hint: 'Pending Claude actions awaiting human approval. Snapshot + revert per entry.' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
   }
@@ -3702,6 +3723,15 @@
     const g = snap && snap.gallery;
     if (!g || typeof g.totalCount !== 'number') return 'Gallery';
     return `Gallery (${g.totalCount})`;
+  }
+
+  // === approval-queue: tab label includes pending count when > 0. Reads
+  // the lightweight `approvalCounts` slice that snapshotInner attaches; the
+  // full queue is fetched lazily via `approval.fetchQueue` postMessage.
+  function approvalTabLabel(snap) {
+    const counts = (snap && snap.approvalCounts) || { pending: 0, recent: 0 };
+    if (counts.pending > 0) return `Approve (${counts.pending})`;
+    return 'Approve';
   }
 
   // Tab merges remap old IDs onto new ones so persisted enabledTabs still

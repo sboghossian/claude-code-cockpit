@@ -8,6 +8,7 @@ import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
 import { RoutinesStatus, readRoutinesStatus } from './routines';
 import { record as recordTime } from './telemetry';
 import { readAuditSnapshot } from './auditLog';
+import { readApprovalCounts } from './approvalQueue';
 import {
   ActivityHeatmap,
   AgentDef,
@@ -243,6 +244,10 @@ export interface CockpitSnapshot {
   // Lazy-loaded gallery summary — only counts. Full items list lives behind a
   // `gallery.openLocal` message round-trip so the snapshot payload stays small.
   gallery?: { skillCount: number; agentCount: number; totalCount: number };
+  // === approval-queue ===
+  // Pending approvals are file-backed and large; the main snapshot only carries
+  // counts. Full list is fetched on demand via `approval.fetchQueue`.
+  approvalCounts?: { pending: number; recent: number };
 }
 
 /**
@@ -2088,6 +2093,7 @@ function snapshotInner(
   const audit = recordTime('snapshot.audit', () => readAuditSnapshot());
   const greeting = computeGreeting();
   const gitBranch = readGitBranchSync(cwd ?? (active ? active.decodedPath : undefined));
+  const approvalCounts = recordTime('snapshot.approvalCounts', () => readApprovalCounts());
   const cockpitStats = computeStats({
     byHour: heatmap.byHour,
     byDay: heatmap.byDay,
@@ -2192,6 +2198,7 @@ function snapshotInner(
         agentCount: agents.length,
         totalCount: skillsEmpty.length + agents.length,
       },
+      approvalCounts,
     };
   }
 
@@ -2305,6 +2312,7 @@ function snapshotInner(
       agentCount: agents.length,
       totalCount: skills.length + agents.length,
     },
+    approvalCounts,
   };
 }
 

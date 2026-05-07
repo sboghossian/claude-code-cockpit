@@ -193,6 +193,7 @@ export function __resetForTests(): void {
   tabs.length = 0;
   triggers.length = 0;
   sidebarScripts.length = 0;
+  sidebarStyles.length = 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -225,4 +226,29 @@ export function registerSidebarScript(relPath: string): void {
 
 export function listSidebarScripts(): readonly string[] {
   return sidebarScripts.slice();
+}
+
+// -----------------------------------------------------------------------------
+// Webview bridge: stylesheets registered as siblings to media/sidebar.css.
+// Phase-1 worktrees push their CSS path here on activation.
+// -----------------------------------------------------------------------------
+
+const sidebarStyles: string[] = [];
+
+export function registerSidebarStyle(relPath: string): void {
+  if (!relPath || typeof relPath !== 'string') {
+    throw new Error('registerSidebarStyle: path must be a non-empty string');
+  }
+  if (relPath.includes('..')) {
+    throw new Error('registerSidebarStyle: path must not contain ".."');
+  }
+  if (sidebarStyles.includes(relPath)) {
+    return;
+  }
+  sidebarStyles.push(relPath);
+  logger.info(`plugin: registered sidebar style "${relPath}"`);
+}
+
+export function listSidebarStyles(): readonly string[] {
+  return sidebarStyles.slice();
 }
