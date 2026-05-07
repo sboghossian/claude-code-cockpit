@@ -160,7 +160,7 @@
             "high-contrast"
           ],
           "default": "auto",
-          "description": "Initial theme for the Cockpit sidebar. 'auto' inherits VSCode's theme via CSS variables (default). 'dark'/'light' force a fixed palette regardless of VSCode's theme. 'high-contrast' uses a WCAG AAA pure-black palette for low-vision and high-glare environments. The Customize panel inside the sidebar can override this at runtime."
+          "description": "Initial theme for the Cockpit sidebar. 'auto' inherits VSCode's theme via CSS variables (default). 'dark'/'light' force a fixed palette regardless of VSCode's theme. 'high-contrast' uses a pure-black palette tuned for low-vision and high-glare environments (every text/UI pair meets WCAG AA, most meet AAA). The Customize panel inside the sidebar can override this at runtime."
         },
         "claudeCockpit.discover.enabled": {
           "type": "boolean",

@@ -159,7 +159,7 @@ body[data-theme="dark"] .watch-status.live {
 body[data-theme="high-contrast"] {
   --cockpit-bg: #000000;
   --cockpit-fg: #ffffff;
-  --cockpit-fg-muted: #d4d4d4;       /* 17.0:1 on black — AAA */
+  --cockpit-fg-muted: #d4d4d4;       /* 14.17:1 on black — AAA */
   --cockpit-border: #ffffff;
   --cockpit-card: #000000;
   --cockpit-hover: #1f1f1f;

@@ -2451,6 +2451,8 @@
     let speakingEnvelope = null; // { until, baseline, fn } for synth speaking
     let utterance = null;        // current SpeechSynthesisUtterance
     let resizeObserver = null;   // tracked so teardown() can disconnect
+    let reduceMotionMq = null;   // matchMedia handle for prefers-reduced-motion
+    let reduceMotionListener = null;
 
     // Fibonacci sphere — N evenly-distributed unit vectors. Generated once.
     function buildCoreParticles(n) {
@@ -2945,14 +2947,26 @@
 
     function init() {
       ensureCanvas();
-      // Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3): paint a single
-      // static frame instead of running the rAF loop. Mode changes still
-      // re-render via setMode → draw() so the visual responds to events.
-      const reduceMotion = window.matchMedia
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (reduceMotion) {
-        // Draw one frame so the canvas isn't blank, then leave it static.
-        try { draw(0); } catch {}
+      // Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3) reactively: paint
+      // one static frame instead of running the rAF loop, AND subscribe to
+      // OS-level toggles so the user can flip Reduce Motion mid-session
+      // without re-mounting the Talk tab. Mode changes still re-render via
+      // setMode → draw() either way.
+      reduceMotionMq = window.matchMedia
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+      const applyReduceMotion = (mq) => {
+        if (mq && mq.matches) {
+          stopAnimation();
+          try { draw(0); } catch (err) { console.warn('reduce-motion draw failed', err); }
+        } else {
+          startAnimation();
+        }
+      };
+      if (reduceMotionMq) {
+        applyReduceMotion(reduceMotionMq);
+        reduceMotionListener = (event) => applyReduceMotion(event);
+        reduceMotionMq.addEventListener('change', reduceMotionListener);
       } else {
         startAnimation();
       }
@@ -2971,6 +2985,11 @@
       stopSpeaking();
       stopAnimation();
       if (resizeObserver) { try { resizeObserver.disconnect(); } catch {} resizeObserver = null; }
+      if (reduceMotionMq && reduceMotionListener) {
+        try { reduceMotionMq.removeEventListener('change', reduceMotionListener); } catch {}
+      }
+      reduceMotionMq = null;
+      reduceMotionListener = null;
       if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
       analyser = null;
     }
@@ -3887,10 +3906,13 @@
               (t) => {
                 const label =
                   t === 'auto' ? 'Auto (follow VSCode)' :
-                  t === 'high-contrast' ? 'High contrast (WCAG AAA)' :
+                  t === 'high-contrast' ? 'High contrast (AA+)' :
                   t.charAt(0).toUpperCase() + t.slice(1);
+                // No aria-label on the input — the wrapping <label> + .comp-label
+                // span are already the accessible name; aria-label here would
+                // double-announce in screen readers.
                 return `<label class="comp-toggle ${themePref === t ? 'on' : ''}">
-                <input type="radio" name="theme" data-theme-set="${t}" aria-label="${escapeHtml(label)}" ${themePref === t ? 'checked' : ''} />
+                <input type="radio" name="theme" data-theme-set="${t}" ${themePref === t ? 'checked' : ''} />
                 <span class="comp-label">${escapeHtml(label)}</span>
               </label>`;
               },
@@ -4221,8 +4243,12 @@
             const ariaLabel = t.requiresCwd
               ? `${t.label} (requires active session)`
               : t.label;
-            const tabIndex = t.id === activeTab ? '0' : '-1';
-            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" aria-label="${escapeHtml(ariaLabel)}" tabindex="${tabIndex}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
+            // Don't set roving `tabindex` here: full WAI-ARIA tabs-pattern
+            // arrow-key navigation is deferred to v1.1 per the launch cut-line.
+            // Without the arrow-key handler, a roving tabindex would skip 19
+            // of 20 tabs in the keyboard tab-order. Default tabindex keeps
+            // every tab Tab-reachable (matches v0.21.0 reachability).
+            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" aria-label="${escapeHtml(ariaLabel)}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
           })
           .join('')}
       </nav>
