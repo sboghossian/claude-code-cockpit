@@ -20,6 +20,7 @@ import { readAppUsage } from './appUsage';
 import { detectUsageDashboard, readRTKSavings, refreshSubdomainHealth } from './integrations';
 import { readMacHealth } from './macHealth';
 import { logger } from './logger';
+import { listSidebarScripts } from './plugin';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 import {
   createRoutineSkill,
@@ -1114,6 +1115,18 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.js'),
     );
     const nonce = makeNonce();
+    // Plugin API (Phase 0): Phase-1 worktrees register sibling scripts via
+    // plugin.registerSidebarScript(); each is rewritten to a webview-safe URI
+    // and emitted with the same nonce as sidebar.js. Empty in v0.21.0 — no
+    // behavior change for users who don't use the new API.
+    const externalScriptTags = listSidebarScripts()
+      .map((rel) => {
+        const safeRel = rel.replace(/^\/+/, '').replace(/\.\./g, '');
+        const segments = safeRel.split('/').filter((s) => s.length > 0);
+        const uri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, ...segments));
+        return `  <script nonce="${nonce}" src="${uri}"></script>`;
+      })
+      .join('\n');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1127,6 +1140,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     <p class="empty">Loading…</p>
   </main>
   <script nonce="${nonce}" src="${jsUri}"></script>
+${externalScriptTags}
 </body>
 </html>`;
   }

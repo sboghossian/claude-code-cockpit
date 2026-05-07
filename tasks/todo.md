@@ -313,3 +313,23 @@ ownership of every tab's widget composition (not just the Custom tab).
 - Make Claude touch a file → file appears in sidebar within 2s
 - Open VSCode in a project with no Claude session → empty state, no errors
 - Force-quit Claude mid-session → sidebar shows stale data, refresh button works
+
+## v1.0 — plugin-api
+
+Phase 0 of the v1.0 launch wave. Defines the formal extension contract every Phase-1 feature consumes (approval-queue, replay-timeline, permissions-audit, skill-gallery, tab-system-v2, a11y-theme, obsidian-graph). Pure plumbing — zero behavior change for v0.21.0 users.
+
+- [x] `src/plugin.ts` exports `CockpitWidget`, `CockpitTab`, `CockpitTrigger`, `WorktreeAction`, `SnapshotRef`, `AuditEvent` interfaces
+- [x] `registerWidget`, `registerTab`, `registerTrigger` functions mutate module-private append-only arrays
+- [x] `registerSidebarScript` lets Phase-1 worktrees register their own sibling JS files; `listSidebarScripts()` exposes the read-only view
+- [x] `media/sidebar.js` adds `EXTERNAL_COMPONENTS = {}` adjacent to (not inside) the COMPONENTS literal
+- [x] `window.cockpit.registerComponent(id, def)` is callable from sibling scripts and populates `EXTERNAL_COMPONENTS`
+- [x] `tabBodyComposed()` checks both `COMPONENTS` and `EXTERNAL_COMPONENTS`
+- [x] `sidebarProvider.html()` walks `listSidebarScripts()` and emits one nonce-tagged `<script>` per registered path
+- [x] Webview CSP unchanged (`connect-src 'none'` still locked); external scripts inherit the same nonce as `sidebar.js`
+- [x] `npm test` 42/42 still green; 4 new plugin tests added (registerWidget shape, duplicate-id error, registerTab defaults, registerTrigger command-format) → 46/46
+- [x] `npm run compile` clean under TypeScript strict (no `any`)
+- [x] `node --check media/sidebar.js` clean
+- [x] Zero new dependencies
+- [x] `package.json` untouched (no contributes / configuration / scripts changes)
+- [x] `claudeData.ts` untouched
+- [x] COMPONENTS literal contents untouched

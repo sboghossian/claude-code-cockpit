@@ -3443,6 +3443,22 @@
     welcomeBanner:   { label: 'Welcome / setup',    category: 'Config',   requiresCwd: false, render: (s) => welcomeBannerSection(s) },
   };
 
+  // ===========================================================================
+  // Plugin API (Phase 0): EXTERNAL_COMPONENTS is populated by sibling scripts
+  // injected via sidebarProvider.html() — Phase-1 worktrees own their own JS
+  // file (e.g. media/sidebar.approval.js) and register their widgets here so
+  // they never touch the COMPONENTS literal above. Same shape as a COMPONENTS
+  // entry: { label, category, requiresCwd, render: (snap) => htmlString }.
+  // ===========================================================================
+  const EXTERNAL_COMPONENTS = {};
+  function registerExternalComponent(id, def) { EXTERNAL_COMPONENTS[id] = def; }
+  // Public bridge for sibling scripts. Defined once; subsequent sidebar.js
+  // reloads (e.g. webview restore) just re-bind the same handle.
+  if (typeof window !== 'undefined') {
+    window.cockpit = window.cockpit || {};
+    window.cockpit.registerComponent = registerExternalComponent;
+  }
+
   // Fragments used as components but not standalone sections — they get
   // rendered as HTML snippets stitched into the active session view.
   function sessionTokensFragment(snap) {
@@ -3707,7 +3723,7 @@
     const blocked = [];
     const rendered = ids
       .map((id) => {
-        const c = COMPONENTS[id];
+        const c = COMPONENTS[id] || EXTERNAL_COMPONENTS[id];
         if (!c) return '';
         if (c.requiresCwd && !hasCwd) {
           blocked.push(c.label);

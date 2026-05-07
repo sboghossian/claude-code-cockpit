@@ -6,6 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Phase-0 plugin API tests register their own test() calls when this file
+// is required. Bundling them here keeps package.json untouched (the launch
+// brief locks it) while still running them under the same `npm test`.
+require('./plugin.test.js');
+
 // Pin HOME to an isolated tmp dir BEFORE loading claudeData — the module
 // captures `os.homedir()` at import time. Each test scopes its own subdir
 // underneath so they don't collide.
