@@ -198,6 +198,14 @@
       {
         "command": "claudeCockpit.approval.revertLast",
         "title": "Claude Cockpit: Revert Last Snapshotted Action"
+      },
+      {
+        "command": "claudeCockpit.replay.openCurrent",
+        "title": "Claude Cockpit: Open Replay (active session)"
+      },
+      {
+        "command": "claudeCockpit.replay.exportDiff",
+        "title": "Claude Cockpit: Reveal Replay Forks Folder"
       }
     ],
     "keybindings": [
@@ -366,6 +374,13 @@
           "default": ["Bash", "Edit", "Write", "MultiEdit"],
           "description": "Hook-side hint: which Claude Code tool names should be routed through the approval queue. Cockpit itself does NOT enforce — wire your PreToolUse hook to read this list (v1.1 will ship the hook).",
           "items": { "type": "string" }
+        },
+        "claudeCockpit.replay.maxEventsPerSession": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Maximum events the Replay tab loads per session. Larger values give finer scrub granularity but cost more memory + CPU on initial parse. Above 5000 the scrubber uniformly samples to keep the slider responsive."
         }
       }
     },
@@ -384,6 +399,7 @@
     "watch": "tsc -p . --watch",
     "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js",
     "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/replay.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

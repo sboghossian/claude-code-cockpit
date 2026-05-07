@@ -2808,4 +2808,108 @@ select[data-prompt-cat-new] {
   overflow: auto;
   flex: 1;
   font-size: 11px;
+/* =============================================================================
+   replay-timeline (Phase-1 launch wave) — all selectors prefixed
+   .cockpit-replay- / .cockpit-cost- per the master plan rule.
+   ============================================================================= */
+.cockpit-replay-scrubber,
+.cockpit-replay-diff,
+.cockpit-cost-projection {
+  margin-top: 12px;
+}
+.cockpit-replay-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  opacity: 0.8;
+  margin-bottom: 8px;
+}
+.cockpit-replay-range {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cockpit-replay-range input[type="range"] {
+  width: 100%;
+}
+.cockpit-replay-event {
+  font-size: 11px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+}
+.cockpit-replay-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cockpit-replay-actions button {
+  background: var(--vscode-button-secondaryBackground, rgba(255, 255, 255, 0.08));
+  color: var(--vscode-button-secondaryForeground, inherit);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.12));
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cockpit-replay-actions button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.14));
+}
+.cockpit-replay-file summary {
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: 11px;
+}
+.cockpit-replay-stat {
+  font-family: var(--vscode-editor-font-family, monospace);
+  opacity: 0.75;
+  font-size: 10px;
+  margin-left: 6px;
+}
+.cockpit-replay-unified {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.cockpit-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.cockpit-cost-grid > div {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.cockpit-cost-grid .label {
+  font-size: 10px;
+  opacity: 0.75;
+}
+.cockpit-cost-grid .value {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.cockpit-cost-warn {
+  background: var(--vscode-inputValidation-warningBackground, rgba(255, 165, 0, 0.18));
+  border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 165, 0, 0.55));
+  color: var(--vscode-inputValidation-warningForeground, inherit);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-bottom: 8px;
 }
