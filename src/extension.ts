@@ -91,6 +91,10 @@ function registerOnboardingSandboxSurface(): void {
     logger.warn(`onboarding-sandbox: registration failed: ${String(err)}`);
   }
 }
+import { configure as configurePosthog, capture as posthogCapture } from './posthog';
+import { captureActivationFailure, setExtensionRoot } from './crash';
+import * as crypto from 'crypto';
+import * as os from 'os';
 
 function registerReplaySurface(): void {
   // Phase-1 feat/launch-replay-timeline. Registers the Replay tab + the three
@@ -137,8 +141,85 @@ function registerReplaySurface(): void {
   }
 }
 
+// =============================================================================
+// telemetry-posthog: read settings + configure the (default-off) client.
+// Returns the resolved enabled flag so callers can branch on it for the
+// session.start ping.
+// =============================================================================
+
+function configureTelemetryFromSettings(extensionRoot: string, extensionVersion: string): boolean {
+  const cfg = vscode.workspace.getConfiguration('claudeCockpit.telemetry');
+  const enabled = cfg.get<boolean>('enabled', false);
+  const crashReportsEnabled = cfg.get<boolean>('crashReports', false);
+  const projectId = (cfg.get<string>('projectId', '') ?? '').trim();
+  const host = ((cfg.get<string>('host', 'app.posthog.com') ?? '').trim()) || 'app.posthog.com';
+  setExtensionRoot(extensionRoot);
+  // Stable, anonymous-ish distinct id: salted SHA256 of os.hostname() truncated
+  // to 16 hex. Salt is the constant string below — different salt per project
+  // makes cross-correlation with HAQQ telemetry impossible even if a user
+  // mistakenly re-uses the same hostname.
+  const salt = 'claude-cockpit-vscode-2026';
+  const distinctId = crypto
+    .createHash('sha256')
+    .update(`${salt}::${os.hostname()}`)
+    .digest('hex')
+    .slice(0, 16);
+  configurePosthog({
+    enabled: enabled && projectId.length > 0,
+    crashReportsEnabled,
+    projectId,
+    host,
+    distinctId,
+    extensionVersion,
+    vsCodeVersion: vscode.version,
+  });
+  return enabled && projectId.length > 0;
+}
+
+function readPackageVersion(extensionRoot: string): string {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(extensionRoot, 'package.json'), 'utf8'),
+    ) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+/**
+ * Emit a single `cockpit.command.invoke` PostHog event with the given command
+ * id. No-op when telemetry is opted out. Sends ONLY the command id — never
+ * the args, never any user input the command later prompts for.
+ */
+function pingCommand(commandId: string): void {
+  void posthogCapture('cockpit.command.invoke', { command: commandId });
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  try {
+    activateInner(context);
+  } catch (err) {
+    // ALWAYS log + (when opted-in) report. Re-throw so VSCode's "Extension
+    // failed to activate" surface still fires — the user must know.
+    captureActivationFailure(err);
+    throw err;
+  }
+}
+
+function activateInner(context: vscode.ExtensionContext): void {
   logger.info('claude-cockpit activating');
+  // === telemetry-posthog (Phase 2): default-off, opt-in. configure() runs
+  // unconditionally so isEnabled() reflects user settings; capture() is a
+  // no-op until the user flips claudeCockpit.telemetry.enabled. ===
+  const extensionRoot = context.extensionUri.fsPath;
+  const extensionVersion = readPackageVersion(extensionRoot);
+  const telemetryOn = configureTelemetryFromSettings(extensionRoot, extensionVersion);
+  if (telemetryOn) {
+    void posthogCapture('cockpit.session.start', {
+      activatedAt: Date.now(),
+    });
+  }
   // Phase-1 obsidian-graph: register the d3 vendor + graph renderer scripts.
   // Vendor goes first so window.d3 exists before sidebar.graph.js touches it.
   registerSidebarScript('media/vendor/d3.min.js');
@@ -186,7 +267,10 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudeCockpit.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('claudeCockpit.refresh', () => {
+      pingCommand('claudeCockpit.refresh');
+      provider.refresh();
+    }),
   );
 
   context.subscriptions.push(
@@ -379,12 +463,47 @@ export function activate(context: vscode.ExtensionContext): void {
         setAuditEnabled(v);
         provider.refresh();
       }
+      if (e.affectsConfiguration('claudeCockpit.telemetry')) {
+        configureTelemetryFromSettings(extensionRoot, extensionVersion);
+        provider.refresh();
+      }
+    }),
+  );
+
+  // === telemetry-posthog: command palette toggle ===
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.telemetry.toggle', async () => {
+      pingCommand('claudeCockpit.telemetry.toggle');
+      const cfg = vscode.workspace.getConfiguration('claudeCockpit.telemetry');
+      const current = cfg.get<boolean>('enabled', false);
+      const projectId = (cfg.get<string>('projectId', '') ?? '').trim();
+      if (!current && !projectId) {
+        const choice = await vscode.window.showInformationMessage(
+          'Cockpit telemetry needs a PostHog project id (claudeCockpit.telemetry.projectId). Open settings to add one?',
+          'Open settings',
+          'Cancel',
+        );
+        if (choice === 'Open settings') {
+          await vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            '@ext:dashable.claude-cockpit telemetry',
+          );
+        }
+        return;
+      }
+      await cfg.update('enabled', !current, vscode.ConfigurationTarget.Global);
+      void vscode.window.showInformationMessage(
+        !current
+          ? 'Cockpit telemetry: ON. Aggregate counters + (optionally) crash stacks will POST to PostHog. See PRIVACY.md.'
+          : 'Cockpit telemetry: OFF. Cockpit is back to 100% local.',
+      );
     }),
   );
 
   // === skill-gallery (Phase 1) ===
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeCockpit.gallery.openTab', () => {
+      pingCommand('claudeCockpit.gallery.openTab');
       void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
       provider.setActiveTabFromHost('gallery');
     }),
@@ -445,6 +564,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // === replay-timeline =====================================================
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeCockpit.replay.openCurrent', () => {
+      pingCommand('claudeCockpit.replay.openCurrent');
       void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
       provider.setActiveTabFromHost('replay');
     }),
@@ -476,6 +596,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // === approval-queue: command palette entries forwarded to the webview. ===
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeCockpit.approval.openQueue', () => {
+      pingCommand('claudeCockpit.approval.openQueue');
       void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
       provider.setActiveTabFromHost('approval');
     }),
@@ -608,4 +729,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   logger.info('claude-cockpit deactivating');
+  // Best-effort session.end ping. Fire-and-forget — VSCode gives extensions a
+  // 5s grace window on shutdown but doesn't await the returned promise, so a
+  // dropped event here is expected and fine.
+  void posthogCapture('cockpit.session.end', { deactivatedAt: Date.now() });
 }

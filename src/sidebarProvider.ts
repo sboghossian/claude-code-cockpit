@@ -90,6 +90,11 @@ import {
   notifyAuditBlocked,
   notifyCostWarning,
 } from './notifications';
+import {
+  capture as posthogCapture,
+  getStatusForSnapshot as getPosthogStatus,
+} from './posthog';
+import { captureMessageFailure } from './crash';
 
 interface InboundMessage {
   type:
@@ -194,7 +199,12 @@ interface InboundMessage {
     | 'tutorial.fetchRecs'
     | 'tutorial.dismiss'
     | 'tutorial.gotoTab'
-    | 'notify.fire';
+    | 'notify.fire'
+    // === telemetry-posthog (Phase 2) ===
+    | 'telemetry.optIn'
+    | 'telemetry.optOut'
+    | 'telemetry.status'
+    | 'telemetry.tabView';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -264,6 +274,9 @@ interface InboundMessage {
   notifyKey?: string;
   notifyMessage?: string;
   notifyLevel?: 'info' | 'warn';
+  // === telemetry-posthog (Phase 2) ===
+  /** Tab id for telemetry.tabView. Capped to a known short string in the handler. */
+  telemetryTab?: string;
 }
 
 /**
@@ -860,6 +873,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       },
       appUsage: readAppUsage(this.globalState),
       telemetry: getTelemetrySnapshot(),
+      // === telemetry-posthog (Phase 2) ===
+      // Status pill for the Self tab. ONLY counters + flags — never the
+      // distinctId, never the projectId, never the host beyond display.
+      posthog: getPosthogStatus(),
       surfaces: {
         macHealth: vscode.workspace
           .getConfiguration('claudeCockpit.surfaces')
@@ -1153,6 +1170,17 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handle(msg: InboundMessage): Promise<void> {
+    try {
+      await this.handleInner(msg);
+    } catch (err) {
+      // crash.ts logs the full anonymized stack + (when telemetry+crashReports
+      // are both opted-in) reports it. We swallow here so a single bad message
+      // doesn't crash the host or stop subsequent messages.
+      await captureMessageFailure(msg.type, err);
+    }
+  }
+
+  private async handleInner(msg: InboundMessage): Promise<void> {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     switch (msg.type) {
       case 'refresh':
@@ -2269,6 +2297,30 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         this.refresh();
         return;
       }
+      // === telemetry-posthog (Phase 2) ============================================
+      case 'telemetry.optIn': {
+        const cfg = vscode.workspace.getConfiguration('claudeCockpit.telemetry');
+        const projectId = (cfg.get<string>('projectId', '') ?? '').trim();
+        if (!projectId) {
+          await vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            '@ext:dashable.claude-cockpit telemetry',
+          );
+          this.view?.webview.postMessage({
+            type: 'telemetry.status',
+            status: getPosthogStatus(),
+            note: 'Set claudeCockpit.telemetry.projectId before enabling.',
+          });
+          return;
+        }
+        await cfg.update('enabled', true, vscode.ConfigurationTarget.Global);
+        this.view?.webview.postMessage({
+          type: 'telemetry.status',
+          status: getPosthogStatus(),
+        });
+        this.refresh();
+        return;
+      }
       case 'tutorial.fetchRecs': {
         const nudges = this.buildTutorialNudges();
         this.view?.webview.postMessage({ type: 'tutorial.recommendations', nudges });
@@ -2296,6 +2348,33 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         const message = typeof msg.notifyMessage === 'string' ? msg.notifyMessage : 'Cockpit notification (test)';
         const level: 'info' | 'warn' = msg.notifyLevel === 'warn' ? 'warn' : 'info';
         void notify({ key, level, message });
+        return;
+      }
+      case 'telemetry.optOut': {
+        const cfg = vscode.workspace.getConfiguration('claudeCockpit.telemetry');
+        await cfg.update('enabled', false, vscode.ConfigurationTarget.Global);
+        this.view?.webview.postMessage({
+          type: 'telemetry.status',
+          status: getPosthogStatus(),
+        });
+        this.refresh();
+        return;
+      }
+      case 'telemetry.status': {
+        this.view?.webview.postMessage({
+          type: 'telemetry.status',
+          status: getPosthogStatus(),
+        });
+        return;
+      }
+      case 'telemetry.tabView': {
+        // The webview pings this when the user navigates between tabs. We
+        // sanitize the tab id (alphanumeric only, max 24 chars) and emit
+        // ONLY the id — never the visible label, never any per-row content.
+        const raw = typeof msg.telemetryTab === 'string' ? msg.telemetryTab : '';
+        const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+        if (!sanitized) return;
+        void posthogCapture('cockpit.tab.view', { tab: sanitized });
         return;
       }
     }

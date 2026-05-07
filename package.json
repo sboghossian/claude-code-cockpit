@@ -238,6 +238,10 @@
       {
         "command": "claudeCockpit.mobile.openSetup",
         "title": "Claude Cockpit: Open Mobile Companion Setup"
+      },
+      {
+        "command": "claudeCockpit.telemetry.toggle",
+        "title": "Claude Cockpit: Toggle Opt-in Telemetry (PostHog)"
       }
     ],
     "keybindings": [
@@ -423,6 +427,26 @@
           "type": "boolean",
           "default": false,
           "description": "Publish a SANITIZED, read-only snapshot of the approval queue to ~/.claude/.cockpit/queue.public.json so a phone can render it via your existing Cloudflare Tunnel + Cloudflare Access SSO. Cockpit makes ZERO outbound calls — you serve the file yourself. Default off. The published payload contains only: id, tool, ageSeconds, agentName (≤8 chars), expectedDiffBytes, status, fileCount. NO file paths, NO arguments, NO secrets. v1.0 is read-only; mobile-side approve lands in v1.1."
+        },
+        "claudeCockpit.telemetry.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in usage analytics via PostHog. Default OFF — Cockpit is 100% local until you flip this. When enabled, Cockpit captures aggregate counters (tab views, command invocations, session duration) and a redacted stack on uncaught extension errors. Detail is redacted before send: no file paths, no prompt text, no session content, no API keys. All HTTP goes through the extension host (Node), never the webview, and every outbound POST is mirrored to ~/.claude/.cockpit/audit.log so you can SEE what left the machine. Requires claudeCockpit.telemetry.projectId to be set; otherwise this stays a no-op."
+        },
+        "claudeCockpit.telemetry.crashReports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt-in crash reporting. Default OFF. Independently gated from telemetry.enabled — many users want usage counters but not crash stacks (anonymized stack frames can still hint at file system layout). When ON and telemetry.enabled is also ON, uncaught errors in activate() / the webview message handler / wrapped async surfaces are sent to PostHog with home directory replaced by ~ and external (non-Cockpit) frames blanked."
+        },
+        "claudeCockpit.telemetry.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "Your PostHog project id (api_key). Empty = telemetry forced off. Cockpit explicitly refuses project id 92178 (HAQQ Legal AI's customer-telemetry project) so an extension diagnostic never leaks into customer data. To run your own dashboard, create a Cockpit-only PostHog project and paste its id here."
+        },
+        "claudeCockpit.telemetry.host": {
+          "type": "string",
+          "default": "app.posthog.com",
+          "description": "PostHog host. Override only if you self-host. Most users should leave this default."
         }
       }
     },
