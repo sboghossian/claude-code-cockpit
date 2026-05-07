@@ -22,7 +22,6 @@ test('registerWidget stores the widget verbatim and lists it back', () => {
     label: 'Approval queue',
     category: 'Approval',
     requiresCwd: false,
-    renderFnName: 'renderApprovalQueue',
   };
   plugin.registerWidget(widget);
   const listed = plugin.listWidgets();
@@ -37,7 +36,6 @@ test('registerWidget throws on duplicate id', () => {
     label: 'Replay session',
     category: 'Replay',
     requiresCwd: true,
-    renderFnName: 'renderReplay',
   };
   plugin.registerWidget(w);
   assert.throws(
@@ -72,4 +70,29 @@ test('registerTrigger rejects unnamespaced command ids', () => {
     keybinding: 'cmd+1',
   });
   assert.equal(plugin.listTriggers().length, 1);
+});
+
+// Static contract check on media/sidebar.js: every site that filters a list of
+// widget IDs must consult BOTH COMPONENTS and EXTERNAL_COMPONENTS. Otherwise an
+// externally-registered widget will be silently dropped before tabBodyComposed
+// ever sees it, defeating the entire Phase-0 bridge. This regex test fails if
+// any future edit re-introduces a `COMPONENTS[id]`-only filter.
+test('sidebar.js widget-id filters consult EXTERNAL_COMPONENTS', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'media', 'sidebar.js'),
+    'utf8',
+  );
+  // Forbidden pattern: a filter that gates only on COMPONENTS[id].
+  // Allowed: `COMPONENTS[id] || EXTERNAL_COMPONENTS[id]`, the shared `known`
+  // helper that consults both, or `Object.entries({ ...EXTERNAL_COMPONENTS, ...COMPONENTS })`.
+  const offending =
+    /\.filter\(\s*\(\s*id\s*\)\s*=>\s*COMPONENTS\[id\]\s*\)/g;
+  const matches = src.match(offending) || [];
+  assert.equal(
+    matches.length,
+    0,
+    `media/sidebar.js contains ${matches.length} COMPONENTS-only filter(s); each must also consult EXTERNAL_COMPONENTS or use the shared known() helper.`,
+  );
 });

@@ -35,8 +35,10 @@ export interface CockpitWidget {
     | 'Audit'
     | 'Gallery';
   requiresCwd: boolean;
-  /** Looked up by name in EXTERNAL_COMPONENTS (media/sidebar.js) at runtime. */
-  renderFnName: string;
+  // The widget's `id` doubles as the lookup key in EXTERNAL_COMPONENTS on the
+  // webview side. The sibling script registers the render fn via
+  // `window.cockpit.registerComponent(id, { label, category, requiresCwd, render })`.
+  // No separate function-name field is needed.
 }
 
 export interface CockpitTab {
@@ -115,9 +117,6 @@ export function registerWidget(widget: CockpitWidget): void {
   if (!widget.label || typeof widget.label !== 'string') {
     throw new Error('registerWidget: label must be a non-empty string');
   }
-  if (!widget.renderFnName || typeof widget.renderFnName !== 'string') {
-    throw new Error('registerWidget: renderFnName must be a non-empty string');
-  }
   if (widgets.some((w) => w.id === widget.id)) {
     throw new Error(`registerWidget: duplicate id "${widget.id}"`);
   }
@@ -193,6 +192,7 @@ export function __resetForTests(): void {
   widgets.length = 0;
   tabs.length = 0;
   triggers.length = 0;
+  sidebarScripts.length = 0;
 }
 
 // -----------------------------------------------------------------------------
