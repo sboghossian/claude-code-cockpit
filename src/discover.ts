@@ -6,6 +6,7 @@ import * as path from 'path';
 import { URL } from 'url';
 import { logger } from './logger';
 import { readObsidianStatus } from './obsidian';
+import { appendAuditEvent } from './auditLog';
 
 export type DiscoverWindow = 'day' | 'week' | 'month';
 export type DiscoverSource = 'github' | 'hn' | 'producthunt' | 'obsidian' | 'custom';
@@ -69,6 +70,7 @@ export async function fetchGithubTrending(window: DiscoverWindow): Promise<Githu
   const url = `https://api.github.com/search/repositories?q=${q}&sort=stars&order=desc&per_page=25`;
 
   return new Promise((resolve, reject) => {
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host: 'api.github.com', method: 'GET', purpose: 'discover.trending' }, worktree: 'permissions-audit' });
     const req = https.get(
       url,
       {
@@ -282,6 +284,7 @@ function httpGet(
       return;
     }
     const lib = parsed.protocol === 'http:' ? http : https;
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host: parsed.hostname, method: 'GET', purpose: 'discover.feed' }, worktree: 'permissions-audit' });
     const req = lib.get(
       parsed,
       {

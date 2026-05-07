@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { URL } from 'url';
 import { logger } from './logger';
+import { appendAuditEvent } from './auditLog';
 
 export interface RoadmapProject {
   name: string;
@@ -81,6 +82,7 @@ function getJson(url: string, timeoutMs: number): Promise<unknown> {
       return;
     }
     const lib = parsed.protocol === 'http:' ? http : https;
+    appendAuditEvent({ ts: Date.now(), kind: 'net.outbound', detail: { host: parsed.hostname, method: 'GET', purpose: 'roadmap.fetch' }, worktree: 'permissions-audit' });
     const req = lib.get(
       url,
       { headers: { 'User-Agent': 'claude-cockpit-vscode', Accept: 'application/json' } },

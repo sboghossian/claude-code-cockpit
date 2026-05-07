@@ -1,5 +1,12 @@
 (function () {
   const vscode = acquireVsCodeApi();
+  // Phase-1 worktree feat/launch-permissions-audit: expose the acquired
+  // VS Code API on window.cockpit so sibling scripts (e.g. sidebar.audit.js)
+  // can postMessage without re-acquiring (acquireVsCodeApi is single-shot).
+  if (typeof window !== 'undefined') {
+    window.cockpit = window.cockpit || {};
+    window.cockpit.vscode = vscode;
+  }
   const root = document.getElementById('root');
   let lastSnapshot = null;
   let minedPromptsState = null; // { prompts: MinedPrompt[], selected: Set<fingerprint> }
@@ -3028,13 +3035,22 @@
       `;
     }
 
+    // permissions-audit (Phase 1): the Keys / Outbound / Audit-Log sub-views
+    // are rendered by widgets registered through the Phase-0 bridge
+    // (auditKeys / auditOutbound / auditLog in media/sidebar.audit.js). We
+    // append their sub-tab buttons here and delegate render to whichever
+    // widget id corresponds to the active view.
+    const auditCount = snap && snap.audit && typeof snap.audit.last24h === 'number' ? snap.audit.last24h : 0;
     const subBar = `
       <div class="sub-tab-bar">
         <button class="sub-tab ${view === 'overview' ? 'sub-tab-active' : ''}" data-security-view="overview">Overview</button>
-        <button class="sub-tab ${view === 'secrets' ? 'sub-tab-active' : ''}" data-security-view="secrets">Secrets <span class="chip-count">${(sec.secrets || []).length}</span></button>
+        <button class="sub-tab ${view === 'secrets' ? 'sub-tab-active' : ''}" data-security-view="secrets">Leaks <span class="chip-count">${(sec.secrets || []).length}</span></button>
         <button class="sub-tab ${view === 'env' ? 'sub-tab-active' : ''}" data-security-view="env">.env <span class="chip-count">${(sec.envFiles || []).length}</span></button>
         <button class="sub-tab ${view === 'git' ? 'sub-tab-active' : ''}" data-security-view="git">Git <span class="chip-count">${(sec.gitRemotes || []).length}</span></button>
         <button class="sub-tab ${view === 'mcp' ? 'sub-tab-active' : ''}" data-security-view="mcp">MCP <span class="chip-count">${(sec.mcpServers || []).length}</span></button>
+        <button class="sub-tab ${view === 'keys' ? 'sub-tab-active' : ''}" data-security-view="keys">Keys</button>
+        <button class="sub-tab ${view === 'outbound' ? 'sub-tab-active' : ''}" data-security-view="outbound">Outbound <span class="chip-count">${auditCount}</span></button>
+        <button class="sub-tab ${view === 'auditLog' ? 'sub-tab-active' : ''}" data-security-view="auditLog">Audit log</button>
       </div>
     `;
 
@@ -3044,6 +3060,13 @@
     else if (view === 'env') body = securityEnvBody(sec);
     else if (view === 'git') body = securityGitBody(sec);
     else if (view === 'mcp') body = securityMcpBody(sec);
+    else if (view === 'keys' || view === 'outbound' || view === 'auditLog') {
+      const widgetId = view === 'keys' ? 'auditKeys' : view === 'outbound' ? 'auditOutbound' : 'auditLog';
+      const ext = EXTERNAL_COMPONENTS[widgetId];
+      body = ext && typeof ext.render === 'function'
+        ? ext.render(snap)
+        : '<p class="empty">Audit module not loaded.</p>';
+    }
 
     const truncatedNote = sec.truncated
       ? `<p class="empty" style="font-size: 10px;">⚠ Scan capped — repo is large. Findings shown are partial.</p>`

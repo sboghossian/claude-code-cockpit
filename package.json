@@ -110,6 +110,14 @@
       {
         "command": "claudeCockpit.obsidian.refreshGraph",
         "title": "Claude Cockpit: Refresh Obsidian Graph"
+      },
+      {
+        "command": "claudeCockpit.audit.export",
+        "title": "Claude Cockpit: Export Audit Log"
+      },
+      {
+        "command": "claudeCockpit.keys.add",
+        "title": "Claude Cockpit: Add API Key (SecretStorage)"
       }
     ],
     "configuration": {
@@ -200,6 +208,11 @@
           "type": "boolean",
           "default": true,
           "description": "HEAD-probe the always-live subdomains in your PILOT memory every 60s so the dots reflect reality. Disable for fully local operation with zero outbound HEAD requests."
+        },
+        "claudeCockpit.audit.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Append meta-events (outbound network calls, key-add/delete) to ~/.claude/.cockpit/audit.log. Local-only; never exfiltrated. Drives the Audit, Outbound, and Keys sub-views in the Security tab. Disable for zero-write operation — existing log files are preserved but no new events are appended."
         }
       }
     },
@@ -216,7 +229,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

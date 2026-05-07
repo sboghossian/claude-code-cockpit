@@ -7,6 +7,7 @@ import { readGraphSummaryForPrimaryVault } from './graph';
 import { MacHealthSnapshot, readMacHealthSync } from './macHealth';
 import { RoutinesStatus, readRoutinesStatus } from './routines';
 import { record as recordTime } from './telemetry';
+import { readAuditSnapshot } from './auditLog';
 import {
   ActivityHeatmap,
   AgentDef,
@@ -229,10 +230,15 @@ export interface CockpitSnapshot {
   // Lightweight summary only — the full {nodes, edges} payload is potentially
   // megabytes for large vaults, so the webview lazy-loads it on tab open.
   obsidianGraph?: { nodeCount: number; edgeCount: number; vault: string } | undefined;
-  // === replay-timeline ===
+  // === replay-timeline (forward-declared; replay-timeline PR provides values) ===
   // Small, postMessage-friendly index of the active session JSONL. Full event
   // list + per-step file diffs are pulled lazily via `replay.loadSession`.
   replayIndex?: ReplayIndexSnapshot;
+  // === permissions-audit ===
+  // Optional rollup so the Security tab can render "X events / 24h,
+  // last: api.github.com" without a round-trip; full log is fetched on demand
+  // via audit.refresh.
+  audit?: { last24h: number; lastDomain: string | undefined };
 }
 
 /**
@@ -2072,6 +2078,10 @@ function snapshotInner(
   const rtk = readRTKSavingsSync();
   const macHealth = readMacHealthSync();
   const routines = recordTime('snapshot.readRoutines', () => readRoutinesStatus(cloudRoutinesEnabled === true));
+  // permissions-audit: cheap rollup of recent audit events so the Security
+  // tab can show a 24h count without a separate round-trip. The full log is
+  // fetched lazily on demand via the audit.refresh message.
+  const audit = recordTime('snapshot.audit', () => readAuditSnapshot());
   const greeting = computeGreeting();
   const gitBranch = readGitBranchSync(cwd ?? (active ? active.decodedPath : undefined));
   const cockpitStats = computeStats({
@@ -2172,6 +2182,7 @@ function snapshotInner(
           ? { nodeCount: summary.nodeCount, edgeCount: summary.edgeCount, vault: summary.vaultName }
           : undefined;
       }),
+      audit,
     };
   }
 
@@ -2279,6 +2290,7 @@ function snapshotInner(
         ? { nodeCount: summary.nodeCount, edgeCount: summary.edgeCount, vault: summary.vaultName }
         : undefined;
     }),
+    audit,
   };
 }
 

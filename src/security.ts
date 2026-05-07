@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { logger } from './logger';
+import { OutboundDomainCount, outboundDomainTail as auditOutboundDomainTail } from './auditLog';
 
 // Local-only security audit. Read-only, no network, no remote APIs. The
 // goal is to flag obvious leaks before they ship: tracked .env files,
@@ -346,6 +347,14 @@ export function summarizeFindings(snap: SecuritySnapshot): {
     envTracked,
     mcpInline,
   };
+}
+
+// Phase-1 worktree feat/launch-permissions-audit — thin wrapper that lets
+// the Security tab's Outbound sub-view consume the audit log without
+// importing it directly. Keeps security.ts the single point of contact for
+// the webview's security-related data.
+export function outboundDomainTail(n: number): OutboundDomainCount[] {
+  return auditOutboundDomainTail(n);
 }
 
 // Cheap version of the snapshot — used by the badge in the tab label so we
