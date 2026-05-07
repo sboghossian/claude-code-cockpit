@@ -34,6 +34,16 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - Pure additive: zero existing palette colors removed. Users on `theme: 'auto'` (the default) still inherit VSCode's theme via `--vscode-*` variables and see no visual change.
 - No new tests required — visual change only. Baseline 47/47 still passes.
 
+## [Unreleased] — feat/launch-obsidian-graph
+
+### Changed (obsidian-graph, Phase 1)
+
+- **Obsidian tab now renders a real-time vault graph** instead of the recent-notes list. Powered by a vendored 63 KB `d3-force` build at `media/vendor/d3.min.js` (no CDN, no new npm runtime dep) and a sibling renderer `media/sidebar.graph.js` registered via the Phase-0 `registerSidebarScript` bridge. Nodes = notes, edges = `[[wikilinks]]`, click any node opens it in Obsidian via `obsidian://open?vault=...&file=...`. Pan/zoom/drag built in. Files Claude touched in the active session render in the accent color.
+- **`src/graph.ts`** — vault walker, wikilink parser (handles `[[link]]`, `[[link|alias]]`, `[[link#section]]`, fenced-code-block exclusion), edge resolver (basename + path forms, ghost nodes for dangling links), and a `~/.claude/.cockpit/graph-cache-<vaultId>.json` cache keyed on the highest `.md` mtime so warm loads are sub-10 ms on a 5 k-note vault.
+- **Snapshot extension** — `CockpitSnapshot.obsidianGraph` is an OPTIONAL `{ nodeCount, edgeCount, vault }` summary. The full `{ nodes, edges }` payload (potentially megabytes) is lazy-loaded via a `graph.refresh` → `graph.payload` round-trip, so the regular cockpit snapshot stays small.
+- **New command** — `claudeCockpit.obsidian.refreshGraph` (Command Palette: "Claude Cockpit: Refresh Obsidian Graph") opens the sidebar, switches to the Obsidian tab, and triggers a fresh build.
+- **Inbound message types** — `graph.refresh`, `graph.openInObsidian`, `graph.pickVault` (the last one is a v1.1 placeholder for a vault picker UI; v1.0 ships using the primary vault from `readObsidianStatus`).
+
 ## [0.21.0] — 2026-05-06
 
 ### Fixed

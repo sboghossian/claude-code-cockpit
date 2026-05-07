@@ -365,3 +365,36 @@ bar + header. CSS-only worktree per the launch plan; lands first in Phase 1.
 
 - [ ] Screen-reader-perfect ARIA narration on every tab body (tab bar + header + Now + Talk + Welcome + Security covered here; the long tail follows).
 - [ ] Programmatic Left/Right arrow key navigation between tabs (roving tabindex makes Tab work; arrow-key handler is a v1.1 polish).
+## v1.0 — obsidian-graph
+
+Goal: replace the obsidian tab's recent-notes list with a real-time vault graph. Stephane only cares about the topology and click-through, not note bodies. Ship the static graph + "today's touches" overlay; vault picker + per-session overlay defer to v1.1 (per the cut-line in `tasks/launch/PLAN.md`).
+
+### Done
+
+- [x] `src/graph.ts` — wikilink parser (plain / alias / section / fenced-code-aware), vault walker (depth 8, 1 MiB read cap per file), edge resolver (id + basename forms, ghost nodes for dangling links), atomic-write JSON cache at `~/.claude/.cockpit/graph-cache-<vaultId>.json`, `getOrBuildGraph` with mtime-based invalidation
+- [x] `media/vendor/d3.min.js` — locally bundled IIFE, 64053 bytes / 62.55 KiB minified (well under the 250 KB plan budget). Bundles only `d3-force`, `d3-selection`, `d3-zoom`, `d3-drag` as `window.d3`. No CDN. No npm runtime dep added to `package.json`
+- [x] `media/sidebar.graph.js` — d3-force renderer mounted into `#cockpit-graph-container`. Registered via `window.cockpit.registerComponent` is unnecessary here because the renderer mounts into a placeholder owned by the existing `obsidianSection`; we use the Phase-0 `registerSidebarScript` bridge so the script loads after `sidebar.js`
+- [x] Pan/zoom/drag (d3-zoom + d3-drag), click-to-open via `obsidian://` (host-side `vscode.env.openExternal` in `graph.openInObsidian` handler)
+- [x] "Touched today" overlay — nodes whose path matches any entry in `claudeData.stats.filesTouched` render in `--vscode-charts-orange`
+- [x] `src/sidebarProvider.ts` — `graph.refresh` / `graph.openInObsidian` / `graph.pickVault` inbound message types + `refreshGraph` private method that yields once via `setImmediate` so the message tick stays responsive on a 5 k-note vault
+- [x] `src/extension.ts` — registers `media/vendor/d3.min.js` (loaded first) + `media/sidebar.graph.js` via `registerSidebarScript`; new `claudeCockpit.obsidian.refreshGraph` command
+- [x] `src/claudeData.ts` — `CockpitSnapshot.obsidianGraph?: { nodeCount; edgeCount; vault }` (lightweight summary; full payload lazy-loads on tab open)
+- [x] `media/sidebar.js` — `obsidianSection` replaced with placeholder div + Refresh button; `window.cockpit.postMessage` and `window.cockpit.getLastSnapshot` exposed for sibling scripts (single `acquireVsCodeApi` rule)
+- [x] `media/sidebar.css` — `.cockpit-graph-*` block at the end (container, svg, link, node, isolated, touched variants)
+- [x] `package.json` — `claudeCockpit.obsidian.refreshGraph` command added (1 contribution)
+- [x] `test/graph.test.js` — 4 tests covering wikilink parser (plain / alias / section / fenced excluded), A↔B cycle stability, isolated-note inclusion, and cache hit + mtime-driven invalidation
+
+### Out of scope (deferred to v1.1)
+
+- [ ] "Filter by Claude session" overlay — color edges that were touched in a chosen replay-timeline session id (depends on `feat/launch-replay-timeline` shipping first)
+- [ ] Vault picker UI (multi-vault users currently get the primary vault from the Obsidian registry; the `graph.pickVault` message type is a no-op hook so v1.1 lands without a wire-format change)
+- [ ] Note-content preview on hover (out by Stephane's intent: "I only care about the graph")
+
+### Acceptance status
+
+- [x] Graph renders for medium vaults; cold scan logs the build time at `info`
+- [x] Cache hit (no .md mtime advance) avoids re-walk; verified by the `getOrBuildGraph` test
+- [x] Click-through opens `obsidian://` URI; vault id sanitized in handler before parse
+- [x] Falls back to "no vault detected" / "no notes found" empty states gracefully
+- [x] `npm test` 51/51 (was 47/47); `npm run compile` clean (TS strict, zero `any`)
+- [x] `node --check` clean for `media/sidebar.js`, `media/sidebar.graph.js`, and `media/vendor/d3.min.js`

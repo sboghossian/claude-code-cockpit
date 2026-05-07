@@ -1575,7 +1575,11 @@
   }
 
   function obsidianSection(snap) {
-    const obs = snap.obsidian || { installed: false, vaults: [], recentNotes: [] };
+    // Replaced in v1.0 with a graph view. The sibling script media/sidebar.graph.js
+    // mounts a d3-force layout into #cockpit-graph-container when the snapshot
+    // arrives. The "Save → Obsidian" / "Open vault" buttons stay above so the
+    // existing action surface is unchanged.
+    const obs = snap.obsidian || { installed: false, vaults: [] };
     if (!obs.installed) {
       return `
         <h2>Obsidian</h2>
@@ -1592,46 +1596,24 @@
     const vaultBadge = vault
       ? `<span class="obsidian-pill">vault: ${escapeHtml(vault.name)}</span>`
       : '';
+    const summary = snap.obsidianGraph || null;
+    const summaryLine = summary
+      ? `<p class="empty cockpit-graph-summary"><strong>${summary.nodeCount}</strong> notes · <strong>${summary.edgeCount}</strong> links · cached for <code>${escapeHtml(summary.vault || '')}</code></p>`
+      : `<p class="empty cockpit-graph-summary">Graph not built yet — click <strong>Refresh graph</strong> to scan the vault.</p>`;
     const actions = `
       <div class="obsidian-actions">
         <button class="office-btn" data-qa="save-obsidian">Save active session →</button>
         <button class="office-btn" data-qa="open-vault">Open vault in Obsidian</button>
+        <button class="office-btn" data-qa="graph-refresh">Refresh graph</button>
       </div>
     `;
-    const vaultsList = obs.vaults
-      .map(
-        (v) => `<li>
-          <div class="row">
-            <a class="left link" data-open-vault-byname="${escapeHtml(v.name)}">${escapeHtml(v.name)}</a>
-            <span class="right">${escapeHtml(v.path)}</span>
-          </div>
-        </li>`,
-      )
-      .join('');
-    const notes = (obs.recentNotes || []).slice(0, 12);
-    const notesHtml = notes.length
-      ? notes
-          .map(
-            (n) => `
-        <div class="note-card">
-          <div class="row">
-            <a class="left link note-title" data-open-note-vault="${escapeHtml(n.vaultName)}" data-open-note-rel="${escapeHtml(n.relPath)}" title="${escapeHtml(n.relPath)}">${escapeHtml(n.filename.replace(/\.md$/i, ''))}</a>
-            <span class="right">${escapeHtml(fmtRelative(n.lastModifiedAt))}</span>
-          </div>
-          ${n.excerpt ? `<div class="note-excerpt">${escapeHtml(n.excerpt)}</div>` : ''}
-          <div class="row" style="margin-top: 2px;">
-            <span class="left" style="color: var(--vscode-descriptionForeground); font-size: 10px;">${escapeHtml(n.relPath)}</span>
-          </div>
-        </div>`,
-          )
-          .join('')
-      : '<p class="empty">No notes yet.</p>';
     return `
-      <h2>Obsidian ${vaultBadge}</h2>
+      <h2>Obsidian graph ${vaultBadge}</h2>
       ${actions}
-      ${obs.vaults.length > 1 ? `<h3 class="sub-h">Vaults (${obs.vaults.length})</h3><ul class="list">${vaultsList}</ul>` : ''}
-      <h3 class="sub-h">Recent notes</h3>
-      ${notesHtml}
+      ${summaryLine}
+      <div id="cockpit-graph-container" class="cockpit-graph-container" data-vault-id="${escapeHtml(vault ? vault.id : '')}" data-vault-name="${escapeHtml(vault ? vault.name : '')}">
+        <div class="cockpit-graph-empty">Loading graph…</div>
+      </div>
     `;
   }
 
@@ -3497,6 +3479,14 @@
   if (typeof window !== 'undefined') {
     window.cockpit = window.cockpit || {};
     window.cockpit.registerComponent = registerExternalComponent;
+    // acquireVsCodeApi() can only be called once per webview, so sidebar.js
+    // owns the handle and re-exposes it. Sibling scripts should call
+    // window.cockpit.postMessage(...) instead of re-acquiring.
+    window.cockpit.postMessage = (msg) => vscode.postMessage(msg);
+    // Sibling scripts that need to know which snapshot is currently rendered
+    // can read this getter; we don't push a stream of events because the
+    // global 'message' bus already broadcasts every snapshot.
+    window.cockpit.getLastSnapshot = () => lastSnapshot;
   }
 
   // Fragments used as components but not standalone sections — they get
@@ -4763,6 +4753,14 @@
           vscode.postMessage({ type: 'startUsageDashboard' });
         } else if (qa === 'detect-usage') {
           vscode.postMessage({ type: 'detectUsageDashboard' });
+        } else if (qa === 'graph-refresh') {
+          // Hand off to the obsidian-graph sibling script. It owns the
+          // mount + the postMessage round-trip; we just nudge it.
+          if (window.cockpit && typeof window.cockpit.requestGraphRefresh === 'function') {
+            window.cockpit.requestGraphRefresh();
+          } else {
+            vscode.postMessage({ type: 'graph.refresh' });
+          }
         }
       });
     });

@@ -106,6 +106,10 @@
       {
         "command": "claudeCockpit.setDailyCap",
         "title": "Claude Cockpit: Set Daily Budget Cap"
+      },
+      {
+        "command": "claudeCockpit.obsidian.refreshGraph",
+        "title": "Claude Cockpit: Refresh Obsidian Graph"
       }
     ],
     "configuration": {

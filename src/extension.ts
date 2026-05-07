@@ -22,9 +22,16 @@ import {
 import { startAppUsageTracker } from './appUsage';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
+import { registerSidebarScript } from './plugin';
 
 export function activate(context: vscode.ExtensionContext): void {
   logger.info('claude-cockpit activating');
+  // Phase-1 obsidian-graph: register the d3 vendor + graph renderer scripts.
+  // The sidebar provider will rewrite each path to a webview-safe URI at
+  // render time. Vendor goes first so window.d3 exists before sidebar.graph.js
+  // touches it.
+  registerSidebarScript('media/vendor/d3.min.js');
+  registerSidebarScript('media/sidebar.graph.js');
   const status = createStatusBar();
 
   function readBudgetConfig(): BudgetConfig {
@@ -177,6 +184,17 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.env.openExternal(
         vscode.Uri.parse(`obsidian://open?vault=${encodeURIComponent(obs.primaryVault.name)}`),
       );
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.obsidian.refreshGraph', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('obsidian');
+      // Tell the webview to ask for a fresh graph payload. The provider
+      // routes 'graph.refresh' through refreshGraph() which posts back a
+      // 'graph.payload' message the renderer mounts.
+      provider.requestGraphRefresh();
     }),
   );
 

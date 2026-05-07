@@ -22,6 +22,7 @@ import { readMacHealth } from './macHealth';
 import { logger } from './logger';
 import { listSidebarScripts } from './plugin';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
+import { getOrBuildGraph, VaultGraph } from './graph';
 import {
   createRoutineSkill,
   CustomFeed,
@@ -102,7 +103,11 @@ interface InboundMessage {
     | 'markFirstRunComplete'
     | 'resetFirstRun'
     | 'openSettings'
-    | 'copyText';
+    | 'copyText'
+    // === obsidian-graph ===
+    | 'graph.refresh'
+    | 'graph.openInObsidian'
+    | 'graph.pickVault';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -129,6 +134,9 @@ interface InboundMessage {
   talkMode?: 'new-session' | 'resume' | 'background';
   text?: string;
   label?: string;
+  // === obsidian-graph ===
+  graphVaultId?: string;
+  graphRelPath?: string;
 }
 
 type CockpitTheme = 'auto' | 'dark' | 'light' | 'high-contrast';
@@ -545,6 +553,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
 
   setActiveTabFromHost(tab: string): void {
     this.view?.webview.postMessage({ type: 'setTab', tab });
+  }
+
+  /** Triggered from the command palette — same code path as the in-webview
+   *  "Refresh graph" button (graph.refresh inbound message). */
+  requestGraphRefresh(): void {
+    void this.refreshGraph(undefined);
   }
 
   runSearch(query: string): void {
@@ -1064,7 +1078,85 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      // === obsidian-graph ===
+      case 'graph.refresh': {
+        await this.refreshGraph(msg.graphVaultId);
+        return;
+      }
+      case 'graph.openInObsidian': {
+        if (!msg.graphVaultId || !msg.graphRelPath) return;
+        const obs = readObsidianStatus();
+        const v = obs.vaults.find((x) => x.id === msg.graphVaultId);
+        if (!v) return;
+        // Strip a leading scheme guard — relPath comes straight from the
+        // graph nodes we built, but defense in depth: never let `obsidian://`
+        // appear inside the file= param.
+        const safeRel = msg.graphRelPath.replace(/^obsidian:\/\//i, '');
+        void vscode.env.openExternal(vscode.Uri.parse(obsidianUriFor(v, safeRel)));
+        return;
+      }
+      case 'graph.pickVault': {
+        // Optional: future vault-picker. v1.0 ships using the primary vault
+        // surfaced by readObsidianStatus(); we keep this case as a no-op
+        // hook so the v1.1 vault-picker can land without a webview message
+        // contract change.
+        return;
+      }
     }
+  }
+
+  /**
+   * Build (or load from cache) the graph for the chosen vault and ship it back
+   * to the webview as a single message. Carrying it OUT-OF-BAND from the
+   * regular snapshot keeps the snapshot small for vaults with thousands of
+   * notes.
+   */
+  private async refreshGraph(vaultId: string | undefined): Promise<void> {
+    const obs = readObsidianStatus();
+    const vault = vaultId
+      ? obs.vaults.find((v) => v.id === vaultId)
+      : obs.primaryVault;
+    if (!vault) {
+      this.view?.webview.postMessage({
+        type: 'graph.payload',
+        payload: { error: 'no-vault' },
+      });
+      return;
+    }
+    let graph: VaultGraph;
+    try {
+      graph = await new Promise<VaultGraph>((resolve, reject) => {
+        // Yield once so the message handler returns before the (potentially
+        // multi-hundred-millisecond) walk runs.
+        setImmediate(() => {
+          try {
+            resolve(getOrBuildGraph(vault));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+    } catch (err) {
+      logger.warn(`graph: build failed for ${vault.name}: ${String(err)}`);
+      this.view?.webview.postMessage({
+        type: 'graph.payload',
+        payload: { error: 'build-failed', message: String(err instanceof Error ? err.message : err) },
+      });
+      return;
+    }
+    this.view?.webview.postMessage({
+      type: 'graph.payload',
+      payload: {
+        vaultId: graph.vaultId,
+        vaultName: graph.vaultName,
+        nodes: graph.nodes,
+        edges: graph.edges,
+        builtAt: graph.builtAt,
+      },
+    });
+    // The summary may have grown — refresh the main snapshot so the badge
+    // updates without the user having to reopen the tab.
+    this.refresh();
   }
 
   private openLatestJsonlInDir(dir: string): void {
