@@ -476,3 +476,45 @@ Phase 1 worktree (merge order #5 per PLAN.md). Adds tab pin / hide / drag-reorde
 - [x] COMPONENTS literal contents UNCHANGED — only ORDER + visibility manipulated
 - [x] Default rendering byte-identical when no user pref is active (verified via `applyOverlay returns base unchanged when no layout prefs are set` test + manual trace)
 
+## v1.0 — approval-queue
+
+### Added
+
+- [x] `src/snapshot.ts` — pre-action filesystem snapshot. Content-addressed (sha256), atomic copy + fsync + rename. `rollback()` verifies sha drift before overwriting; drifted files are `drifted-skipped` by default, user must explicitly force.
+- [x] `src/approvalQueue.ts` — file-backed queue at `~/.claude/.cockpit/queue.json`. Atomic JSON writes, single-fsync. States: `pending | approved | rejected | rolled-back | snapshot-failed`. Sources: `cockpit | jarvis`.
+- [x] `media/sidebar.approval.js` — webview UI; registers `approvalQueue` + `approvalDetail` widgets via the Phase-0 bridge (no edits to `COMPONENTS` literal). Click delegation at document level so re-renders by sidebar.js do not strip handlers.
+- [x] `media/sidebar.approval.css` — `.cockpit-approval-*` selectors only.
+- [x] `Approve` tab + tab icon. `approvalCounts` carried in `CockpitSnapshot` (counts only, full queue fetched lazily).
+- [x] 4 commands: `claudeCockpit.approval.{openQueue,bulkApprove,bulkReject,revertLast}`.
+- [x] 3 settings: `claudeCockpit.approval.{autoSnapshot,snapshotMaxBytes,requireForToolNames}`.
+- [x] Jarvis integration preserved: `showInformationMessage` notification flow unchanged; jarvis pendings additionally surface in the new tab; approving a `jarvis:*` entry forwards to `decideApproval()` from `jarvis.ts`.
+
+### Tests
+
+- [x] `test/snapshot.test.js` — 7 tests: capture roundtrip, drift detection, absent file rollback (delete), over-budget rejection, unchanged no-op, prune-oldest, no leftover tmp files.
+- [x] `test/approvalQueue.test.js` — 7 tests: persistence, snapshot-roundtrip, snapshot-failed, decide transitions, jarvis ingest, counts, drift-clean.
+
+### Hook recipe (manual; v1.0 does not enforce)
+
+To enqueue actions before they run, add to `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "code --command claudeCockpit.approval.openQueue" }]
+      }
+    ]
+  }
+}
+```
+
+v1.1 will ship a stock hook that round-trips through the queue and blocks until decided.
+
+### Out of scope (per brief)
+
+- [x] Cockpit does not modify session JSONL or any boo-mesh DB.
+- [x] No autonomous multi-step LLM action: queue is observe + revert; humans decide.
+- [x] Enforcement (blocking PreToolUse) deferred to v1.1.
+
