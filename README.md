@@ -1,14 +1,29 @@
 # Claude Code Cockpit
 
-> The local-first HUD for Claude Code. Every session, every token, every dollar — in your VSCode sidebar. Read-only. 100% local.
+> The local-first HUD for Claude Code. Every session, every token, every dollar — in your VSCode sidebar. Read-only by default. 100% local until you opt in.
 
 [![VSCode Marketplace](https://img.shields.io/visual-studio-marketplace/v/dashable.claude-code-cockpit?label=Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=dashable.claude-code-cockpit) [![GitHub release](https://img.shields.io/github/v/release/sboghossian/claude-code-cockpit?label=GitHub)](https://github.com/sboghossian/claude-code-cockpit/releases) [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ![Claude Code Cockpit — Welcome, Now, and Customize panels](media/screenshots/hero.png)
 
-Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **Customizable**: a header strip with logo + actions sits above a tab bar you control — pick which tabs are visible, build a **Custom** tab from any of 30+ widgets, and switch between auto / dark / light theme.
+Surfaces the state Claude Code already writes to disk. Plus your Mac. Plus your Obsidian. Plus claude.ai. **Customizable**: a header strip with logo + actions sits above a tab bar you control — pick which tabs are visible, drag-reorder them into named layout presets, pop them out into a fullscreen grid, build a **Custom** tab from any of 30+ widgets, and switch between auto / dark / light / **high-contrast (AA+)** theme.
 
-**Available tabs**: Custom · Now · Mac · Watchtower · Agents · Routines · Discover · Roadmap · Changelog · Manage · Chat · Search · Obsidian · Memory · Prompts · Skills · Projects · Files · Config · Help. Each tab shows an inline-SVG line icon beside its label; icons use `currentColor` and adapt to dark and light themes. The Custom, Now, and Help tabs are pinned; the rest can be hidden via the Customize panel.
+## What's new in v1.0
+
+- **Approve** — pending Claude actions awaiting human approval. Pre-action filesystem snapshots; one-click revert with sha256 drift detection. Aligns with the LeCun world-model stance: no autonomous multi-step LLM action without lookahead + scoring + rollback + human gate.
+- **Replay** — scrub backwards through any active session, see exactly what changed at each step, fork the JSONL prefix into a Cockpit-owned dir. Cost projection card with daily-cap warning.
+- **Gallery** — browse every skill in `~/.claude/skills/` and agent in `~/.claude/agents/`. Share via clipboard. Install from HTTPS URL with SHA256 preview.
+- **Tutorial** — recommendation cards built from your session history. "You ran `/qa` 4 times — try `/qa --report-only`."
+- **Plugin API** — formal extension contract. Phase-1+ widgets register via `window.cockpit.registerComponent` without editing the COMPONENTS literal. Sibling scripts emitted as nonce-tagged `<script>` tags; CSP `connect-src 'none'` preserved.
+- **Permissions audit log** — append-only NDJSON at `~/.claude/.cockpit/audit.log`. Six outbound network sites wrapped. Security tab gains Keys (VS Code SecretStorage), Outbound, and Audit-log sub-views.
+- **Tab system v2** — pin / hide / drag-reorder + named layout presets ("Coding", "Research", "Reviewing PRs") + pop-out fullscreen 4-column grid + cmd/ctrl+1..9 to jump.
+- **Obsidian graph** — d3-force vault graph replaces the old recent-notes list. Click-through opens in Obsidian. Files Claude touched in the active session render in the accent color. Vendored 63 KB d3 build, no CDN.
+- **Mobile companion** (read-only) — sanitized snapshot at `~/.claude/.cockpit/queue.public.json`. Serve via your Cloudflare Tunnel + Access SSO; the page at `cockpit.dashable.dev/mobile/` rides the Access cookie. Default off.
+- **Opt-in PostHog telemetry + crash reporting** — three independent settings, all default off. Hand-rolled https.request (zero new deps). Detail redacted at module boundary; outbound mirrored to the audit log. Refuses HAQQ project 92178.
+- **a11y** — WCAG AA across light + dark, AA+ high-contrast palette, `prefers-reduced-motion` honored on every CSS animation + Talk's rAF loop. Tab bar / header / theme picker get full ARIA decoration.
+- **Onboarding sandbox** — synthesized fake project under `~/.claude/.cockpit/sandbox/` so first-run users can click around without touching real sessions. Status bar gains pending-approvals badge + audit-events-24h pill + Talk launcher.
+
+**Available tabs**: Custom · Now · **Approve** · **Replay** · Mac · Watchtower · Agents · Routines · **Gallery** · **Tutorial** · Discover · Timeline · History · Settings · Obsidian · Library · Skills · Browse · Talk · Security · Self · Help. Each tab shows an inline-SVG line icon beside its label; icons use `currentColor` and adapt to every theme. Custom, Now, and Help are pinned by default; the rest can be hidden, reordered, or saved into named layout presets via the Customize panel.
 
 **Global search** (in the header): type any string to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings — with type-filter chips to narrow results. Click any hit to jump to the right tab.
 
@@ -42,11 +57,14 @@ Updates live as Claude works (filesystem watcher + 400ms debounce).
 
 ## Privacy
 
-Local-first. No telemetry, no analytics, no third-party services. The webview itself runs under a strict CSP that blocks `connect-src` and `form-action`. The extension host makes only **three** bounded outbound calls, all disclosed and configurable:
+Local-first. The webview runs under a strict CSP that blocks `connect-src` entirely. The extension host makes only the following bounded outbound calls, all disclosed and configurable:
 
 1. `api.github.com/repos/sboghossian/claude-code-cockpit/releases/latest` — update check, **on by default** (`claudeCockpit.updateCheck.enabled`).
 2. `api.github.com/search/repositories` — Discover tab's GitHub trending fetch, **off by default** (`claudeCockpit.discover.enabled`), only on Refresh.
 3. `roadmap.dashable.dev/api/projects` (or `localhost:3777` locally) — Roadmap tab's project metadata, **on by default** (`claudeCockpit.roadmap.enabled`).
+4. `app.posthog.com/i/v0/e/` — opt-in usage analytics + crash reporting, **off by default**. Three independent gates (`claudeCockpit.telemetry.enabled`, `crashReports`, `projectId`); until all three are non-default the module is byte-identical no-op. Detail redacted at the module boundary; every outbound POST is mirrored to `~/.claude/.cockpit/audit.log` so you can SEE what left the machine. Cockpit refuses PostHog project id 92178 (HAQQ Legal AI's customer-telemetry project) so extension diagnostics never co-mingle with customer data.
+
+Every outbound network call is also logged to the **append-only audit log** at `~/.claude/.cockpit/audit.log` — you can grep it, tail it, or browse it via the Security tab's Audit-log sub-view. Six wrap sites cover every `https.request` / `https.get` in the extension.
 
 Set any flag to `false` for fully local operation with zero outbound traffic. Zero runtime dependencies. See [`PRIVACY.md`](./PRIVACY.md) for the full audit trail.
 
