@@ -248,6 +248,16 @@ export interface CockpitSnapshot {
   // Pending approvals are file-backed and large; the main snapshot only carries
   // counts. Full list is fetched on demand via `approval.fetchQueue`.
   approvalCounts?: { pending: number; recent: number };
+  // === onboarding-sandbox ===
+  // Sandbox tour state — `active: true` means the user clicked "Start 3-min
+  // demo" from Welcome. Only the lightweight pointer ships in the snapshot;
+  // the synthetic JSONL itself is read on demand from sessionFile.
+  sandbox?: {
+    active: boolean;
+    projectRoot: string | undefined;
+    sessionFile: string | undefined;
+    sessionId: string | undefined;
+  };
 }
 
 /**

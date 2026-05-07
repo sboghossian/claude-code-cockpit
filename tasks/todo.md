@@ -547,3 +547,41 @@ Phase 1 of the v1.0 launch wave. Differentiation feature ("watch competitors don
 - **Fork semantics.** Claude Code's session loader walks `~/.claude/projects/<encoded-cwd>/` only — it does NOT auto-discover `~/.claude/.cockpit/forks/`. So `replay.fork` is currently an EXPORT, not a Claude Code session handoff. Faithful prefix the user can audit, share, or `cp` into their project dir under a fresh uuid. If Claude Code grows a `--resume <path>` flag (or honors a session-id alias dir), we drop a one-liner. Documented in `CHANGELOG.md` and the in-tab toast.
 - **Diff cache invalidation.** Cache key is `(sessionFile, mtime, size)`. JSONL is append-only so when mtime advances we re-parse the whole file from scratch (LRU-evicting at 32 entries). Future optimization: tail-append parse — skip lines we already have. Skipped for v1.
 - **Replay event sampling.** Above `claudeCockpit.replay.maxEventsPerSession` (default 5000) we sample uniformly so the slider stays usable. The full event list is still parseable via `getCachedSession` host-side; only the postMessage payload is sampled.
+
+## v1.0 — onboarding-sandbox
+
+### Built
+- [x] `src/sandbox.ts` — synthesize `~/.claude/.cockpit/sandbox/demo-project/` + 30-event JSONL transcript that passes the existing parseLine() validator
+- [x] `src/notifications.ts` — central `notify()` with 30 s per-key debounce + `claudeCockpit.notifications.enabled` setting gate
+- [x] `src/statusBar.ts` extended — pending-approval badge, audit-events-24h pill, Talk launcher (all hide on empty)
+- [x] `media/sidebar.tutorial.js` — Tutorial tab widgets (`tutorialRecs` recommendation cards + `tutorialNudges` history-mined suggestions)
+- [x] Welcome banner — "Start 3-min demo" button → `sandbox.start` message; switches to "Exit demo" when active
+- [x] Tutorial tab registered via Phase-0 plugin bridge (no edits to COMPONENTS literal); `DEFAULT_TAB_COMPOSITIONS.tutorial` + TAB_ICONS + tabCatalogue entries added
+- [x] `evaluateNotifications()` watcher fires on (a) approval pending 0→≥1, (b) audit `tool.invoke` `outcome: 'blocked'` newer than last seen, (c) today's spend ≥ 80 % of daily cap (once per local day)
+- [x] 6 new commands: `tutorial.open`, `sandbox.start`, `sandbox.exit`, `audit.open`, `talk.open`, `notifications.test`
+- [x] CSS block appended to `media/sidebar.css` — every selector prefixed `.cockpit-tutorial-`
+- [x] Snapshot extension: `CockpitSnapshot.sandbox?` (optional, undefined-safe)
+- [x] `package.json` `scripts.test` deduplicated (was three duplicate keys from parallel merges)
+
+### Tests
+- [x] `test/sandbox.test.js` — 3 tests: synth JSONL shape (parses, 30 events, sessionId), idempotent re-start, teardown via `exitSandbox`
+- [x] `test/notifications.test.js` — 4 tests: dedupes within window, honors custom debounceMs, routes warn level to showWarningMessage, returns undefined when settings disable
+- [x] `test/statusBar.test.js` — 3 tests: approval count rendering on transition, hide-all on undefined snapshot, audit dot when last24h > 0
+- [x] `test/tutorial.test.js` — 3 tests: high-impact recs surfaced, dismissal Set filter drops only targeted ids, minePrompts ordering invariant (occurrences DESC)
+
+### Acceptance check
+- [x] `npm run compile` clean (TypeScript strict, zero `any`)
+- [x] `node --check media/sidebar.tutorial.js` clean
+- [x] `npm test` — **127 tests, 127 pass, 0 fail.** 114 baseline + 13 new. No regressions. Initial run inadvertently broke the claudeData fixture-driven tests because my new test files were eagerly `require`-ing modules that capture `os.homedir()` at module load (sandbox.ts, statusBar.ts via claudeData.ts) — `claudeData.test.js`'s sibling auto-discoverer loads us BEFORE it pins `process.env.HOME`, so the captured paths froze against the dev's real `~/`. Fix: deferred all `require('../out/...')` calls into the test bodies (same pattern as `test/replay.test.js`) AND switched `src/sandbox.ts` from a frozen `REF` constant to runtime `refRoot()`/`refProject()`/`refSessions()` helpers (same pattern as `src/replay.ts:forksDirInternal`).
+- [x] Status bar: 3 new items, all clickable, all hide when their signal is empty.
+- [x] Tutorial tab populates with at least 5 recommendations on a real session history (drives off `computeRecommendations`'s existing 30+ rec types + `minePrompts`).
+
+### Deferred to v1.1
+- **Full sandbox session redirection.** The brief proposes hot-swapping `findActiveSession` so the cockpit's snapshot pipeline ingests the synthetic JSONL as if it were the live session. We chose NOT to do that in v1.0 — the pointer is read inside `claudeData.snapshot()` and feeds dozens of consumers (cost tables, replay, audit, jarvis), so a global override is a load-bearing change for a feature that's nice-to-have. Instead we ship the synthetic JSONL on disk + the SANDBOX overlay banner, and let the user open the JSONL via the Replay tab's "Load this file" workflow when they want to scrub through a fake session. Honest answer to "what's a fake project?" — see "Open questions" below.
+- **Walkthrough tooltip steps.** The brief calls for a 5-step dismissable walkthrough through Talk → Approval → Replay. v1.0 ships the recommendations-driven Tutorial tab and the Welcome-tab "Start 3-min demo" entry point; the actual numbered tooltip overlay is a v1.1 surface (it depends on a generic in-webview tooltip primitive we haven't built yet).
+- **`notifyAgentFinished` auto-fire.** The helper is exported from `src/notifications.ts`, but Cockpit doesn't observe agent lifecycle events today — that's a v1.1 hook integration story. Surface is in place so callers can fire it programmatically.
+
+### Open questions / scope ambiguities
+
+- **What is a "fake project"?** This was the genuinely-undefined corner of the brief. Three plausible answers: (a) a synthetic JSONL on disk + a sentinel CWD, surfaced through the existing snapshot pipeline (high blast radius — every consumer of the `cwd` pointer downstream needs to know about sandbox mode), (b) a synthetic JSONL on disk + a tour overlay banner that reads from the JSONL on demand without redirecting the active session (low blast radius, what we shipped), or (c) a full second `vscode.window.createWebviewPanel` running its own provider in sandbox mode (huge new surface). Picked (b) — the brief explicitly authorizes deferring "the SANDBOX (3-min Talk/agent demo)" to v1.1 in PLAN.md cut lines, so we hedged toward the safe variant that still demonstrates the cockpit on synthetic data.
+- **PreToolUse hook for the audit-blocked notification.** Today the notification only fires when an external process appends a `tool.invoke` event with `outcome: 'blocked'` to `~/.claude/.cockpit/audit.log`. Cockpit doesn't ship that hook itself — it observes the log. v1.1 will ship a stock hook recipe so the trigger is wired for users out of the box.

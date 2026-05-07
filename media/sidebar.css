@@ -2913,3 +2913,92 @@ select[data-prompt-cat-new] {
   line-height: 1.4;
   margin-bottom: 8px;
 }
+
+/* === onboarding-sandbox: tutorial widgets + sandbox banner =================
+   All selectors prefixed `.cockpit-tutorial-` per the launch brief. Visual
+   tone matches the existing Welcome banner so first-run users don't see a
+   jarring style shift between Welcome and Tutorial.
+*/
+.cockpit-tutorial-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: rgba(255, 191, 0, 0.08);
+  border: 1px solid rgba(255, 191, 0, 0.3);
+  border-radius: 6px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.cockpit-tutorial-banner-pill {
+  background: rgba(255, 191, 0, 0.85);
+  color: #1a1a1a;
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.cockpit-tutorial-banner-btn {
+  margin-left: auto;
+}
+.cockpit-tutorial-recs {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cockpit-tutorial-rec {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+}
+.cockpit-tutorial-rec-high {
+  border-left: 3px solid var(--vscode-errorForeground, #f48771);
+}
+.cockpit-tutorial-rec-med {
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+}
+.cockpit-tutorial-rec-low {
+  border-left: 3px solid var(--vscode-editorInfo-foreground, #3794ff);
+}
+.cockpit-tutorial-rec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cockpit-tutorial-rec-why {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  margin: 0 0 6px 0;
+  line-height: 1.4;
+}
+.cockpit-tutorial-rec-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cockpit-tutorial-hint {
+  font-size: 11px;
+  margin: 4px 0 8px;
+}
+.cockpit-tutorial-nudges {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cockpit-tutorial-nudge {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.06));
+  border-radius: 6px;
+  font-size: 11px;
+}
+.cockpit-tutorial-nudge-why {
+  margin: 4px 0;
+  color: var(--vscode-descriptionForeground);
+}

@@ -79,6 +79,17 @@ import {
   previewInstall,
   validateInstallUrl,
 } from './gallery';
+// === onboarding-sandbox ===
+import {
+  exitSandbox,
+  startSandbox,
+} from './sandbox';
+import {
+  notify,
+  notifyApprovalQueueLanded,
+  notifyAuditBlocked,
+  notifyCostWarning,
+} from './notifications';
 
 interface InboundMessage {
   type:
@@ -176,7 +187,14 @@ interface InboundMessage {
     | 'replay.scrubTo'
     | 'replay.fork'
     | 'replay.exportDiff'
-    | 'cost.checkBudget';
+    | 'cost.checkBudget'
+    // === onboarding-sandbox ===
+    | 'sandbox.start'
+    | 'sandbox.exit'
+    | 'tutorial.fetchRecs'
+    | 'tutorial.dismiss'
+    | 'tutorial.gotoTab'
+    | 'notify.fire';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -237,6 +255,15 @@ interface InboundMessage {
   replayIndexB?: number;
   /** When provided, fork includes only events through this index. */
   replayForkAtIndex?: number;
+  // === onboarding-sandbox ===
+  // (tabId is already declared in the tab-system-v2 block above; tutorial.gotoTab
+  // reuses that field rather than introducing a duplicate.)
+  /** Recommendation id to dismiss for the rest of this session. */
+  recId?: string;
+  /** Notification key — used by webview-side tests / debugging only. */
+  notifyKey?: string;
+  notifyMessage?: string;
+  notifyLevel?: 'info' | 'warn';
 }
 
 /**
@@ -305,6 +332,11 @@ const PINS_KEY = 'claudeCockpit.pinnedMemory';
 const USER_PREFS_KEY = 'claudeCockpit.userPrefs';
 const CUSTOM_FEEDS_KEY = 'claudeCockpit.customFeeds';
 const FIRST_RUN_KEY = 'claudeCockpit.firstRunCompleted';
+// === onboarding-sandbox: persistent flag — sandbox active across reloads.
+const SANDBOX_ACTIVE_KEY = 'claudeCockpit.sandbox.active';
+const SANDBOX_SESSION_KEY = 'claudeCockpit.sandbox.sessionFile';
+const SANDBOX_PROJECT_KEY = 'claudeCockpit.sandbox.projectRoot';
+const SANDBOX_SESSION_ID_KEY = 'claudeCockpit.sandbox.sessionId';
 // permissions-audit: index of secret-storage key NAMES (never values).
 const KEYS_INDEX_KEY = 'claudeCockpit.audit.keysIndex';
 function secretKeyFor(name: string): string {
@@ -410,6 +442,19 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   // ordering doesn't have to mkdir on import. ===
   private approvalQueue: ApprovalQueueStore | undefined;
   private approvalQueueWatcher: fs.FSWatcher | undefined;
+  // === onboarding-sandbox ===
+  // In-memory dismissed-rec ids — wiped on extension reload by design (the
+  // brief calls these "session-scoped"; nothing should follow the user across
+  // VS Code restarts).
+  private dismissedRecs = new Set<string>();
+  // Track previous approval pending count so we can fire a notification on
+  // the 0 → 1 (or higher) transition without spamming on every snapshot.
+  private prevApprovalPending = 0;
+  // Same for the audit blocked-event signature; we only fire when a NEW
+  // tool.invoke event lands with outcome:'blocked' since the last refresh.
+  private prevAuditLastBlockedTs = 0;
+  // Cost-warning gate: fire once per "today" once we cross 80% of cap.
+  private prevCostWarnDate: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -701,10 +746,23 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     // by sessionFile + mtime + size in src/sessionDiff.ts so this is cheap on
     // every refresh (parse only when JSONL grew).
     const replayIndex = buildReplayIndex(snap.localLayout.activeSessionFile);
+    // === onboarding-sandbox: surface sandbox state on every snapshot push. ===
+    const sandboxActive = this.globalState.get<boolean>(SANDBOX_ACTIVE_KEY, false) === true;
+    const sandboxState = sandboxActive
+      ? {
+          active: true,
+          projectRoot: this.globalState.get<string>(SANDBOX_PROJECT_KEY) || undefined,
+          sessionFile: this.globalState.get<string>(SANDBOX_SESSION_KEY) || undefined,
+          sessionId: this.globalState.get<string>(SANDBOX_SESSION_ID_KEY) || undefined,
+        }
+      : { active: false, projectRoot: undefined, sessionFile: undefined, sessionId: undefined };
+    // Filter out recommendations the user explicitly dismissed this session.
+    const filteredRecs = recommendations.filter((r) => !this.dismissedRecs.has(r.id));
     const payload = {
       ...snap,
       replayIndex,
-      recommendations,
+      recommendations: filteredRecs,
+      sandbox: sandboxState,
       prompts,
       pinnedMemory,
       userPrefs,
@@ -825,6 +883,142 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       // Tag the pop-out so its render() can branch into the full-screen grid.
       this.popoutPanel.webview.postMessage({ type: 'layout.popoutMode', enabled: true });
     }
+    // === onboarding-sandbox: evaluate notification triggers AFTER posting the
+    // snapshot so the webview repaints first, then any modal-style dialog
+    // pops up over a fresh UI. ===
+    this.evaluateNotifications(snap);
+  }
+
+  // === onboarding-sandbox: state-machine for desktop notifications. Reads
+  // the just-built snapshot, compares against the prev* fields, and fires
+  // through the debounced notify() helpers when a new edge is detected.
+  private evaluateNotifications(snap: CockpitSnapshot): void {
+    // 1. Approval queue: 0 → ≥1 transition.
+    const pending = snap.approvalCounts?.pending ?? 0;
+    if (pending > 0 && this.prevApprovalPending === 0) {
+      void notifyApprovalQueueLanded(pending).then((choice) => {
+        if (choice === 'Open queue') {
+          this.setActiveTabFromHost('approval');
+          void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+        }
+      });
+    }
+    this.prevApprovalPending = pending;
+
+    // 2. Audit blocked: scan the small tail for a tool.invoke with outcome
+    // 'blocked' newer than the last seen one. We only walk readAuditTail(50)
+    // — anything older isn't worth a notification anyway.
+    try {
+      const tail = readAuditTail(50);
+      let newestBlockedTs = this.prevAuditLastBlockedTs;
+      let newestBlockedDetail: { tool: string; agent: string | undefined } | undefined;
+      for (const ev of tail) {
+        if (ev.kind !== 'tool.invoke') continue;
+        const detail = ev.detail || {};
+        const outcome = typeof detail.outcome === 'string' ? detail.outcome : '';
+        if (outcome !== 'blocked') continue;
+        if (ev.ts <= this.prevAuditLastBlockedTs) continue;
+        if (ev.ts > newestBlockedTs) {
+          newestBlockedTs = ev.ts;
+          const tool = typeof detail.tool === 'string' ? detail.tool
+            : typeof detail.name === 'string' ? detail.name
+            : 'tool';
+          const agent = typeof detail.byAgent === 'string' ? detail.byAgent : undefined;
+          newestBlockedDetail = { tool, agent };
+        }
+      }
+      if (newestBlockedDetail && newestBlockedTs > this.prevAuditLastBlockedTs) {
+        void notifyAuditBlocked(newestBlockedDetail.tool, newestBlockedDetail.agent).then((choice) => {
+          if (choice === 'Open audit') {
+            this.setActiveTabFromHost('security');
+            void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+          }
+        });
+        this.prevAuditLastBlockedTs = newestBlockedTs;
+      }
+    } catch (err) {
+      logger.warn(`notifications: audit scan failed: ${String(err)}`);
+    }
+
+    // 3. Cost: cross 80% of daily cap. Once per local-day so a long session
+    // doesn't fire repeatedly even if spend dips below and back above.
+    const cap = snap.budget.dailyCapUsd;
+    const spent = snap.budget.spentTodayUsd;
+    const today = new Date().toISOString().slice(0, 10);
+    if (cap > 0 && spent >= cap * 0.8 && this.prevCostWarnDate !== today) {
+      void notifyCostWarning(spent, cap).then((choice) => {
+        if (choice === 'Open replay') {
+          this.setActiveTabFromHost('replay');
+          void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+        } else if (choice === 'Adjust cap') {
+          void vscode.commands.executeCommand('claudeCockpit.setDailyCap');
+        }
+      });
+      this.prevCostWarnDate = today;
+    }
+  }
+
+  // === onboarding-sandbox: synthesize tutorial nudges from minePrompts.
+  // Pulls the top repeating prompts and turns each into a "you ran X N times
+  // — try Y" suggestion. Defensive: returns at most 6 nudges.
+  private buildTutorialNudges(): {
+    id: string;
+    title: string;
+    why: string;
+    command: string | undefined;
+    action: string | undefined;
+  }[] {
+    let mined: ReturnType<typeof minePrompts> = [];
+    try {
+      mined = minePrompts(20);
+    } catch (err) {
+      logger.warn(`tutorial: minePrompts failed: ${String(err)}`);
+      return [];
+    }
+    const out: ReturnType<typeof this.buildTutorialNudges> = [];
+    for (const m of mined) {
+      if (m.occurrences < 2) continue;
+      if (this.dismissedRecs.has(`tutorial-mined-${m.fingerprint}`)) continue;
+      // Naive pattern-based suggestions — match common `/skill` invocations
+      // to a faster variant. Falls back to a generic "consider saving this
+      // as a Cockpit prompt" nudge.
+      const trimmed = m.body.trim();
+      const skillMatch = trimmed.match(/^\/(\w[\w-]*)/);
+      let nudge: { command: string | undefined; suggestion: string };
+      if (skillMatch) {
+        const skill = skillMatch[1];
+        if (skill === 'qa') {
+          nudge = {
+            command: '/qa --report-only',
+            suggestion: 'Try /qa --report-only first — it surfaces issues without spending tokens fixing them. Promote to a full /qa once you triage.',
+          };
+        } else if (skill === 'ship' || skill === 'deploy') {
+          nudge = {
+            command: '/review',
+            suggestion: 'Pre-flight with /review (caveman-review preset) before /ship — catches regressions in 30 seconds.',
+          };
+        } else {
+          nudge = {
+            command: undefined,
+            suggestion: `Save /${skill} as a Cockpit prompt so you can fire it from the Library tab without retyping.`,
+          };
+        }
+      } else {
+        nudge = {
+          command: undefined,
+          suggestion: 'Save this prompt to your Library — you have used it more than once already.',
+        };
+      }
+      out.push({
+        id: `tutorial-mined-${m.fingerprint}`,
+        title: `You ran “${trimmed.slice(0, 60)}${trimmed.length > 60 ? '…' : ''}” ${m.occurrences} times`,
+        why: nudge.suggestion,
+        command: nudge.command,
+        action: nudge.command ? 'copy-command' : undefined,
+      });
+      if (out.length >= 6) break;
+    }
+    return out;
   }
 
   setActiveTabFromHost(tab: string): void {
@@ -2030,6 +2224,78 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           spentTodayUsd: snap.today.totalUsd,
           willWarn: budget.dailyCapUsd > 0 && snap.today.totalUsd >= budget.dailyCapUsd,
         });
+        return;
+      }
+      // === onboarding-sandbox =====================================================
+      case 'sandbox.start': {
+        const result = startSandbox();
+        if (!result.ok || !result.state) {
+          void vscode.window.showErrorMessage(`Cockpit: sandbox start failed — ${result.error ?? 'unknown error'}`);
+          return;
+        }
+        await this.globalState.update(SANDBOX_ACTIVE_KEY, true);
+        await this.globalState.update(SANDBOX_PROJECT_KEY, result.state.projectRoot);
+        await this.globalState.update(SANDBOX_SESSION_KEY, result.state.sessionFile);
+        await this.globalState.update(SANDBOX_SESSION_ID_KEY, result.state.sessionId);
+        this.view?.webview.postMessage({
+          type: 'sandbox.state',
+          state: {
+            active: true,
+            projectRoot: result.state.projectRoot,
+            sessionFile: result.state.sessionFile,
+            sessionId: result.state.sessionId,
+          },
+        });
+        this.setActiveTabFromHost('tutorial');
+        this.refresh();
+        void vscode.window.showInformationMessage(
+          `Cockpit: sandbox started at ${result.state.projectRoot}. Click "Exit demo" in the Welcome tab to tear it down.`,
+        );
+        return;
+      }
+      case 'sandbox.exit': {
+        const result = exitSandbox();
+        await this.globalState.update(SANDBOX_ACTIVE_KEY, false);
+        await this.globalState.update(SANDBOX_PROJECT_KEY, undefined);
+        await this.globalState.update(SANDBOX_SESSION_KEY, undefined);
+        await this.globalState.update(SANDBOX_SESSION_ID_KEY, undefined);
+        if (!result.ok) {
+          void vscode.window.showWarningMessage(`Cockpit: sandbox exit warning — ${result.error ?? 'unknown error'}`);
+        }
+        this.view?.webview.postMessage({
+          type: 'sandbox.state',
+          state: { active: false, projectRoot: undefined, sessionFile: undefined, sessionId: undefined },
+        });
+        this.refresh();
+        return;
+      }
+      case 'tutorial.fetchRecs': {
+        const nudges = this.buildTutorialNudges();
+        this.view?.webview.postMessage({ type: 'tutorial.recommendations', nudges });
+        return;
+      }
+      case 'tutorial.dismiss': {
+        if (typeof msg.recId === 'string' && msg.recId) {
+          this.dismissedRecs.add(msg.recId);
+          this.refresh();
+        }
+        return;
+      }
+      case 'tutorial.gotoTab': {
+        if (typeof msg.tabId === 'string' && msg.tabId) {
+          this.setActiveTabFromHost(msg.tabId);
+        }
+        return;
+      }
+      case 'notify.fire': {
+        // Surface escape hatch for host-side debugging. Routes through the
+        // debounced notify() helper so test harnesses can verify the
+        // settings + debounce gate without going through the full audit /
+        // approval pipeline.
+        const key = typeof msg.notifyKey === 'string' ? msg.notifyKey : 'webview.test';
+        const message = typeof msg.notifyMessage === 'string' ? msg.notifyMessage : 'Cockpit notification (test)';
+        const level: 'info' | 'warn' = msg.notifyLevel === 'warn' ? 'warn' : 'info';
+        void notify({ key, level, message });
         return;
       }
     }

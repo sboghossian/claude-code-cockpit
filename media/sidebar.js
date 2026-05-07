@@ -485,6 +485,30 @@
       ? `<button class="office-btn" data-action="reset-first-run" title="Show this welcome again on next reload">Reset welcome</button>`
       : `<button class="office-btn" data-action="dismiss-welcome">Got it — take me to the cockpit →</button>`;
 
+    // === onboarding-sandbox: 3-min demo button. Idempotent — clicking when the
+    // sandbox is already active surfaces a "tour active" pill instead.
+    const sb = snap.sandbox;
+    const sandboxBlock = sb && sb.active
+      ? `
+        <h3 class="sub-h">Tour mode</h3>
+        <p class="empty" style="font-size: 11px;">
+          Sandbox active. Open the <strong>Tutorial</strong> tab to see the guided steps. Synthetic project at <code>${escapeHtml(sb.projectRoot || '~/.claude/.cockpit/sandbox/demo-project')}</code>.
+        </p>
+        <div class="actions" style="gap: 6px; flex-wrap: wrap;">
+          <button class="office-btn" data-tutorial-action="exit-sandbox" title="Tear down the sandbox dir + leave tour mode">Exit demo</button>
+          <button class="office-btn" data-action="goto-tab" data-tab="tutorial" title="Open the Tutorial tab">Open Tutorial →</button>
+        </div>
+      `
+      : `
+        <h3 class="sub-h">Try a 3-min demo</h3>
+        <p class="empty" style="font-size: 11px;">
+          Synthesize a fake project + 30-event session JSONL under <code>~/.claude/.cockpit/sandbox/</code> so you can poke at Talk · Approval · Replay before pointing Cockpit at real code.
+        </p>
+        <div class="actions" style="gap: 6px;">
+          <button class="office-btn" data-tutorial-action="start-sandbox" title="Start the 3-min demo">Start 3-min demo</button>
+        </div>
+      `;
+
     return `
       <div class="welcome-banner">
         <h2 style="margin-top: 4px;">Welcome to Claude Cockpit</h2>
@@ -519,6 +543,8 @@
           Tip: every tab is now a composition of widgets you choose. Click
           <strong>Customize ⚙</strong> on any tab to pick what shows up there.
         </p>
+
+        ${sandboxBlock}
 
         <div class="actions" style="margin-top: 16px;">${next}</div>
       </div>
@@ -3654,6 +3680,8 @@
     approval:   ['approvalQueue', 'approvalDetail'],
     // === replay-timeline ===
     replay:     ['replayScrubber', 'replayDiff', 'replayCostProjection'],
+    // === onboarding-sandbox: Tutorial tab ===
+    tutorial:   ['tutorialRecs', 'tutorialNudges'],
   };
 
   // Inline SVG icons for the primary tab bar. Stroke-only, 14×14, currentColor
@@ -3685,6 +3713,8 @@
     approval:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><polyline points="9 12 11 14 15 10"/></svg>',
     // === replay-timeline === (rewind / scrubber glyph)
     replay:     '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',
+    // === onboarding-sandbox === lightbulb / tip glyph
+    tutorial:   '<svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2z"/></svg>',
   };
 
   function tabCatalogue(snap) {
@@ -3721,8 +3751,19 @@
       { id: 'approval',   label: approvalTabLabel(snap),                                              pinned: false, requiresCwd: false, hint: 'Pending Claude actions awaiting human approval. Snapshot + revert per entry.' },
       // === replay-timeline ===
       { id: 'replay',     label: replayLabel(snap),                                                   pinned: false, requiresCwd: true,  hint: 'Scrub backwards through your active session — see exactly what changed at each step, fork from any point.' },
+      // === onboarding-sandbox: Tutorial tab — recommendations + repeating-prompt nudges. ===
+      { id: 'tutorial',   label: tutorialLabel(snap),                                                 pinned: false, requiresCwd: false, hint: 'History-based recommendations: "you ran /qa 4 times this week — try /qa --report-only".' },
       { id: 'help',       label: '? Help',                                                            pinned: true,  requiresCwd: false, hint: 'How to read this thing' },
     ];
+  }
+
+  // === onboarding-sandbox === Tab label shows count when nudges/recs exist.
+  function tutorialLabel(snap) {
+    const recs = (snap && snap.recommendations) || [];
+    const sb = snap && snap.sandbox;
+    const liveDot = sb && sb.active ? ' ●' : '';
+    if (recs.length > 0) return 'Tutorial (' + recs.length + ')' + liveDot;
+    return 'Tutorial' + liveDot;
   }
 
   function galleryLabel(snap) {
