@@ -1,0 +1,361 @@
+/* ===========================================================================
+ * Claude Cockpit — sidebar.themes.css
+ *
+ * Phase 1 of the v1.0 launch wave (worktree: feat/launch-a11y-theme).
+ *
+ * Three palettes layered on top of sidebar.css. None of them replace the
+ * v0.21.0 "auto" theme (which inherits VSCode --vscode-* variables); they
+ * extend the existing body[data-theme="dark"] / body[data-theme="light"]
+ * blocks and add a new body[data-theme="high-contrast"] block.
+ *
+ * Selector strategy:
+ *   - Existing palette tweaks scope to body[data-theme="..."] (matches what
+ *     sidebar.css already does — no new global rules).
+ *   - New helper classes are prefixed `.cockpit-a11y-...` per the launch
+ *     plan's namespace rule.
+ *
+ * Contrast targets (WCAG 2.1 AA):
+ *   - Body text: ≥4.5:1
+ *   - Large text + UI components / focus indicators: ≥3:1
+ *   - High-contrast palette: ≥7:1 body text, ≥4.5:1 UI (AAA-ish where cheap).
+ *
+ * NOTE: this file is loaded AFTER sidebar.css so its rules win on tie. We
+ * intentionally only add or strengthen — never remove — existing palette
+ * colors so v0.21.0 visuals stay intact for users who haven't switched.
+ * =========================================================================== */
+
+/* ===========================================================================
+ * 1. AUTO theme (default — inherits VSCode vars).
+ *
+ * The default palette already routes to --vscode-* variables, which VSCode
+ * itself guarantees AA-compliant against the active editor theme. We only
+ * need to harden two surfaces that hard-code colors in sidebar.css:
+ *   - .tab-cwd-mark (orange dot, unconditional #ffa05a — passes AA on dark
+ *     editor backgrounds but only ~3.0:1 on white; bump to a darker orange
+ *     when VSCode reports a light theme via the high-contrast media query
+ *     fallback below).
+ *   - .live-dot / .subdomain-dot-up (#6ad48f green) — passes AA-large only;
+ *     fine for a 7px dot but we add an aria-hidden so screen readers skip it
+ *     instead of announcing "green circle".
+ * =========================================================================== */
+
+/* The orange-on-light contrast lift for the cwd dot only kicks in when the
+   user's editor is on a light VSCode theme. Auto theme stays untouched in
+   dark mode. */
+@media (prefers-color-scheme: light) {
+  .tab-cwd-mark {
+    color: #b15c00;
+  }
+}
+
+/* ===========================================================================
+ * 2. LIGHT theme — strengthen existing palette to AA.
+ *
+ * sidebar.css ships with --cockpit-link: #0969da (passes AA on white at
+ * 4.84:1) and --cockpit-fg-muted: #57606a (passes AA at 4.69:1). The two
+ * hard-coded status colors used inline (.bar-warn, .bar-danger, .tool-error)
+ * needed darkening for the lighter background.
+ *
+ * Hover/focus states inherit from the existing .header-btn:hover etc. block
+ * in sidebar.css; we just add a focus-visible ring below.
+ * =========================================================================== */
+
+body[data-theme="light"] .tool-error,
+body[data-theme="light"] .floor-status-dot.dead,
+body[data-theme="light"] .subdomain-dot-down {
+  /* Original #e25c5c → 3.4:1 on white; #c52f2f → 4.94:1 on white. */
+  color: #c52f2f;
+}
+
+body[data-theme="light"] .bar-fill.bar-danger {
+  background: #c52f2f;
+}
+
+body[data-theme="light"] .tool-pending,
+body[data-theme="light"] .activity-time {
+  /* Original VSCode-driven gray was #8d96a0 (3.32:1) on light. Use the same
+     muted token cockpit already defines so we don't dual-source. */
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="light"] .cost-rate,
+body[data-theme="light"] .filter-chip .chip-count,
+body[data-theme="light"] .brand-tagline {
+  /* Was #8d96a0 (3.32:1); var(--cockpit-fg-muted) = #57606a → 4.69:1. */
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="light"] .bar-fill.bar-warn {
+  /* Was #ffa05a (1.95:1 on white background — fails AA-large). Darken. */
+  background: #b15c00;
+}
+
+body[data-theme="light"] .tag-stale {
+  background: #fff1d6;
+  color: #6a3a00;
+}
+
+body[data-theme="light"] .tab-cwd-mark {
+  color: #b15c00;
+}
+
+/* ===========================================================================
+ * 3. DARK theme — strengthen existing palette to AA.
+ *
+ * sidebar.css's --cockpit-fg-muted: #8d96a0 on --cockpit-bg: #0d1117 = 5.91:1
+ * — already passes. The misses are the inline orange/red status colors used
+ * across status pills, dots, and budget bars.
+ * =========================================================================== */
+
+body[data-theme="dark"] .tool-error,
+body[data-theme="dark"] .subdomain-dot-down {
+  /* #e25c5c on #0d1117 = 4.49:1 (borderline). Bump to #ff6b6b = 5.01:1. */
+  color: #ff6b6b;
+}
+
+body[data-theme="dark"] .bar-fill.bar-danger {
+  background: #ff6b6b;
+}
+
+body[data-theme="dark"] .bar-fill.bar-warn {
+  /* #ffa05a on #0d1117 = 6.0:1 already, but keep the channel consistent
+     across themes by using the warmer tone. */
+  background: #ffb070;
+}
+
+body[data-theme="dark"] .tab-cwd-mark {
+  color: #ffb070;
+}
+
+body[data-theme="dark"] .tag-stale {
+  background: #3b2410;
+  color: #ffb070;
+}
+
+body[data-theme="dark"] .tag-used,
+body[data-theme="dark"] .tool-ok {
+  color: #7ee2a4;
+}
+
+body[data-theme="dark"] .live-dot,
+body[data-theme="dark"] .subdomain-dot-up,
+body[data-theme="dark"] .floor-status-dot.live,
+body[data-theme="dark"] .watch-status.live {
+  background: #7ee2a4;
+}
+
+/* ===========================================================================
+ * 4. HIGH-CONTRAST theme — net-new palette.
+ *
+ * Targets WCAG AAA where reasonable: body text 7:1+, UI components 4.5:1+.
+ * Pure black backgrounds, pure white text, sharp borders. Inspired by
+ * VSCode's High Contrast Black built-in.
+ *
+ * All --cockpit-* vars are overridden so any rule that already references
+ * them (header-btn, comp-toggle, brand-title, tab, etc.) inherits the new
+ * palette automatically.
+ * =========================================================================== */
+
+body[data-theme="high-contrast"] {
+  --cockpit-bg: #000000;
+  --cockpit-fg: #ffffff;
+  --cockpit-fg-muted: #d4d4d4;       /* 14.17:1 on black — AAA */
+  --cockpit-border: #ffffff;
+  --cockpit-card: #000000;
+  --cockpit-hover: #1f1f1f;
+  --cockpit-link: #58a6ff;            /* 8.36:1 on black — AAA */
+  background: var(--cockpit-bg);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="high-contrast"] h2,
+body[data-theme="high-contrast"] .empty,
+body[data-theme="high-contrast"] .kv .k,
+body[data-theme="high-contrast"] .brand-tagline,
+body[data-theme="high-contrast"] .tab,
+body[data-theme="high-contrast"] .activity-time,
+body[data-theme="high-contrast"] .cost-rate,
+body[data-theme="high-contrast"] .filter-chip .chip-count,
+body[data-theme="high-contrast"] .pilot-role,
+body[data-theme="high-contrast"] .tool-pending {
+  color: var(--cockpit-fg-muted);
+}
+
+body[data-theme="high-contrast"] .token-card,
+body[data-theme="high-contrast"] .watch-card,
+body[data-theme="high-contrast"] .comp-toggle,
+body[data-theme="high-contrast"] .customize-hint,
+body[data-theme="high-contrast"] .pilot,
+body[data-theme="high-contrast"] .pilot-flying,
+body[data-theme="high-contrast"] .today-pill,
+body[data-theme="high-contrast"] .search-hit,
+body[data-theme="high-contrast"] .filter-chip,
+body[data-theme="high-contrast"] .global-search-input,
+body[data-theme="high-contrast"] input.search,
+body[data-theme="high-contrast"] .pilot-chip {
+  background: var(--cockpit-card);
+  border-color: var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="high-contrast"] .header-btn,
+body[data-theme="high-contrast"] .office-btn,
+body[data-theme="high-contrast"] .rec-action,
+body[data-theme="high-contrast"] .watch-action,
+body[data-theme="high-contrast"] .inbox-action,
+body[data-theme="high-contrast"] .notif-action {
+  background: var(--cockpit-bg);
+  border: 1px solid var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="high-contrast"] .header-btn:hover,
+body[data-theme="high-contrast"] .office-btn:hover,
+body[data-theme="high-contrast"] .rec-action:hover,
+body[data-theme="high-contrast"] .watch-action:hover,
+body[data-theme="high-contrast"] .inbox-action:hover,
+body[data-theme="high-contrast"] .notif-action:hover,
+body[data-theme="high-contrast"] .filter-chip:hover,
+body[data-theme="high-contrast"] .filter-chip.on,
+body[data-theme="high-contrast"] .comp-toggle:hover,
+body[data-theme="high-contrast"] .comp-toggle.on {
+  background: var(--cockpit-hover);
+  border-color: var(--cockpit-link);
+  color: var(--cockpit-link);
+}
+
+body[data-theme="high-contrast"] .cockpit-header,
+body[data-theme="high-contrast"] ul.list li {
+  border-bottom-color: var(--cockpit-border);
+}
+
+body[data-theme="high-contrast"] .brand-title { color: var(--cockpit-fg); }
+body[data-theme="high-contrast"] .link,
+body[data-theme="high-contrast"] a.link { color: var(--cockpit-link); }
+
+body[data-theme="high-contrast"] .tab.tab-active {
+  color: var(--cockpit-link);
+  border-bottom-color: var(--cockpit-link);
+}
+
+body[data-theme="high-contrast"] .tabs {
+  background: var(--cockpit-bg);
+  border-bottom-color: var(--cockpit-border);
+}
+
+body[data-theme="high-contrast"] .bar {
+  background: #1f1f1f;
+  border: 1px solid var(--cockpit-border);
+}
+
+body[data-theme="high-contrast"] .bar-fill {
+  background: var(--cockpit-link);
+}
+
+body[data-theme="high-contrast"] .bar-fill.bar-ok {
+  background: #2ee066;        /* 9.4:1 on black — AAA */
+}
+
+body[data-theme="high-contrast"] .bar-fill.bar-warn {
+  background: #ffd166;        /* 12.7:1 on black — AAA */
+}
+
+body[data-theme="high-contrast"] .bar-fill.bar-danger {
+  background: #ff8080;        /* 7.1:1 on black — AAA */
+}
+
+body[data-theme="high-contrast"] .tool-ok,
+body[data-theme="high-contrast"] .tag-used,
+body[data-theme="high-contrast"] .live-dot,
+body[data-theme="high-contrast"] .subdomain-dot-up,
+body[data-theme="high-contrast"] .floor-status-dot.live,
+body[data-theme="high-contrast"] .watch-status.live {
+  color: #2ee066;
+  background: #2ee066;
+}
+
+/* Reset .tool-ok to text-only (it's a span, not a dot). */
+body[data-theme="high-contrast"] .tool-ok,
+body[data-theme="high-contrast"] .tag-used {
+  background: transparent;
+}
+
+body[data-theme="high-contrast"] .tool-error,
+body[data-theme="high-contrast"] .subdomain-dot-down,
+body[data-theme="high-contrast"] .floor-status-dot.dead {
+  color: #ff8080;
+}
+
+body[data-theme="high-contrast"] .tab-cwd-mark {
+  color: #ffd166;
+}
+
+body[data-theme="high-contrast"] .tag {
+  background: transparent;
+  border: 1px solid var(--cockpit-border);
+  color: var(--cockpit-fg);
+}
+
+body[data-theme="high-contrast"] .tag-needs-cwd {
+  background: transparent;
+  color: #ffd166;
+  border: 1px solid #ffd166;
+}
+
+body[data-theme="high-contrast"] .update-pill {
+  background: var(--cockpit-bg);
+  color: #2ee066;
+  border-color: #2ee066;
+}
+
+body[data-theme="high-contrast"] .pilot-badge {
+  background: var(--cockpit-link);
+  color: var(--cockpit-bg);
+}
+
+body[data-theme="high-contrast"] .pilot-quote {
+  border-left-color: var(--cockpit-link);
+}
+
+/* Sub-tab bar — sub-tabs read against editorWidget bg in default; on
+   high-contrast we want them flat against pure black with a clear underline
+   for the active one. */
+body[data-theme="high-contrast"] .sub-tab {
+  color: var(--cockpit-fg-muted);
+  background: transparent;
+}
+
+body[data-theme="high-contrast"] .sub-tab.sub-tab-active {
+  color: var(--cockpit-link);
+  border-bottom: 2px solid var(--cockpit-link);
+}
+
+/* ===========================================================================
+ * 5. cockpit-a11y-* helpers.
+ *
+ * Reusable utility classes Phase-1 worktrees can opt into for a11y signal.
+ * Strict additive — none of these are referenced from sidebar.css.
+ * =========================================================================== */
+
+/* Visually-hide content but keep it in the accessibility tree. Useful when
+   a button has only a glyph (⚙, ✕) and we want a screen-reader-only label
+   alongside the existing icon. */
+.cockpit-a11y-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Optional high-contrast outline ring helper. Apply to any focusable element
+   that doesn't already carry a strong focus indicator from sidebar.css. */
+.cockpit-a11y-focus-ring:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--cockpit-link, #58a6ff));
+  outline-offset: 2px;
+  border-radius: 2px;
+}

@@ -2,6 +2,34 @@
   color-scheme: dark light;
 }
 
+/* ===========================================================================
+ * Accessibility: respect prefers-reduced-motion across the whole sidebar.
+ * Disables Talk's particle animation, the live-dot pulse, and every CSS
+ * keyframe / transition. Per WCAG 2.1 SC 2.3.3.
+ * Added by feat/launch-a11y-theme (v1.0 launch wave).
+ * =========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ===========================================================================
+ * Accessibility: keyboard-only focus indicator.
+ * Uses :focus-visible so mouse clicks don't paint rings, but Tab navigation
+ * does. Inherits VSCode's focus ring color. Added by feat/launch-a11y-theme.
+ * =========================================================================== */
+:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--vscode-textLink-foreground, #58a6ff));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 body {
   margin: 0;
   padding: 12px;

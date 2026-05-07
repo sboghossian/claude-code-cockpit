@@ -2451,6 +2451,8 @@
     let speakingEnvelope = null; // { until, baseline, fn } for synth speaking
     let utterance = null;        // current SpeechSynthesisUtterance
     let resizeObserver = null;   // tracked so teardown() can disconnect
+    let reduceMotionMq = null;   // matchMedia handle for prefers-reduced-motion
+    let reduceMotionListener = null;
 
     // Fibonacci sphere — N evenly-distributed unit vectors. Generated once.
     function buildCoreParticles(n) {
@@ -2945,7 +2947,29 @@
 
     function init() {
       ensureCanvas();
-      startAnimation();
+      // Respect prefers-reduced-motion (WCAG 2.1 SC 2.3.3) reactively: paint
+      // one static frame instead of running the rAF loop, AND subscribe to
+      // OS-level toggles so the user can flip Reduce Motion mid-session
+      // without re-mounting the Talk tab. Mode changes still re-render via
+      // setMode → draw() either way.
+      reduceMotionMq = window.matchMedia
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+      const applyReduceMotion = (mq) => {
+        if (mq && mq.matches) {
+          stopAnimation();
+          try { draw(0); } catch (err) { console.warn('reduce-motion draw failed', err); }
+        } else {
+          startAnimation();
+        }
+      };
+      if (reduceMotionMq) {
+        applyReduceMotion(reduceMotionMq);
+        reduceMotionListener = (event) => applyReduceMotion(event);
+        reduceMotionMq.addEventListener('change', reduceMotionListener);
+      } else {
+        startAnimation();
+      }
       setMode(mode);
       // Surface the known-blocked state proactively so user isn't confused.
       if (micBlocked) {
@@ -2961,6 +2985,11 @@
       stopSpeaking();
       stopAnimation();
       if (resizeObserver) { try { resizeObserver.disconnect(); } catch {} resizeObserver = null; }
+      if (reduceMotionMq && reduceMotionListener) {
+        try { reduceMotionMq.removeEventListener('change', reduceMotionListener); } catch {}
+      }
+      reduceMotionMq = null;
+      reduceMotionListener = null;
       if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
       analyser = null;
     }
@@ -3870,14 +3899,23 @@
         </div>
         <p class="empty" style="font-size: 11px;">Pick widgets for any tab. Empty = empty (no fallback). Pinned tabs (Custom, Now, Help) can't be hidden.</p>
 
-        <h3 class="sub-h">Theme</h3>
-        <div class="theme-toggle">
-          ${['auto', 'dark', 'light']
+        <h3 class="sub-h" id="cockpit-theme-heading">Theme</h3>
+        <div class="theme-toggle" role="radiogroup" aria-labelledby="cockpit-theme-heading">
+          ${['auto', 'dark', 'light', 'high-contrast']
             .map(
-              (t) => `<label class="comp-toggle ${themePref === t ? 'on' : ''}">
+              (t) => {
+                const label =
+                  t === 'auto' ? 'Auto (follow VSCode)' :
+                  t === 'high-contrast' ? 'High contrast (AA+)' :
+                  t.charAt(0).toUpperCase() + t.slice(1);
+                // No aria-label on the input — the wrapping <label> + .comp-label
+                // span are already the accessible name; aria-label here would
+                // double-announce in screen readers.
+                return `<label class="comp-toggle ${themePref === t ? 'on' : ''}">
                 <input type="radio" name="theme" data-theme-set="${t}" ${themePref === t ? 'checked' : ''} />
-                <span class="comp-label">${t === 'auto' ? 'Auto (follow VSCode)' : t.charAt(0).toUpperCase() + t.slice(1)}</span>
-              </label>`,
+                <span class="comp-label">${escapeHtml(label)}</span>
+              </label>`;
+              },
             )
             .join('')}
         </div>
@@ -4159,7 +4197,7 @@
         </button>`
       : '';
     return `
-      <header class="cockpit-header" data-theme-pref="${escapeHtml(themePref)}">
+      <header class="cockpit-header" data-theme-pref="${escapeHtml(themePref)}" role="banner">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">◐</span>
           <div class="brand-text">
@@ -4167,14 +4205,14 @@
             <span class="brand-tagline">Personal-OS HUD for Claude Code · 100% local</span>
           </div>
         </div>
-        <div class="header-search">
-          <input type="search" class="global-search-input" placeholder="Search anything…" value="${escapeHtml(query)}" data-global-search />
-          ${query ? '<button class="header-btn header-btn-x" data-action="clear-search" title="Clear search">✕</button>' : ''}
+        <div class="header-search" role="search">
+          <input type="search" class="global-search-input" placeholder="Search anything…" aria-label="Search Cockpit" value="${escapeHtml(query)}" data-global-search />
+          ${query ? '<button class="header-btn header-btn-x" data-action="clear-search" aria-label="Clear search" title="Clear search">✕</button>' : ''}
         </div>
         <div class="header-actions">
           ${updatePill}
-          <button class="header-btn" data-action="open-customize" title="Customize widgets, tabs, theme">⚙</button>
-          <button class="header-btn" data-action="goto-help" title="Help">?</button>
+          <button class="header-btn" data-action="open-customize" aria-label="Customize widgets, tabs, and theme" title="Customize widgets, tabs, theme">⚙</button>
+          <button class="header-btn" data-action="goto-help" aria-label="Open Help tab" title="Help">?</button>
         </div>
       </header>
     `;
@@ -4182,7 +4220,7 @@
 
   function renderTabBar(tabs, activeTab) {
     return `
-      <nav class="tabs" role="tablist">
+      <nav class="tabs" role="tablist" aria-label="Cockpit tabs">
         ${tabs
           .map((t) => {
             const cls = ['tab'];
@@ -4190,13 +4228,27 @@
             if (t.dim) cls.push('tab-dim');
             if (t.requiresCwd) cls.push('tab-needs-cwd');
             const cwdMark = t.requiresCwd
-              ? '<span class="tab-cwd-mark" title="Most useful with an active Claude Code session">●</span>'
+              ? '<span class="tab-cwd-mark" aria-hidden="true" title="Most useful with an active Claude Code session">●</span>'
               : '';
             const title = t.hint
               ? `title="${escapeHtml(t.hint + (t.requiresCwd ? ' — needs an active session' : ''))}"`
               : '';
-            const icon = TAB_ICONS[t.id] || '';
-            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
+            // Wrap the inline SVG so it's announced as decorative — the
+            // visible label already describes the tab. The optional cwd dot
+            // is also decorative; its meaning is conveyed via aria-label.
+            const rawIcon = TAB_ICONS[t.id] || '';
+            const icon = rawIcon
+              ? rawIcon.replace('<svg ', '<svg aria-hidden="true" focusable="false" ')
+              : '';
+            const ariaLabel = t.requiresCwd
+              ? `${t.label} (requires active session)`
+              : t.label;
+            // Don't set roving `tabindex` here: full WAI-ARIA tabs-pattern
+            // arrow-key navigation is deferred to v1.1 per the launch cut-line.
+            // Without the arrow-key handler, a roving tabindex would skip 19
+            // of 20 tabs in the keyboard tab-order. Default tabindex keeps
+            // every tab Tab-reachable (matches v0.21.0 reachability).
+            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" aria-label="${escapeHtml(ariaLabel)}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
           })
           .join('')}
       </nav>
@@ -4454,7 +4506,7 @@
       input.addEventListener('change', () => {
         if (!input.checked) return;
         const v = input.getAttribute('data-theme-set');
-        if (v !== 'auto' && v !== 'dark' && v !== 'light') return;
+        if (v !== 'auto' && v !== 'dark' && v !== 'light' && v !== 'high-contrast') return;
         document.body.setAttribute('data-theme', v);
         persistUserPrefs({ theme: v });
       });

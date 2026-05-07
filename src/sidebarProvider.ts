@@ -131,11 +131,13 @@ interface InboundMessage {
   label?: string;
 }
 
+type CockpitTheme = 'auto' | 'dark' | 'light' | 'high-contrast';
+
 interface UserPrefs {
   customComponents: string[] | undefined;
   tabComponents: Record<string, string[]> | undefined;
   enabledTabs: string[] | undefined;
-  theme: 'auto' | 'dark' | 'light';
+  theme: CockpitTheme;
   tabFilter: 'all' | 'requires' | 'standalone';
   discoverEnabled: boolean;
 }
@@ -144,9 +146,13 @@ interface UserPrefsPatch {
   customComponents?: string[];
   tabComponents?: Record<string, string[]>;
   enabledTabs?: string[];
-  theme?: 'auto' | 'dark' | 'light';
+  theme?: CockpitTheme;
   tabFilter?: 'all' | 'requires' | 'standalone';
   discoverEnabled?: boolean;
+}
+
+function isCockpitTheme(v: unknown): v is CockpitTheme {
+  return v === 'auto' || v === 'dark' || v === 'light' || v === 'high-contrast';
 }
 
 interface PromptEntry {
@@ -177,15 +183,15 @@ function isStringArrayMap(v: unknown): v is Record<string, string[]> {
 function readUserPrefs(state: vscode.Memento): UserPrefs {
   const stored = state.get<Partial<UserPrefs>>(USER_PREFS_KEY, {});
   const cfg = vscode.workspace.getConfiguration('claudeCockpit');
-  const settingsTheme = cfg.get<'auto' | 'dark' | 'light'>('theme', 'auto');
+  const settingsTheme = cfg.get<CockpitTheme>('theme', 'auto');
   const settingsDiscover = cfg.get<boolean>('discover.enabled', false);
   return {
     customComponents: Array.isArray(stored.customComponents) ? stored.customComponents : undefined,
     tabComponents: isStringArrayMap(stored.tabComponents) ? stored.tabComponents : undefined,
     enabledTabs: Array.isArray(stored.enabledTabs) ? stored.enabledTabs : undefined,
-    theme: stored.theme === 'dark' || stored.theme === 'light' || stored.theme === 'auto'
+    theme: isCockpitTheme(stored.theme)
       ? stored.theme
-      : settingsTheme,
+      : (isCockpitTheme(settingsTheme) ? settingsTheme : 'auto'),
     tabFilter: stored.tabFilter === 'requires' || stored.tabFilter === 'standalone' || stored.tabFilter === 'all'
       ? stored.tabFilter
       : 'all',
@@ -921,10 +927,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
           enabledTabs: Array.isArray(patch.enabledTabs)
             ? patch.enabledTabs
             : current.enabledTabs,
-          theme:
-            patch.theme === 'auto' || patch.theme === 'dark' || patch.theme === 'light'
-              ? patch.theme
-              : current.theme,
+          theme: isCockpitTheme(patch.theme) ? patch.theme : current.theme,
           tabFilter:
             patch.tabFilter === 'all' || patch.tabFilter === 'requires' || patch.tabFilter === 'standalone'
               ? patch.tabFilter
@@ -1111,6 +1114,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     const cssUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.css'),
     );
+    // a11y/theme palettes (feat/launch-a11y-theme): loaded AFTER sidebar.css
+    // so the body[data-theme="..."] overrides win on tie. Empty file is a
+    // no-op for users who haven't switched themes.
+    const themesCssUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.themes.css'),
+    );
     const jsUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.js'),
     );
@@ -1133,6 +1142,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; media-src 'self' blob:; connect-src 'none'; form-action 'none';" />
   <link rel="stylesheet" href="${cssUri}" />
+  <link rel="stylesheet" href="${themesCssUri}" />
   <title>Claude Cockpit</title>
 </head>
 <body>
