@@ -333,3 +333,35 @@ Phase 0 of the v1.0 launch wave. Defines the formal extension contract every Pha
 - [x] `package.json` untouched (no contributes / configuration / scripts changes)
 - [x] `claudeData.ts` untouched
 - [x] COMPONENTS literal contents untouched
+
+## v1.0 — a11y-theme
+
+Goal: WCAG AA contrast across dark + light, net-new high-contrast palette,
+`prefers-reduced-motion` honored, screen-reader narration through the tab
+bar + header. CSS-only worktree per the launch plan; lands first in Phase 1.
+
+### Acceptance criteria
+
+- [x] **`media/sidebar.themes.css` shipped.** Three palettes: contrast-strengthened light (status colors `#c52f2f` red, `#b15c00` warn), strengthened dark (`#ff6b6b`/`#ffb070`), and a new `body[data-theme="high-contrast"]` block (pure black bg, AAA contrast: link 8.36:1, text 17:1, success 9.4:1, danger 7.1:1).
+- [x] **`prefers-reduced-motion: reduce` block at top of `sidebar.css`** collapses every CSS animation + transition to ~0ms (live-dot pulse, `cockpit-pulse` keyframe, all hover transitions).
+- [x] **Talk particle viz respects reduced motion.** `Talk.init()` checks `matchMedia('(prefers-reduced-motion: reduce)')`, paints one static frame instead of starting the `requestAnimationFrame` loop.
+- [x] **Global `:focus-visible` ring** (2px `--vscode-focusBorder` outline, 2px offset) on every interactive element. Plus `.cockpit-a11y-focus-ring` opt-in helper.
+- [x] **`.cockpit-a11y-sr-only` utility** for screen-reader-only content.
+- [x] **Tab bar a11y.** `<nav role="tablist" aria-label="Cockpit tabs">`; each tab gets `aria-label`, roving `tabindex` (0 active / -1 inactive per WAI-ARIA tab pattern), inline SVG marked `aria-hidden="true" focusable="false"`.
+- [x] **Header strip a11y.** `role="banner"`, search wrapper `role="search"`, `aria-label` on icon-only buttons (⚙, ?, ✕) and the search input.
+- [x] **Theme radio group a11y.** `role="radiogroup"` + `aria-labelledby="cockpit-theme-heading"` + per-radio `aria-label`. Fourth option "High contrast (WCAG AAA)" added.
+- [x] **`'high-contrast'` enum value** in `package.json` `claudeCockpit.theme`. `CockpitTheme` TS type extended to `'auto' | 'dark' | 'light' | 'high-contrast'`. Validators in `readUserPrefs` and the `userPrefs` patch handler updated; `data-theme-set` JS validator updated.
+- [x] **`sidebarProvider.html()` emits `<link rel="stylesheet" href="sidebar.themes.css" />`** after the existing sidebar.css link.
+- [x] `npm test` green (47/47 baseline preserved — visual change only).
+- [x] `npm run compile` clean under TypeScript strict (no `any`).
+- [x] `node --check media/sidebar.js` clean.
+- [x] Zero new dependencies. No CSS framework or preprocessor introduced.
+- [x] No existing palette colors removed. Users on `theme: 'auto'` (default) see zero visual change.
+- [x] No edits to the `COMPONENTS` literal contents in `media/sidebar.js`.
+- [x] No edits to `claudeData.ts` or `CockpitSnapshot` shape (this worktree owns no snapshot field).
+- [x] No new commands / new view containers in `package.json`.
+
+### Deferred to v1.1 (per launch plan cut lines)
+
+- [ ] Screen-reader-perfect ARIA narration on every tab body (tab bar + header + Now + Talk + Welcome + Security covered here; the long tail follows).
+- [ ] Programmatic Left/Right arrow key navigation between tabs (roving tabindex makes Tab work; arrow-key handler is a v1.1 polish).

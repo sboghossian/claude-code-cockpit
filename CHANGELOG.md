@@ -13,6 +13,27 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 
 - Phase 0 is pure plumbing — no new tabs, widgets, or message types. Until a Phase-1 worktree registers something, every existing tab renders byte-identical to v0.21.0.
 
+## [Unreleased] — feat/launch-a11y-theme
+
+### Added
+
+- **`media/sidebar.themes.css`** — three palettes layered on top of `sidebar.css`: a contrast-strengthened light theme (status colors darkened from `#e25c5c`/`#ffa05a` to `#c52f2f`/`#b15c00` for AA on white), a strengthened dark theme (`#ff6b6b` red and `#ffb070` warn for ≥4.5:1 on `#0d1117`), and a brand-new **`high-contrast` palette** (`body[data-theme="high-contrast"]`) targeting WCAG AAA: pure-black background, pure-white text, `#58a6ff` link (8.36:1), `#2ee066` success (9.4:1), `#ff8080` danger (7.1:1). Linked second in `sidebarProvider.html()` so its rules win on tie. Empty `data-theme="auto"` users see zero change.
+- **`high-contrast` enum value** in `claudeCockpit.theme` (package.json) and a corresponding fourth radio in the Customize panel ("High contrast (WCAG AAA)"). The `CockpitTheme` type in `sidebarProvider.ts` and the `data-theme-set` validator in `sidebar.js` accept the new value end-to-end.
+- **`prefers-reduced-motion: reduce` honored across the whole sidebar.** Added a universal selector at the top of `sidebar.css` that collapses `animation-duration` and `transition-duration` to ~0ms (per WCAG 2.1 SC 2.3.3). This disables the live-dot pulse, `cockpit-pulse` keyframe, and every CSS transition. Talk's canvas-driven particle visualization (`requestAnimationFrame`) checks `matchMedia('(prefers-reduced-motion: reduce)')` in `Talk.init()` and paints a single static frame instead of starting the rAF loop.
+- **Global `:focus-visible` ring.** Keyboard navigation now paints a 2px `--vscode-focusBorder` outline on every interactive element; mouse clicks don't. Plus a `.cockpit-a11y-focus-ring` opt-in helper class for Phase-1 worktrees.
+- **`.cockpit-a11y-sr-only` utility class.** Visually-hidden content that stays in the accessibility tree (so screen readers announce it). Available to all Phase-1 features under the `cockpit-a11y-` namespace.
+
+### Changed
+
+- **Tab bar a11y.** `<nav class="tabs" role="tablist">` now carries `aria-label="Cockpit tabs"`. Each tab button gets an `aria-label` (label + `(requires active session)` when applicable), a roving `tabindex` (`0` for active, `-1` for inactive — matches the WAI-ARIA tab pattern), and the inline-SVG icon plus the `requiresCwd` dot are now `aria-hidden="true" focusable="false"` so screen readers announce only the visible label.
+- **Header strip a11y.** `<header role="banner">`, search wrapper `role="search"`, search input `aria-label="Search Cockpit"`, and the icon-only buttons (`⚙`, `?`, `✕`) now have `aria-label` attributes (`"Customize widgets, tabs, and theme"` / `"Open Help tab"` / `"Clear search"`) so they're no longer announced as just "button".
+- **Theme radio group.** Wrapped in `role="radiogroup"` with `aria-labelledby` pointing at the new `<h3 id="cockpit-theme-heading">Theme</h3>`, and each radio carries an `aria-label`.
+
+### Notes
+
+- Pure additive: zero existing palette colors removed. Users on `theme: 'auto'` (the default) still inherit VSCode's theme via `--vscode-*` variables and see no visual change.
+- No new tests required — visual change only. Baseline 47/47 still passes.
+
 ## [0.21.0] — 2026-05-06
 
 ### Fixed
