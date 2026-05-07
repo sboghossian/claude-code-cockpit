@@ -5,3 +5,4 @@ out/
 .vscode-test/
 .gstack/
 preview-render.js
+.claude/worktrees/
