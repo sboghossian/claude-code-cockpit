@@ -439,7 +439,7 @@
   "scripts": {
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
-    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test 'test/*.test.js'",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
