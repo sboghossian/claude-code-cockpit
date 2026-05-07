@@ -126,6 +126,118 @@
       {
         "command": "claudeCockpit.gallery.installFromUrl",
         "title": "Claude Cockpit: Install Skill from URL"
+      },
+      {
+        "command": "claudeCockpit.layout.save",
+        "title": "Claude Cockpit: Save Current Tab Layout As…"
+      },
+      {
+        "command": "claudeCockpit.layout.load",
+        "title": "Claude Cockpit: Load Tab Layout"
+      },
+      {
+        "command": "claudeCockpit.layout.popOut",
+        "title": "Claude Cockpit: Pop Out Fullscreen Grid"
+      },
+      {
+        "command": "claudeCockpit.tab.next",
+        "title": "Claude Cockpit: Next Tab"
+      },
+      {
+        "command": "claudeCockpit.tab.prev",
+        "title": "Claude Cockpit: Previous Tab"
+      },
+      {
+        "command": "claudeCockpit.tab.1",
+        "title": "Claude Cockpit: Jump to Tab 1"
+      },
+      {
+        "command": "claudeCockpit.tab.2",
+        "title": "Claude Cockpit: Jump to Tab 2"
+      },
+      {
+        "command": "claudeCockpit.tab.3",
+        "title": "Claude Cockpit: Jump to Tab 3"
+      },
+      {
+        "command": "claudeCockpit.tab.4",
+        "title": "Claude Cockpit: Jump to Tab 4"
+      },
+      {
+        "command": "claudeCockpit.tab.5",
+        "title": "Claude Cockpit: Jump to Tab 5"
+      },
+      {
+        "command": "claudeCockpit.tab.6",
+        "title": "Claude Cockpit: Jump to Tab 6"
+      },
+      {
+        "command": "claudeCockpit.tab.7",
+        "title": "Claude Cockpit: Jump to Tab 7"
+      },
+      {
+        "command": "claudeCockpit.tab.8",
+        "title": "Claude Cockpit: Jump to Tab 8"
+      },
+      {
+        "command": "claudeCockpit.tab.9",
+        "title": "Claude Cockpit: Jump to Tab 9"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeCockpit.tab.1",
+        "key": "ctrl+1",
+        "mac": "cmd+1",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.2",
+        "key": "ctrl+2",
+        "mac": "cmd+2",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.3",
+        "key": "ctrl+3",
+        "mac": "cmd+3",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.4",
+        "key": "ctrl+4",
+        "mac": "cmd+4",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.5",
+        "key": "ctrl+5",
+        "mac": "cmd+5",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.6",
+        "key": "ctrl+6",
+        "mac": "cmd+6",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.7",
+        "key": "ctrl+7",
+        "mac": "cmd+7",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.8",
+        "key": "ctrl+8",
+        "mac": "cmd+8",
+        "when": "focusedView == claudeCockpit.sidebar"
+      },
+      {
+        "command": "claudeCockpit.tab.9",
+        "key": "ctrl+9",
+        "mac": "cmd+9",
+        "when": "focusedView == claudeCockpit.sidebar"
       }
     ],
     "configuration": {

@@ -2685,4 +2685,127 @@ select[data-prompt-cat-new] {
   margin: 12px 0;
   border: 0;
   border-top: 1px solid var(--vscode-editorWidget-border, rgba(255, 255, 255, 0.08));
+/* === tab-system-v2 (worktree: feat/launch-tab-system-v2) ===================
+   Drag handles, pin marker, context menu, and pop-out grid. All selectors
+   prefixed `.cockpit-layout-` per the conflict-map rule in PLAN.md. */
+
+.cockpit-layout-draggable {
+  cursor: grab;
+}
+.cockpit-layout-draggable:active {
+  cursor: grabbing;
+}
+.cockpit-layout-dragging {
+  opacity: 0.45;
+}
+.cockpit-layout-drag-over {
+  box-shadow: inset 2px 0 0 var(--vscode-textLink-foreground);
+}
+.cockpit-layout-pinned::before {
+  content: "📌";
+  margin-right: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.cockpit-layout-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  border-radius: 4px;
+}
+.cockpit-layout-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cockpit-layout-menu-item:hover {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
+.cockpit-layout-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--vscode-menu-separatorBackground, var(--vscode-editorWidget-border));
+}
+
+/* Pop-out fullscreen grid: 4 cols x N rows, scrollable. The .cockpit-layout-
+   popout class is added to the .tab-panel wrapper so the grid only kicks in
+   inside the dedicated webview panel. */
+.cockpit-layout-popout {
+  padding: 8px;
+}
+.cockpit-layout-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+}
+.cockpit-layout-toolbar strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+  margin-right: 4px;
+}
+.cockpit-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1100px) {
+  .cockpit-layout-grid { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
+}
+@media (max-width: 820px) {
+  .cockpit-layout-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+}
+@media (max-width: 540px) {
+  .cockpit-layout-grid { grid-template-columns: 1fr; }
+}
+.cockpit-layout-card {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 480px;
+}
+.cockpit-layout-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+.cockpit-layout-card-head h3 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+.cockpit-layout-card-body {
+  padding: 8px 10px;
+  overflow: auto;
+  flex: 1;
+  font-size: 11px;
 }

@@ -311,6 +311,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // === tab-system-v2 ===
+  // Layout + keyboard navigation commands. cmd+1..9 jump to tab N in the
+  // user's CURRENT visible order; tab.next/prev cycle. Pop-out opens the
+  // fullscreen webview panel. Save / Load drive the named-layout presets.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.layout.save', () => provider.saveLayoutViaPrompt()),
+    vscode.commands.registerCommand('claudeCockpit.layout.load', () => provider.loadLayoutViaPrompt()),
+    vscode.commands.registerCommand('claudeCockpit.layout.popOut', () => provider.popOutFullscreen()),
+    vscode.commands.registerCommand('claudeCockpit.tab.next', () => provider.cycleTab('next')),
+    vscode.commands.registerCommand('claudeCockpit.tab.prev', () => provider.cycleTab('prev')),
+  );
+  for (let i = 1; i <= 9; i++) {
+    const idx = i - 1;
+    context.subscriptions.push(
+      vscode.commands.registerCommand(`claudeCockpit.tab.${i}`, () => provider.jumpToTabIndex(idx)),
+    );
+  }
+
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   status.update(snapshot(cwd, readBudgetConfig()));
 
