@@ -635,3 +635,40 @@ EDITED:
 - `package.json` — added 1 setting + 2 commands. Test file list updated to include mobileExport.test.js.
 - `CHANGELOG.md` — new `[Unreleased]` block at top.
 - `tasks/todo.md` — this section.
+## v1.0 — telemetry-posthog
+
+Phase 2 of the v1.0 launch wave. Opt-in PostHog analytics + opt-in crash reporting, default OFF, default no-op until the user supplies a `projectId`. v0.21.0 users see byte-identical behaviour.
+
+### Done
+
+- [x] `src/posthog.ts` — hand-rolled `https.request` PostHog client (zero new deps). Pluggable `Fetcher` for tests via `__setFetcherForTests`.
+- [x] `src/crash.ts` — `captureActivationFailure`, `captureMessageFailure`, `wrapAsync`. Stack anonymization replaces homedir, blanks external frames, caps at 4 KB.
+- [x] `src/extension.ts` — `activate()` body wrapped in try/catch → `captureActivationFailure` → rethrow. New `pingCommand()` helper used by 5 high-traffic commands. Settings reload reconfigures the client.
+- [x] `src/sidebarProvider.ts` — `handle()` now delegates to `handleInner()` under try/catch. Four new InboundMessage types: `telemetry.optIn | optOut | status | tabView`. Snapshot payload gains `posthog: getPosthogStatus()` (counters + flags only — no projectId, no distinctId).
+- [x] `media/sidebar.js` — Self tab → Telemetry section: status pill + opt-in / opt-out button + counters. `setActiveTab(id)` pings `telemetry.tabView`. Help tab + Welcome banner now mention the opt-in.
+- [x] `package.json` — 4 new settings (`telemetry.enabled`, `telemetry.crashReports`, `telemetry.projectId`, `telemetry.host`), 1 new command (`claudeCockpit.telemetry.toggle`). Test script consolidated to a single line that runs every `test/*.test.js` file (was three duplicate keys, last-wins, ~80 tests silently skipped).
+- [x] `PRIVACY.md` — full **Optional telemetry (PostHog)** section: every event name + every detail field + every redaction rule + every gating setting + the HAQQ-project refusal.
+- [x] `CHANGELOG.md` — `[Unreleased] — feat/launch-telemetry-posthog` block.
+- [x] `test/posthog.test.js` — 12 tests: opt-out no-op, empty-projectId no-op, HAQQ refusal, payload shape, malformed event-name rejection, redaction, forbidden-key dropping, crashReports gating, stack anonymization, status leak-check.
+- [x] `npm test` 194/194 green (114 baseline + 12 new posthog + 68 previously-orphaned tests reactivated by the script consolidation).
+- [x] `npm run compile` clean under TypeScript strict (no `any`).
+- [x] `node --check media/sidebar.js` clean.
+
+### Event taxonomy (final)
+
+| Event | Detail (post-redaction) |
+|---|---|
+| `cockpit.session.start` | `activatedAt: number` |
+| `cockpit.session.end` | `deactivatedAt: number` |
+| `cockpit.tab.view` | `tab: string` (sanitized to `[a-zA-Z0-9_-]{1,24}`) |
+| `cockpit.command.invoke` | `command: string` (the command id, e.g. `claudeCockpit.refresh`) |
+| `cockpit.crash.report` | `surface: string`, `errorName: string`, `errorMessage: string` (≤500 chars), `stack: string` (≤4 KB, anonymized) |
+
+Every event also carries the standard envelope: `extensionVersion`, `vsCodeVersion`, `platform`, `$lib: 'claude-cockpit'`, `$lib_version`, `distinctId` (16-hex of salted hostname).
+
+### Open questions / scope ambiguities
+
+- **Where users enable telemetry.** Three surfaces: Self tab toggle, command palette (`Toggle Opt-in Telemetry`), VSCode settings. NO aggressive prompt — the welcome banner mentions it as a passing link, not a modal. If Stephane wants more visibility (e.g. a one-time banner inside the Self tab on first cold start), I'd add it under a `claudeCockpit.telemetry.bannerShown` globalState flag. Skipped for v1 to keep "default 100% local" honest — opt-in must NEVER feel coerced.
+- **GDPR / data-retention.** If Stephane plans to publish opt-in PostHog dashboards publicly, we need a "delete my data" path. Currently the only identifier is a 16-hex hash of `os.hostname()` — irreversible without the hostname. I recommend (a) documenting the salt + the regenerate-on-reinstall behavior in `PRIVACY.md`, and (b) adding `claudeCockpit.telemetry.regenerateDistinctId` if a user asks for one. Not blocking v1.0.
+- **Crash telemetry auto-includes VSCode version + OS string.** Yes — `vsCodeVersion: vscode.version` and `platform: process.platform` (just `darwin` / `linux` / `win32`, no kernel version) are in every event envelope. Per the brief: "it should, but verify it's not too identifying." Verdict: `process.platform` is one of three values — not identifying. `vscode.version` (e.g. `1.85.1`) is two-month-old at most, used by ~millions of users — not identifying. We do NOT capture `os.release()` or `os.cpus()` or anything that combines into a fingerprint.
+- **Reactivated tests.** Consolidating the test script raises the count from 114 to 194. The 80 newly-running tests were already passing — they were just not in any of the three duplicate `test` keys. If a CI somewhere asserted `tests 114`, it'll now see `tests 194` and may flag the change. Worth flagging in the PR description.

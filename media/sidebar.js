@@ -513,8 +513,9 @@
       <div class="welcome-banner">
         <h2 style="margin-top: 4px;">Welcome to Claude Cockpit</h2>
         <p class="empty" style="font-size: 12px; margin-top: 0;">
-          Read-only HUD for Claude Code. <strong>100% local</strong> — no telemetry,
-          no network calls without an explicit opt-in. Cockpit watches
+          Read-only HUD for Claude Code. <strong>100% local by default</strong>.
+          Optional analytics (<a class="link" data-action="goto-tab" data-tab="self">Self → Telemetry</a>)
+          is OFF until you turn it on. Cockpit watches
           <code>~/.claude/projects/</code> and surfaces what's already on your disk.
         </p>
 
@@ -612,6 +613,7 @@
 
       <h3 class="sub-h">Privacy</h3>
       <p class="empty" style="font-size: 11px;">All data is read-only and stays on your machine. Cockpit never makes outbound network calls except: (1) when you click an Obsidian link (<code>obsidian://</code>), (2) when you click a Cloudflare tunnel hostname (opens external), or (3) when probing localhost ports for the optional claude-usage dashboard. The webview content security policy blocks all <code>connect-src</code>.</p>
+      <p class="empty" style="font-size: 11px; margin-top: 6px;">Optional telemetry (<strong>off by default</strong>): the Self tab has a one-click opt-in for PostHog analytics + crash reports. When ON, Cockpit POSTs aggregate counters (tab views, command invocations, session duration) and redacted crash stacks to a PostHog project you choose. File paths, prompt text, session content, and API keys are <strong>never</strong> captured. Every outbound POST is mirrored to <code>~/.claude/.cockpit/audit.log</code>. Full disclosure in <code>PRIVACY.md</code>.</p>
 
       <h3 class="sub-h">Where data comes from</h3>
       <ul class="list">
@@ -1863,6 +1865,26 @@
         </li>`)
           .join('')
       : '<li><span class="empty">Idle.</span></li>';
+    // === telemetry-posthog (Phase 2): pill + opt-in/out toggle. The host
+    // populates `snap.posthog` with counters + the resolved enabled flag.
+    // When opt-in needs a projectId we route to settings via 'open-settings'.
+    const ph = snap.posthog || {};
+    const phOn = ph.enabled === true;
+    const phPill = phOn
+      ? '<span class="tag tag-used">PostHog: connected</span>'
+      : (ph.projectIdSet ? '<span class="tag">PostHog: disabled</span>' : '<span class="tag">PostHog: not configured</span>');
+    const phToggle = phOn
+      ? '<button class="office-btn" data-action="telemetry-opt-out">Opt out of telemetry</button>'
+      : (ph.projectIdSet
+          ? '<button class="office-btn" data-action="telemetry-opt-in">Opt in to telemetry</button>'
+          : '<button class="office-btn" data-action="open-settings" title="Set claudeCockpit.telemetry.projectId first">Configure telemetry…</button>');
+    const phCounters = phOn || ph.sent || ph.failed || ph.dropped
+      ? `<div class="kv" style="margin-top: 8px;">
+           <span class="k">Sent</span><span class="v">${ph.sent || 0}</span>
+           <span class="k">Failed</span><span class="v">${ph.failed || 0}</span>
+           <span class="k">Dropped (opt-out)</span><span class="v">${ph.dropped || 0}</span>
+         </div>`
+      : '';
     return `
       <h2>Self · cockpit observing itself</h2>
       <div class="kv">
@@ -1870,6 +1892,20 @@
         <span class="k">Total runs</span><span class="v">${t.totalRuns}</span>
         <span class="k">Errors</span><span class="v">${t.totalErrors}</span>
       </div>
+      <h3 style="margin-top: 12px;">Telemetry · opt-in</h3>
+      <div class="actions" style="gap: 8px; align-items: center;">
+        ${phPill}
+        ${phToggle}
+      </div>
+      <p class="empty" style="font-size: 11px; margin-top: 6px;">
+        Default OFF. When enabled, Cockpit POSTs aggregate counters
+        (<code>cockpit.tab.view</code>, <code>cockpit.command.invoke</code>,
+        <code>cockpit.session.start</code>) to your own PostHog project.
+        File paths, prompt text, session content, and API keys are
+        <strong>never</strong> sent. Every outbound is mirrored to
+        <code>~/.claude/.cockpit/audit.log</code>. See <code>PRIVACY.md</code>.
+      </p>
+      ${phCounters}
       <h3 style="margin-top: 12px;">Surfaces enabled</h3>
       <ul class="list">
         ${surfaceState('macHealth', 'Mac Health')}
@@ -4550,9 +4586,17 @@
   }
 
   function setActiveTab(id) {
+    const prev = (vscode.getState() || {}).activeTab;
     const next = { ...(vscode.getState() || {}), activeTab: id };
     delete next.customizeOpen;
     vscode.setState(next);
+    // === telemetry-posthog (Phase 2): ping the host so it can capture a
+    // tab.view event. The host gates this on the opt-in flag — when
+    // telemetry is OFF, the message arrives but the posthog client is a
+    // no-op, so there's still zero outbound traffic.
+    if (id && id !== prev) {
+      vscode.postMessage({ type: 'telemetry.tabView', telemetryTab: id });
+    }
   }
 
   // Fetch roadmap on first view, or refresh if cache is older than 10 min.
@@ -4632,6 +4676,12 @@
         }
         if (action === 'open-settings') {
           vscode.postMessage({ type: 'openSettings' });
+        }
+        if (action === 'telemetry-opt-in') {
+          vscode.postMessage({ type: 'telemetry.optIn' });
+        }
+        if (action === 'telemetry-opt-out') {
+          vscode.postMessage({ type: 'telemetry.optOut' });
         }
         if (action === 'goto-changelog') {
           const cur = vscode.getState() || {};

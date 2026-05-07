@@ -36,6 +36,31 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - Per the launch master plan's cut lines, mobile is LOW priority and explicitly defer-able. We shipped it because v1.0 wants the full feature set, but the surface area is bounded: a 240-line TypeScript module, three static files in `landing/mobile/`, one config flag default-off. Disabling the flag returns the extension to byte-identical v0.21.0 behaviour for this surface.
 - Authentication boundary: Cloudflare Access SSO. There is no fallback "protect with a password" mode — half-baked auth is worse than no auth. Users who don't run Cloudflare Access should leave the setting off.
 - Refresh cadence: 5s on the phone, debounced 250ms on the desktop. The desktop only rewrites the file when the queue **content** changes (sha256 digest match); idle ticks don't bump the mtime.
+## [Unreleased] — feat/launch-telemetry-posthog
+
+### Added
+
+- **Opt-in PostHog telemetry (`src/posthog.ts`)** — Phase 2 of the v1.0 launch wave. Default OFF. Hand-rolled `https.request` client (zero new deps) that POSTs `cockpit.<namespace>.<verb>` events to `app.posthog.com/i/v0/e/`. Configured via three settings, all defaulting to a no-op state: `claudeCockpit.telemetry.enabled` (boolean, default `false`), `claudeCockpit.telemetry.crashReports` (boolean, default `false`), `claudeCockpit.telemetry.projectId` (string, default `""`). When all three are zero/empty, the module's public surface is byte-for-byte a no-op — no allocations, no fs writes, no outbound traffic. v0.21.0 users see zero behavior change.
+- **Crash glue (`src/crash.ts`)** — `captureActivationFailure`, `captureMessageFailure`, `wrapAsync` wrappers that anonymize stack traces (home dir → `~`, tmpdir → `<tmp>`, frames outside the extension's `out/` dir blanked to `<external-frame>`, capped at 4 KB) before handing them to `posthog.captureCrash`. Wrappers run regardless of telemetry settings — they catch + log via `logger.warn` always; the PostHog post is gated on the opt-in flag. This means a thrown handler error never escapes the host, regardless of telemetry settings — a behavioural improvement over v0.21.0.
+- **Activation + message handler now wrapped.** `extension.ts:activate()` body lives in `activateInner()` invoked under a top-level try/catch; if it throws, `captureActivationFailure(err)` reports the redacted stack and rethrows so VSCode's "Extension failed to activate" surface still fires. Similarly `sidebarProvider.handle()` now delegates to `handleInner()` under try/catch — a single bad message no longer crashes the whole webview message bus.
+- **Self tab → Telemetry section.** New status pill (`PostHog: connected | disabled | not configured`) plus a one-click opt-in / opt-out toggle. Hooks via `telemetry.optIn`, `telemetry.optOut`, `telemetry.status` messages added to the InboundMessage union. Status payload exposes only counters + flags — never the projectId, never the distinctId, never the host beyond display.
+- **Tab-view ping.** `setActiveTab(id)` in `media/sidebar.js` now sends `telemetry.tabView` to the host on actual tab change. The host sanitizes the tab id (`[a-zA-Z0-9_-]{1,24}`) and emits `cockpit.tab.view`. Webview never makes the HTTP call directly — CSP `connect-src 'none'` is unchanged.
+- **Command instrumentation.** Five command palette entries (`refresh`, `gallery.openTab`, `replay.openCurrent`, `approval.openQueue`, `telemetry.toggle`) wrap their callbacks with a one-line `pingCommand(id)` that emits `cockpit.command.invoke`. Sends ONLY the command id — never the args, never any user input the command later prompts for.
+- **Outbound mirroring.** Every PostHog POST writes a `net.outbound` entry to `~/.claude/.cockpit/audit.log` so users can see exactly what left the machine — same audit-log surface the permissions-audit worktree introduced.
+- **Redaction at the module boundary.** `redactString()` strips `os.homedir()`, `/Users/...`, `/home/...`, `C:\\...` paths and `sk-…` / `xoxb-…` / `AKIA…` / `AIza…` / `ghp_…` / `github_pat_…` API-key shapes. `redactDetail()` walks nested objects ≤5 deep and hard-drops `apiKey`, `secret`, `password`, `token`, `authorization`, `prompt`, `body`, `content`, `fileContents`, `fileBody`, `sessionContent` keys. Defense in depth: callers also redact at emit sites.
+- **HAQQ project refusal.** `posthog.configure()` explicitly refuses project id `92178` (Stephane's HAQQ Legal AI customer-telemetry project) so extension diagnostics can never co-mingle with HAQQ customer data — even if a user pastes it by mistake.
+- **One new command.** `claudeCockpit.telemetry.toggle` flips the master flag from anywhere; if `projectId` is unset, it routes to settings instead.
+- **Privacy disclosure** — `PRIVACY.md` gains an **Optional telemetry (PostHog)** section listing every event name, every detail field, every redaction rule, and the three settings that gate the surface. Welcome banner + Help tab now mention the opt-in toggle.
+
+### Tests
+
+- 12 new tests in `test/posthog.test.js`: opt-out → no-op, empty-projectId → no-op, HAQQ project refusal, full payload-shape verification, malformed event-name rejection, redaction (paths + tokens), forbidden-key dropping inside `redactDetail`, crash-report flag gating, stack anonymization (`out/` frames preserved, externals blanked), status snapshot leak-check (must NOT include projectId or distinctId). Tests use a `__setFetcherForTests` injection seam — no real HTTP, no env mutation that would race other test files.
+- `package.json:scripts.test` consolidated to a single line that runs every `test/*.test.js` file (the prior version had three duplicate `test` keys; only the last won, leaving 80+ tests silently skipped). Test count grows from 114 (legacy filter) to 194 with this fix + the new posthog suite.
+
+### Notes
+
+- This is the **last** phase-2 worktree (telemetry observes every other worktree's surface). Mobile companion lands next.
+- PostHog project setup is the user's responsibility — Cockpit ships no project id. Users opt in by pasting their own `projectId` from a fresh PostHog project.
 
 ## [Unreleased] — Plugin API foundation + Approval queue
 
