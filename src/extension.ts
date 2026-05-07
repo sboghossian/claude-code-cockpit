@@ -24,16 +24,17 @@ import { activateGallery } from './gallery';
 import { CockpitSidebarProvider } from './sidebarProvider';
 import { createStatusBar } from './statusBar';
 import { setAuditEnabled } from './auditLog';
-import { registerSidebarScript } from './plugin';
+import { registerSidebarScript, registerSidebarStyle } from './plugin';
 
 export function activate(context: vscode.ExtensionContext): void {
   logger.info('claude-cockpit activating');
   // Phase-1 obsidian-graph: register the d3 vendor + graph renderer scripts.
-  // The sidebar provider will rewrite each path to a webview-safe URI at
-  // render time. Vendor goes first so window.d3 exists before sidebar.graph.js
-  // touches it.
+  // Vendor goes first so window.d3 exists before sidebar.graph.js touches it.
   registerSidebarScript('media/vendor/d3.min.js');
   registerSidebarScript('media/sidebar.graph.js');
+  // Phase-1 approval-queue: register the approval sibling script + style.
+  registerSidebarScript('media/sidebar.approval.js');
+  registerSidebarStyle('media/sidebar.approval.css');
   // Phase-1 worktrees register their widgets / tabs via the plugin API BEFORE
   // the webview provider mounts; activation order matters so listSidebarScripts()
   // returns the gallery sibling script when html() runs.
@@ -341,6 +342,47 @@ export function activate(context: vscode.ExtensionContext): void {
   } else {
     logger.info('app usage tracker disabled via claudeCockpit.surfaces.appUsage');
   }
+
+  // === approval-queue: command palette entries forwarded to the webview. ===
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.approval.openQueue', () => {
+      void vscode.commands.executeCommand('workbench.view.extension.claudeCockpit');
+      provider.setActiveTabFromHost('approval');
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.approval.bulkApprove', async () => {
+      const choice = await vscode.window.showWarningMessage(
+        'Approve every pending Cockpit-source action? This bypasses per-action review.',
+        { modal: true },
+        'Approve all',
+      );
+      if (choice !== 'Approve all') return;
+      // Reuse the webview message bus rather than duplicating the loop.
+      provider.handleHostMessage({ type: 'approval.bulkApprove' });
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.approval.bulkReject', async () => {
+      const choice = await vscode.window.showWarningMessage(
+        'Reject every pending Cockpit-source action?',
+        { modal: true },
+        'Reject all',
+      );
+      if (choice !== 'Reject all') return;
+      provider.handleHostMessage({ type: 'approval.bulkReject' });
+    }),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeCockpit.approval.revertLast', async () => {
+      const id = provider.lastRollbackableId();
+      if (!id) {
+        void vscode.window.showInformationMessage('No revertible Cockpit approval found.');
+        return;
+      }
+      provider.handleHostMessage({ type: 'approval.rollback', approvalId: id });
+    }),
+  );
 
   context.subscriptions.push({ dispose: () => status.dispose() });
   context.subscriptions.push({ dispose: () => logger.dispose() });

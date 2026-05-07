@@ -20,7 +20,13 @@ import { readAppUsage } from './appUsage';
 import { detectUsageDashboard, readRTKSavings, refreshSubdomainHealth } from './integrations';
 import { readMacHealth } from './macHealth';
 import { logger } from './logger';
-import { listSidebarScripts } from './plugin';
+import { listSidebarScripts, listSidebarStyles } from './plugin';
+import {
+  ApprovalEntry,
+  ApprovalQueueStore,
+  queuePath as approvalQueuePath,
+} from './approvalQueue';
+import type { WorktreeAction } from './plugin';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
 import { getOrBuildGraph, VaultGraph } from './graph';
 import {
@@ -148,7 +154,17 @@ interface InboundMessage {
     | 'layout.unpin'
     | 'layout.hide'
     | 'layout.show'
-    | 'layout.activateTab';
+    | 'layout.activateTab'
+    // === approval-queue ===
+    | 'approval.fetchQueue'
+    | 'approval.approve'
+    | 'approval.reject'
+    | 'approval.rollback'
+    | 'approval.openQueue'
+    | 'approval.openSnapshotDir'
+    | 'approval.bulkApprove'
+    | 'approval.bulkReject'
+    | 'approval.enqueueDemo';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -195,6 +211,11 @@ interface InboundMessage {
   tabOrder?: string[];
   pinnedTabs?: string[];
   hiddenTabs?: string[];
+  // === approval-queue ===
+  approvalId?: string;
+  approvalNote?: string;
+  approvalForce?: boolean;
+  approvalDemoFiles?: string[];
 }
 
 /**
@@ -363,6 +384,11 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   // same messages back here. We re-broadcast every refresh() to both views
   // to keep layout state coherent.
   private popoutPanel: vscode.WebviewPanel | undefined;
+  // === approval-queue: single store instance, file-backed at
+  // ~/.claude/.cockpit/queue.json. Created lazily so tests / activation
+  // ordering doesn't have to mkdir on import. ===
+  private approvalQueue: ApprovalQueueStore | undefined;
+  private approvalQueueWatcher: fs.FSWatcher | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -427,6 +453,78 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       this.jarvisWatcher?.close();
       this.jarvisWatcher = undefined;
     });
+
+    // === approval-queue: ensure store exists; watch the queue file so
+    // out-of-process writes (e.g. a CLI hook) refresh the badge in real
+    // time. The full queue payload is sent only on `approval.fetchQueue`. ===
+    this.ensureApprovalQueue();
+    this.startApprovalWatcher();
+    view.onDidDispose(() => {
+      this.approvalQueueWatcher?.close();
+      this.approvalQueueWatcher = undefined;
+    });
+  }
+
+  private ensureApprovalQueue(): ApprovalQueueStore {
+    if (!this.approvalQueue) {
+      this.approvalQueue = new ApprovalQueueStore();
+    }
+    return this.approvalQueue;
+  }
+
+  private startApprovalWatcher(): void {
+    try {
+      this.approvalQueueWatcher?.close();
+      this.approvalQueueWatcher = undefined;
+      const p = approvalQueuePath();
+      if (!fs.existsSync(p)) return;
+      let debounce: NodeJS.Timeout | undefined;
+      this.approvalQueueWatcher = fs.watch(p, () => {
+        if (debounce) clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          this.ensureApprovalQueue().reload();
+          this.postApprovalQueue();
+          this.refresh();
+        }, 250);
+      });
+    } catch (err) {
+      logger.info(`approvalQueue: watcher attach failed: ${String(err)}`);
+    }
+  }
+
+  private postApprovalQueue(): void {
+    if (!this.view) return;
+    const store = this.ensureApprovalQueue();
+    // Merge in jarvis pending so the new tab shows both sources. We do not
+    // mutate the on-disk queue with jarvis ids unless the user actually
+    // approves them; this method is a read-only display merge.
+    const cockpit: ApprovalEntry[] = store.list();
+    const jarvis = (this.jarvis?.pendingApprovals ?? []).map((a) => ({
+      id: `jarvis:${a.id}`,
+      source: 'jarvis' as const,
+      action: {
+        id: `jarvis:${a.id}`,
+        worktree: 'boo-mesh',
+        tool: a.tool,
+        argsRedacted: a.payload.length > 200 ? a.payload.slice(0, 200) + '…' : a.payload,
+        filesAffected: [] as string[],
+        requestedAt: a.requestedAt * 1000,
+        byAgent: a.requestedBy || undefined,
+        expectedDiffBytes: 0,
+        rollbackable: false,
+      },
+      status: 'pending' as const,
+      snapshotId: undefined,
+      snapshotError: undefined,
+      decidedAt: undefined,
+      decidedBy: undefined,
+      decisionNote: undefined,
+      rollback: undefined,
+    }));
+    const known = new Set(cockpit.map((e) => e.id));
+    const merged = cockpit.concat(jarvis.filter((j) => !known.has(j.id)));
+    merged.sort((a, b) => b.action.requestedAt - a.action.requestedAt);
+    this.view.webview.postMessage({ type: 'approval.queue', entries: merged });
   }
 
   private startJarvisWatcher(): void {
@@ -476,6 +574,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       } finally {
         this.jarvisInflight = undefined;
         this.refresh();
+        // Push the merged queue (cockpit + jarvis pending) so the new tab
+        // reflects the latest jarvis state without waiting for a webview
+        // click. No-op when the view is not yet mounted.
+        this.postApprovalQueue();
       }
     })();
     return this.jarvisInflight;
@@ -775,6 +877,28 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
    *  SHA256 + 1KB excerpt before any disk write. */
   previewGalleryInstall(url: string): void {
     void this.handle({ type: 'gallery.installPreview', galleryUrl: url });
+  }
+
+  /**
+   * Public message-bus entry for command-palette commands. Forwards to the
+   * same `handle()` switch the webview hits, so we don't duplicate logic.
+   */
+  handleHostMessage(msg: InboundMessage): void {
+    void this.handle(msg);
+  }
+
+  /**
+   * Most recent Cockpit-source pending entry that has a snapshot. Used by
+   * the `claudeCockpit.approval.revertLast` command palette entry.
+   */
+  lastRollbackableId(): string | undefined {
+    const list = this.ensureApprovalQueue().list();
+    // Newest first; `list()` returns insertion order, so reverse-scan.
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const e = list[i];
+      if (e.source === 'cockpit' && e.snapshotId) return e.id;
+    }
+    return undefined;
   }
 
   runSearch(query: string): void {
@@ -1637,6 +1761,171 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         this.openPopoutPanel();
         return;
       }
+      // === approval-queue ===
+      case 'approval.fetchQueue': {
+        this.ensureApprovalQueue().reload();
+        this.postApprovalQueue();
+        return;
+      }
+      case 'approval.approve': {
+        if (!msg.approvalId) return;
+        const id = msg.approvalId;
+        if (id.startsWith('jarvis:')) {
+          // Forward to the existing jarvis decideApproval flow, preserving
+          // the v0.21.0 contract. The queue tab is the trust gate; we don't
+          // re-implement boo-mesh state.
+          try {
+            decideApproval(id.slice('jarvis:'.length), 'approved', 'cockpit-approval-tab');
+          } catch (err) {
+            logger.warn(`approval.approve(jarvis): ${String(err)}`);
+          }
+          void this.refreshJarvis();
+        } else {
+          this.ensureApprovalQueue().approve(id, {
+            decidedBy: 'cockpit-approval-tab',
+            note: msg.approvalNote,
+          });
+        }
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
+      case 'approval.reject': {
+        if (!msg.approvalId) return;
+        const id = msg.approvalId;
+        if (id.startsWith('jarvis:')) {
+          try {
+            decideApproval(
+              id.slice('jarvis:'.length),
+              'rejected',
+              'cockpit-approval-tab',
+              msg.approvalNote,
+            );
+          } catch (err) {
+            logger.warn(`approval.reject(jarvis): ${String(err)}`);
+          }
+          void this.refreshJarvis();
+        } else {
+          this.ensureApprovalQueue().reject(id, {
+            decidedBy: 'cockpit-approval-tab',
+            note: msg.approvalNote,
+          });
+        }
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
+      case 'approval.rollback': {
+        if (!msg.approvalId) return;
+        const id = msg.approvalId;
+        if (id.startsWith('jarvis:')) {
+          // Boo-mesh approvals don't have Cockpit-owned snapshots; rollback
+          // is a no-op the UI shouldn't have offered. Surface a friendly
+          // notification and no-op gracefully.
+          void vscode.window.showInformationMessage(
+            'Cockpit cannot revert a boo-mesh approval — no local snapshot exists.',
+          );
+          return;
+        }
+        const store = this.ensureApprovalQueue();
+        const { result } = store.rollback(id, {
+          decidedBy: 'cockpit-approval-tab',
+          note: msg.approvalNote,
+          forceRollback: msg.approvalForce === true,
+        });
+        if (!result.ok) {
+          const drift = result.files.filter((f) => f.status === 'drifted-skipped').length;
+          if (drift > 0 && msg.approvalForce !== true) {
+            const choice = await vscode.window.showWarningMessage(
+              `Cockpit: ${drift} file(s) drifted since the snapshot. Restore anyway?`,
+              { modal: true },
+              'Force restore',
+              'Cancel',
+            );
+            if (choice === 'Force restore') {
+              store.rollback(id, {
+                decidedBy: 'cockpit-approval-tab',
+                note: msg.approvalNote,
+                forceRollback: true,
+              });
+            }
+          } else {
+            void vscode.window.showErrorMessage(
+              `Cockpit: rollback failed (${result.files.length} file(s) reported errors).`,
+            );
+          }
+        }
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
+      case 'approval.openQueue': {
+        this.setActiveTabFromHost('approval');
+        this.postApprovalQueue();
+        return;
+      }
+      case 'approval.openSnapshotDir': {
+        const id = msg.approvalId;
+        if (!id) return;
+        const entry = this.ensureApprovalQueue().get(id);
+        if (!entry || !entry.snapshotId) return;
+        const dir = path.join(os.homedir(), '.claude', '.cockpit', 'snapshots', entry.snapshotId);
+        if (!fs.existsSync(dir)) return;
+        void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(dir));
+        return;
+      }
+      case 'approval.bulkApprove': {
+        const store = this.ensureApprovalQueue();
+        for (const e of store.pending()) {
+          if (e.source === 'cockpit') {
+            store.approve(e.id, { decidedBy: 'cockpit-approval-tab-bulk' });
+          }
+        }
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
+      case 'approval.bulkReject': {
+        const store = this.ensureApprovalQueue();
+        for (const e of store.pending()) {
+          if (e.source === 'cockpit') {
+            store.reject(e.id, { decidedBy: 'cockpit-approval-tab-bulk' });
+          }
+        }
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
+      case 'approval.enqueueDemo': {
+        // Test-only path: lets the user enqueue a fake action to verify the
+        // tab end-to-end without a real PreToolUse hook wired up. Files are
+        // taken from the message body OR fall back to the active CLAUDE.md.
+        const cwdNow = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!cwdNow) {
+          void vscode.window.showWarningMessage('Open a workspace folder first.');
+          return;
+        }
+        const files = (msg.approvalDemoFiles ?? [path.join(cwdNow, 'CLAUDE.md')])
+          .filter((f) => path.isAbsolute(f))
+          .slice(0, 8);
+        const action: WorktreeAction = {
+          id: `demo-${Date.now().toString(36)}`,
+          worktree: 'cockpit-demo',
+          tool: 'Edit',
+          argsRedacted: 'demo enqueue from approval tab',
+          filesAffected: files,
+          requestedAt: Date.now(),
+          byAgent: 'demo',
+          expectedDiffBytes: 0,
+          rollbackable: true,
+        };
+        const cfg = vscode.workspace.getConfiguration('claudeCockpit.approval');
+        const snapshotMaxBytes = cfg.get<number>('snapshotMaxBytes', 50 * 1024 * 1024);
+        this.ensureApprovalQueue().enqueue(action, { snapshotMaxBytes });
+        this.postApprovalQueue();
+        this.refresh();
+        return;
+      }
     }
   }
 
@@ -1832,6 +2121,14 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         return `  <script nonce="${nonce}" src="${uri}"></script>`;
       })
       .join('\n');
+    const externalStyleTags = listSidebarStyles()
+      .map((rel) => {
+        const safeRel = rel.replace(/^\/+/, '').replace(/\.\./g, '');
+        const segments = safeRel.split('/').filter((s) => s.length > 0);
+        const uri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, ...segments));
+        return `  <link rel="stylesheet" href="${uri}" />`;
+      })
+      .join('\n');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1839,6 +2136,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; media-src 'self' blob:; connect-src 'none'; form-action 'none';" />
   <link rel="stylesheet" href="${cssUri}" />
   <link rel="stylesheet" href="${themesCssUri}" />
+${externalStyleTags}
   <title>Claude Cockpit</title>
 </head>
 <body>

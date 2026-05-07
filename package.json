@@ -182,6 +182,22 @@
       {
         "command": "claudeCockpit.tab.9",
         "title": "Claude Cockpit: Jump to Tab 9"
+      },
+      {
+        "command": "claudeCockpit.approval.openQueue",
+        "title": "Claude Cockpit: Open Approval Queue"
+      },
+      {
+        "command": "claudeCockpit.approval.bulkApprove",
+        "title": "Claude Cockpit: Approve All Pending (Cockpit-source only)"
+      },
+      {
+        "command": "claudeCockpit.approval.bulkReject",
+        "title": "Claude Cockpit: Reject All Pending (Cockpit-source only)"
+      },
+      {
+        "command": "claudeCockpit.approval.revertLast",
+        "title": "Claude Cockpit: Revert Last Snapshotted Action"
       }
     ],
     "keybindings": [
@@ -333,6 +349,23 @@
           "type": "boolean",
           "default": true,
           "description": "Append meta-events (outbound network calls, key-add/delete) to ~/.claude/.cockpit/audit.log. Local-only; never exfiltrated. Drives the Audit, Outbound, and Keys sub-views in the Security tab. Disable for zero-write operation — existing log files are preserved but no new events are appended."
+        },
+        "claudeCockpit.approval.autoSnapshot": {
+          "type": "boolean",
+          "default": true,
+          "description": "Capture a pre-action filesystem snapshot of `WorktreeAction.filesAffected` when an entry lands in the approval queue, so revert is possible. Off = the queue still surfaces actions but revert is unavailable."
+        },
+        "claudeCockpit.approval.snapshotMaxBytes": {
+          "type": "number",
+          "default": 52428800,
+          "minimum": 0,
+          "description": "Per-action snapshot size cap in bytes (default 50 MB). Captures larger than this are rejected and the entry is marked snapshot-failed; the action is not blocked."
+        },
+        "claudeCockpit.approval.requireForToolNames": {
+          "type": "array",
+          "default": ["Bash", "Edit", "Write", "MultiEdit"],
+          "description": "Hook-side hint: which Claude Code tool names should be routed through the approval queue. Cockpit itself does NOT enforce — wire your PreToolUse hook to read this list (v1.1 will ship the hook).",
+          "items": { "type": "string" }
         }
       }
     },
@@ -350,6 +383,7 @@
     "compile": "tsc -p .",
     "watch": "tsc -p . --watch",
     "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/auditLog.test.js",
+    "test": "npm run compile && node --require ./test/register.js --test test/claudeData.test.js test/plugin.test.js test/snapshot.test.js test/approvalQueue.test.js",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

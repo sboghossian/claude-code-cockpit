@@ -1,0 +1,199 @@
+/*
+ * Claude Cockpit — Approval queue tab styles.
+ *
+ * All selectors are prefixed `.cockpit-approval-` per the launch plan
+ * conflict map. Plain CSS — no Tailwind, no preprocessor. Variables come
+ * from media/sidebar.css (themed alongside VSCode).
+ */
+
+.cockpit-approval-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.cockpit-approval-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.cockpit-approval-header h2 {
+  margin: 0;
+}
+
+.cockpit-approval-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cockpit-approval-empty {
+  border: 1px dashed var(--vscode-input-border, #444);
+  border-radius: 6px;
+  padding: 16px 12px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  text-align: center;
+}
+
+.cockpit-approval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cockpit-approval-item {
+  border: 1px solid var(--vscode-input-border, #444);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--vscode-editor-background);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cockpit-approval-item.cockpit-approval-snapshot-failed {
+  border-color: var(--vscode-inputValidation-errorBorder, #c4314b);
+}
+
+.cockpit-approval-item.cockpit-approval-decided {
+  opacity: 0.7;
+}
+
+.cockpit-approval-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cockpit-approval-tool {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cockpit-approval-pill {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.cockpit-approval-pill-source-cockpit {
+  color: var(--vscode-charts-blue, #4f9cff);
+}
+
+.cockpit-approval-pill-source-jarvis {
+  color: var(--vscode-charts-purple, #b58dff);
+}
+
+.cockpit-approval-pill-status-pending {
+  color: var(--vscode-charts-yellow, #d7ba7d);
+}
+
+.cockpit-approval-pill-status-snapshot-failed {
+  color: var(--vscode-inputValidation-errorForeground, #f48771);
+}
+
+.cockpit-approval-pill-status-approved {
+  color: var(--vscode-charts-green, #6a9955);
+}
+
+.cockpit-approval-pill-status-rejected {
+  color: var(--vscode-charts-red, #f14c4c);
+}
+
+.cockpit-approval-pill-status-rolled-back {
+  color: var(--vscode-charts-orange, #d19a66);
+}
+
+.cockpit-approval-meta {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  word-break: break-word;
+}
+
+.cockpit-approval-args {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.1));
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 6em;
+  overflow: auto;
+}
+
+.cockpit-approval-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground);
+}
+
+.cockpit-approval-files li {
+  list-style: none;
+  padding-left: 0;
+  word-break: break-all;
+}
+
+.cockpit-approval-button {
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-input-border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+
+.cockpit-approval-button:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.cockpit-approval-button-approve {
+  border-color: var(--vscode-charts-green, #6a9955);
+  color: var(--vscode-charts-green, #6a9955);
+}
+
+.cockpit-approval-button-reject {
+  border-color: var(--vscode-charts-red, #f14c4c);
+  color: var(--vscode-charts-red, #f14c4c);
+}
+
+.cockpit-approval-button-rollback {
+  border-color: var(--vscode-charts-orange, #d19a66);
+  color: var(--vscode-charts-orange, #d19a66);
+}
+
+.cockpit-approval-button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cockpit-approval-warn {
+  font-size: 11px;
+  color: var(--vscode-inputValidation-errorForeground, #f48771);
+  font-weight: 500;
+}
+
+.cockpit-approval-detail {
+  border: 1px dashed var(--vscode-input-border, #444);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.cockpit-approval-detail-empty {
+  text-align: center;
+  font-style: italic;
+}
