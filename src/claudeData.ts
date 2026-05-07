@@ -239,6 +239,10 @@ export interface CockpitSnapshot {
   // last: api.github.com" without a round-trip; full log is fetched on demand
   // via audit.refresh.
   audit?: { last24h: number; lastDomain: string | undefined };
+  // === skill-gallery ===
+  // Lazy-loaded gallery summary — only counts. Full items list lives behind a
+  // `gallery.openLocal` message round-trip so the snapshot payload stays small.
+  gallery?: { skillCount: number; agentCount: number; totalCount: number };
 }
 
 /**
@@ -2183,6 +2187,11 @@ function snapshotInner(
           : undefined;
       }),
       audit,
+      gallery: {
+        skillCount: skillsEmpty.length,
+        agentCount: agents.length,
+        totalCount: skillsEmpty.length + agents.length,
+      },
     };
   }
 
@@ -2291,6 +2300,11 @@ function snapshotInner(
         : undefined;
     }),
     audit,
+    gallery: {
+      skillCount: skills.length,
+      agentCount: agents.length,
+      totalCount: skills.length + agents.length,
+    },
   };
 }
 

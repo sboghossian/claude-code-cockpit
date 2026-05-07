@@ -118,6 +118,14 @@
       {
         "command": "claudeCockpit.keys.add",
         "title": "Claude Cockpit: Add API Key (SecretStorage)"
+      },
+      {
+        "command": "claudeCockpit.gallery.openTab",
+        "title": "Claude Cockpit: Open Gallery"
+      },
+      {
+        "command": "claudeCockpit.gallery.installFromUrl",
+        "title": "Claude Cockpit: Install Skill from URL"
       }
     ],
     "configuration": {

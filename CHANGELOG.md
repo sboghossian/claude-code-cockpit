@@ -9,9 +9,17 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - **Plugin API (`src/plugin.ts`)** — Phase 0 of the v1.0 launch wave. Defines the formal extension contract every Phase-1 feature consumes: `CockpitWidget`, `CockpitTab`, `CockpitTrigger` extension points plus the shared `WorktreeAction`, `SnapshotRef`, `AuditEvent` types that approval-queue, replay-timeline, and permissions-audit will all import. Includes `registerWidget`, `registerTab`, `registerTrigger`, and `registerSidebarScript` functions backed by module-private append-only registries. Zero external dependencies.
 - **Webview bridge for sibling scripts.** `media/sidebar.js` now exposes `window.cockpit.registerComponent(id, def)` and an `EXTERNAL_COMPONENTS` map adjacent to the existing `COMPONENTS` registry. `tabBodyComposed()` falls back to `EXTERNAL_COMPONENTS` so Phase-1 features can register widgets without editing the COMPONENTS literal. The sidebar provider's `html()` walks `listSidebarScripts()` and emits one nonce-tagged `<script>` per registered path, preserving the existing CSP (`connect-src 'none'`).
 
+<!-- skill-gallery (Phase 1) -->
+- **Skill / agent gallery tab (`src/gallery.ts` + `media/sidebar.gallery.js`)** — new Gallery tab listing every skill in `~/.claude/skills/`, every plugin-cached skill, and every agent in `~/.claude/agents/` (global + workspace). Reuses the existing `listSkills` and `readAgents` readers — no duplicated frontmatter parsing. Items are searchable by name/description/origin and filterable by kind (skills vs agents). Lazy-loaded via the `gallery.openLocal` message round-trip; the snapshot itself only carries the `{skillCount, agentCount, totalCount}` summary so payload size stays flat.
+- **Share-via-clipboard.** Each row's "Share" button copies a portable manifest to the clipboard: a Cockpit signature header (kind, origin, sharedAt, publishTo URL) followed by the original SKILL.md frontmatter + body verbatim. The header is a markdown comment so it doesn't shadow the `---` frontmatter — recipients can paste the result straight into the eventual cockpit-skills registry issue template.
+- **Install from HTTPS URL.** Paste a public URL (GitHub raw, registry mirror); the extension fetches it host-side, computes SHA256, and shows a preview (URL, SHA256, byte count, first 1KB). Confirming pops a modal warning, re-fetches, re-hashes, and rejects with `SHA256 mismatch` if the bytes drift between preview and confirm. Rejects `http://`, malformed URLs, and 4xx/5xx responses. Writes to `~/.claude/skills/<inferred-slug>/SKILL.md` only after the user confirms.
+- **Two new commands.** `claudeCockpit.gallery.openTab` jumps to the Gallery tab; `claudeCockpit.gallery.installFromUrl` prompts for an HTTPS URL and routes through the same preview/confirm flow.
+- **Snapshot extension.** `CockpitSnapshot.gallery?` (optional) — `{skillCount, agentCount, totalCount}`. Phase-1 worktrees can grow this without breaking pre-existing call sites that build snapshots literally.
+
 ### Notes
 
 - Phase 0 is pure plumbing — no new tabs, widgets, or message types. Until a Phase-1 worktree registers something, every existing tab renders byte-identical to v0.21.0.
+- Skill-gallery v1.0 ships **local browse + clipboard share + install-by-URL** only. The public registry server and one-click publish are deferred to v1.1 (the registry repo doesn't exist yet — the Share button points at the planned `cockpit-skills` GitHub issue template).
 
 ## [Unreleased] — feat/launch-permissions-audit
 

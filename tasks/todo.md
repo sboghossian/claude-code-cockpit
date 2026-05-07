@@ -420,3 +420,32 @@ Phase 1 of the v1.0 launch wave. Append-only audit log + Security-tab sub-views 
 - [x] `node --check media/sidebar.js` clean; `node --check media/sidebar.audit.js` clean
 - [x] No mutations to `~/.claude/projects/*.jsonl`; audit log lives at `~/.claude/.cockpit/audit.log` (Cockpit-owned dir)
 - [x] No exfiltration — log file is local-only; PostHog telemetry-posthog will consume aggregate counts (NEVER paths) when it merges later in Phase 2
+## v1.0 — skill-gallery
+
+New tab listing every skill (`~/.claude/skills/` + plugin cache) and every agent (`~/.claude/agents/` global + workspace), with clipboard share + install-by-URL.
+
+### Acceptance
+
+- [x] `src/gallery.ts` exports `listGalleryItems`, `gallerySummary`, `formatShareManifest`, `validateInstallUrl`, `inferSkillName`, `previewInstall`, `installFromUrl`, `activateGallery`
+- [x] Reuses `listSkills` (claudeData.ts) + `readAgents` (integrations.ts) — no duplicated frontmatter parsing
+- [x] `media/sidebar.gallery.js` registers two widgets via `window.cockpit.registerComponent`: `galleryGrid` (search + filter + share) and `galleryShareCard` (install URL + preview + publish-issue link)
+- [x] New `gallery` tab declared via `registerTab` and a one-line addition each in `DEFAULT_TAB_COMPOSITIONS`, `TAB_ICONS`, and `tabCatalogue()`
+- [x] `gallery.share` copies a portable manifest (Cockpit signature header + frontmatter + body) to clipboard; round-trips through `parseFrontmatter` (test asserts)
+- [x] `gallery.installPreview` rejects non-HTTPS URLs, malformed URLs, and 4xx/5xx responses; returns SHA256 + 1KB excerpt on success
+- [x] `gallery.installConfirm` re-fetches, re-hashes, rejects with "SHA256 mismatch" if bytes drift since preview, and writes only after a modal confirmation
+- [x] Path-traversal guard: install target must resolve inside `rootOverride ?? ~/.claude/skills/`
+- [x] `CockpitSnapshot.gallery?` carries summary counts only (skillCount, agentCount, totalCount); full items list is lazy-loaded via `gallery.openLocal`
+- [x] Two new commands: `claudeCockpit.gallery.openTab`, `claudeCockpit.gallery.installFromUrl`
+- [x] All inbound message types use the `gallery.*` namespace prefix
+- [x] All new CSS selectors use the `cockpit-gallery-*` prefix
+- [x] Webview CSP unchanged (`connect-src 'none'` — install fetches run host-side)
+- [x] `npm test` 47 baseline + 11 new = 58/58 green
+- [x] `npm run compile` clean under TypeScript strict (no `any`)
+- [x] `node --check media/sidebar.js` + `node --check media/sidebar.gallery.js` clean
+- [x] No new dependencies
+
+### Out-of-scope (deferred to v1.1)
+
+- [ ] Public registry server / one-click publish — Share button just copies clipboard payload pointing at the planned cockpit-skills issue template
+- [ ] Auto-update of installed skills (re-fetch + re-hash on demand)
+- [ ] Sign-with-pubkey workflow for skill provenance
