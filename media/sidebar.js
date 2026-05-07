@@ -9,6 +9,15 @@
   }
   const root = document.getElementById('root');
   let lastSnapshot = null;
+  // === tab-system-v2 ===
+  // Expose a thin host-post handle so sidebar.layout.js (loaded as a sibling
+  // <script>) can route layout.* messages without re-calling
+  // acquireVsCodeApi (VSCode forbids the second call). sidebar.layout.js
+  // either uses its own retry or falls back to relay-via-window.postMessage,
+  // which we forward here.
+  if (typeof window !== 'undefined') {
+    window.__cockpitHostPost = (msg) => vscode.postMessage(msg);
+  }
   let minedPromptsState = null; // { prompts: MinedPrompt[], selected: Set<fingerprint> }
 
   const PROMPT_CATEGORIES = ['legal', 'build', 'review', 'plan', 'research', 'infra', 'other'];
@@ -3738,11 +3747,69 @@
       }
       return true;
     });
-    if (enabledExplicit) {
-      return filtered.filter((t) => t.pinned || explicitSet.has(t.id) || t.id === 'welcome');
+    const baseList = enabledExplicit
+      ? filtered.filter((t) => t.pinned || explicitSet.has(t.id) || t.id === 'welcome')
+      : filtered;
+    return applyLayoutOverlay(baseList, prefs);
+  }
+
+  // === tab-system-v2 ===
+  // Apply pin/hide/reorder overlay on top of the base enabled list. When NO
+  // layout prefs are set we return the base list reference unchanged so the
+  // default render is byte-identical (regression-safe).
+  function applyLayoutOverlay(baseList, prefs) {
+    const layoutOrder = Array.isArray(prefs.tabOrder) ? prefs.tabOrder : null;
+    const pinned = Array.isArray(prefs.pinnedTabs) ? prefs.pinnedTabs : null;
+    const hidden = Array.isArray(prefs.hiddenTabs) ? prefs.hiddenTabs : null;
+    if (!layoutOrder && !pinned && !hidden) return baseList;
+    const byId = new Map();
+    for (const t of baseList) byId.set(t.id, t);
+    const hideSet = new Set(hidden || []);
+    // Built-in pinned (Custom/Now/Help) are NEVER hidden, mirroring the
+    // contract from PINNED_TABS in the catalogue.
+    const result = [];
+    const used = new Set();
+    if (pinned) {
+      for (const id of pinned) {
+        const t = byId.get(id);
+        if (!t || used.has(id)) continue;
+        result.push(t);
+        used.add(id);
+      }
     }
-    // First-launch default: every tab visible (preserves prior UX).
-    return filtered;
+    // Built-ins that are intrinsically pinned but not user-pinned still go
+    // up front (preserves PINNED_TABS contract).
+    for (const t of baseList) {
+      if (t.pinned && !used.has(t.id)) {
+        result.push(t);
+        used.add(t.id);
+      }
+    }
+    if (layoutOrder) {
+      for (const id of layoutOrder) {
+        if (used.has(id)) continue;
+        if (hideSet.has(id)) continue;
+        const t = byId.get(id);
+        if (!t) continue;
+        result.push(t);
+        used.add(id);
+      }
+    }
+    // Anything left in the base list that wasn't placed by the overlay falls
+    // in at the end (catalog order). Hidden tabs drop out unless they were
+    // forced via the pinned list above.
+    for (const t of baseList) {
+      if (used.has(t.id)) continue;
+      if (hideSet.has(t.id) && !t.pinned) continue;
+      result.push(t);
+      used.add(t.id);
+    }
+    return result;
+  }
+
+  // Expose pure helper for tests.
+  if (typeof window !== 'undefined') {
+    window.__cockpitLayoutPure = { applyLayoutOverlay };
   }
 
   function visibleTabBar(snap) {
@@ -4321,13 +4388,66 @@
     const composeTabId = TAB_MIGRATIONS[activeTab] || activeTab;
     const body = tabBodyComposed(snap, composeTabId);
 
-    root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
+    // === tab-system-v2 ===
+    // Pop-out mode: render the same body but inside a 4-col grid wrapper so
+    // the user sees every active widget at once. We also append a small
+    // "Layout" toolbar with quick load/save controls. Layout state is read
+    // from snap.userPrefs so the sidebar view + pop-out panel share state.
+    const popout = typeof window !== 'undefined' && !!window.__cockpitPopoutMode;
+    if (popout) {
+      const gridBody = renderPopoutGrid(snap);
+      root.innerHTML = `${header}${tabBar}<div class="tab-panel cockpit-layout-popout">${gridBody}</div>`;
+    } else {
+      root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
+    }
     bindEvents();
     // Talk lifecycle now follows the rendered composition, not the active
     // tab id — user can drop the Talk widget on any tab.
     const composition = getTabComponentIds(snap, composeTabId);
     if (composition.includes('talk')) Talk.init();
     else Talk.teardown();
+    // Notify sidebar.layout.js so it can re-annotate drag handles + pinned
+    // markers after every reflow. Custom events are zero-overhead when no
+    // listener is registered (e.g. layout.js disabled).
+    document.dispatchEvent(new CustomEvent('cockpit:rendered'));
+  }
+
+  // === tab-system-v2 ===
+  // Build the full-screen grid: every visible tab gets a card showing its
+  // composed body. We reuse tabBodyComposed so the same widget render fns
+  // run; the only delta is a wrapping <section> per tab.
+  function renderPopoutGrid(snap) {
+    const tabs = visibleTabBar(snap);
+    const cards = tabs
+      .filter((t) => !t.dim)
+      .map((t) => {
+        const composeId = TAB_MIGRATIONS[t.id] || t.id;
+        const body = tabBodyComposed(snap, composeId);
+        return `<section class="cockpit-layout-card" data-tab-card="${escapeHtml(t.id)}">
+          <header class="cockpit-layout-card-head">
+            <h3>${escapeHtml(stripCount(t.label))}</h3>
+            <button class="office-btn" data-action="goto-tab" data-tab="${escapeHtml(t.id)}">Focus</button>
+          </header>
+          <div class="cockpit-layout-card-body">${body}</div>
+        </section>`;
+      })
+      .join('');
+    const presets = (snap && snap.userPrefs && snap.userPrefs.tabLayouts) || {};
+    const presetNames = Object.keys(presets);
+    const active = (snap && snap.userPrefs && snap.userPrefs.currentLayoutName) || '';
+    const presetButtons = presetNames
+      .map(
+        (name) => `<button class="office-btn ${active === name ? 'on' : ''}" data-cockpit-layout-load="${escapeHtml(name)}">${escapeHtml(name)}</button>`,
+      )
+      .join('');
+    const toolbar = `
+      <div class="cockpit-layout-toolbar">
+        <strong>Layout</strong>
+        ${presetButtons || '<span class="empty">No saved presets — right-click a tab to save one.</span>'}
+        <button class="office-btn" data-cockpit-layout-save>Save current as…</button>
+      </div>
+    `;
+    return `${toolbar}<div class="cockpit-layout-grid">${cards}</div>`;
   }
 
   function ensureValidActiveTab(active, tabs) {
@@ -5187,20 +5307,95 @@
         });
       });
     });
+
+    // === tab-system-v2 ===
+    // Pop-out grid toolbar — load/save preset shortcuts. The right-click
+    // context menu (sidebar.layout.js) drives most flows; this is the
+    // visible preset bar shown in the fullscreen view.
+    root.querySelectorAll('button[data-cockpit-layout-load]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.getAttribute('data-cockpit-layout-load');
+        if (!name) return;
+        vscode.postMessage({ type: 'layout.load', layoutName: name });
+      });
+    });
+    root.querySelectorAll('button[data-cockpit-layout-save]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = window.prompt('Save layout as (e.g. Coding):');
+        if (!name || !name.trim()) return;
+        const order = (lastSnapshot ? visibleTabBar(lastSnapshot) : []).map((t) => t.id);
+        const prefs = (lastSnapshot && lastSnapshot.userPrefs) || {};
+        vscode.postMessage({
+          type: 'layout.save',
+          layoutName: name.trim(),
+          tabOrder: order,
+          pinnedTabs: Array.isArray(prefs.pinnedTabs) ? prefs.pinnedTabs : [],
+          hiddenTabs: Array.isArray(prefs.hiddenTabs) ? prefs.hiddenTabs : [],
+        });
+      });
+    });
   }
 
   function onSnapshot(snap) {
     lastSnapshot = snap;
+    // === tab-system-v2 ===
+    // Stamp on window so sidebar.layout.js can read latest userPrefs without
+    // duplicating message-bus logic. Read-only contract — never mutate.
+    if (typeof window !== 'undefined') window.__cockpitLastSnapshot = snap;
     render(snap);
   }
 
   window.addEventListener('message', (event) => {
     const msg = event.data;
+    // === tab-system-v2 ===
+    // Relay path: sidebar.layout.js may post layout.* messages via
+    // window.postMessage when it can't access vscode (acquireVsCodeApi can
+    // only be called once). Forward to host using our handle.
+    if (msg && msg.__cockpitLayoutRelay && msg.msg) {
+      vscode.postMessage(msg.msg);
+      return;
+    }
     if (msg && msg.type === 'snapshot') {
       onSnapshot(msg.snapshot);
     } else if (msg && msg.type === 'setTab') {
       setActiveTab(msg.tab);
       if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'layout.popoutMode') {
+      // Pop-out webview: switch into the fullscreen grid render path.
+      window.__cockpitPopoutMode = !!msg.enabled;
+      document.body.setAttribute('data-cockpit-popout', msg.enabled ? '1' : '0');
+      if (lastSnapshot) render(lastSnapshot);
+    } else if (msg && msg.type === 'layout.jumpToIndex') {
+      // cmd+N from a host keybinding. Resolve N → tab id via current order.
+      if (!lastSnapshot) return;
+      const order = visibleTabBar(lastSnapshot).map((t) => t.id);
+      const idx = Number(msg.index);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= order.length) return;
+      setActiveTab(order[idx]);
+      render(lastSnapshot);
+    } else if (msg && msg.type === 'layout.cycleTab') {
+      if (!lastSnapshot) return;
+      const order = visibleTabBar(lastSnapshot).map((t) => t.id);
+      const cur = (vscode.getState() || {}).activeTab || order[0];
+      const i = order.indexOf(cur);
+      const dir = msg.direction === 'prev' ? -1 : 1;
+      const next = order[(i + dir + order.length) % order.length];
+      if (!next) return;
+      setActiveTab(next);
+      render(lastSnapshot);
+    } else if (msg && msg.type === 'layout.saveCurrentAs') {
+      // Host command supplied the name; capture current visible order +
+      // pinned/hidden state and persist as a preset.
+      if (!lastSnapshot || !msg.layoutName) return;
+      const order = visibleTabBar(lastSnapshot).map((t) => t.id);
+      const prefs = lastSnapshot.userPrefs || {};
+      vscode.postMessage({
+        type: 'layout.save',
+        layoutName: msg.layoutName,
+        tabOrder: order,
+        pinnedTabs: Array.isArray(prefs.pinnedTabs) ? prefs.pinnedTabs : [],
+        hiddenTabs: Array.isArray(prefs.hiddenTabs) ? prefs.hiddenTabs : [],
+      });
     } else if (msg && msg.type === 'minedPrompts') {
       minedPromptsState = {
         prompts: msg.prompts || [],

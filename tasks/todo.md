@@ -449,3 +449,30 @@ New tab listing every skill (`~/.claude/skills/` + plugin cache) and every agent
 - [ ] Public registry server / one-click publish — Share button just copies clipboard payload pointing at the planned cockpit-skills issue template
 - [ ] Auto-update of installed skills (re-fetch + re-hash on demand)
 - [ ] Sign-with-pubkey workflow for skill provenance
+## v1.0 — tab-system-v2
+
+Phase 1 worktree (merge order #5 per PLAN.md). Adds tab pin / hide / drag-reorder, named layout presets ("Coding", "Research", "Reviewing PRs"), pop-out fullscreen webview panel, and `cmd+1..9` keyboard navigation. All four wire into the existing tab bar in `media/sidebar.js`; layout state lives in `globalState` (not the view) so the sidebar webview and pop-out panel never desync.
+
+- [x] `media/sidebar.layout.js` (new file) — drag-and-drop handlers, right-click context menu (pin/hide/save/load/delete preset, pop out), keyboard listener (cmd/ctrl+1..9), all behind document-level event delegation so re-renders don't need re-binding
+- [x] `src/tabLayout.ts` (new file) — pure host-side helpers (`saveLayout`, `loadLayout`, `deleteLayout`, `pinTab`, `unpinTab`, `hideTab`, `showTab`, `reorderTabs`, `applyOverlay`)
+- [x] `src/sidebarProvider.ts` — UserPrefs gains `tabLayouts: Record<string, TabLayout>`, `currentLayoutName`, `pinnedTabs`, `hiddenTabs`, `tabOrder` (all optional, default-undefined; legacy users see byte-identical default behaviour)
+- [x] `src/sidebarProvider.ts` — InboundMessage union adds `layout.save | layout.load | layout.delete | layout.popOut | layout.reorderTabs | layout.pin | layout.unpin | layout.hide | layout.show | layout.activateTab` in a `// === tab-system-v2 ===` block
+- [x] `src/sidebarProvider.ts` — handle() switch appends matching cases at the end of the switch, also in a labelled block; namespaced messages prevent collision with other Phase-1 worktrees
+- [x] `src/sidebarProvider.ts` — `popoutPanel: vscode.WebviewPanel | undefined` field; `openPopoutPanel()` creates the panel via `vscode.window.createWebviewPanel('claudeCockpit.fullscreen', …)` with the SAME html() output and SAME message handler, no separate provider class
+- [x] `src/sidebarProvider.ts` — refresh() broadcasts the snapshot to BOTH the sidebar view AND the pop-out panel; `setActiveTabFromHost()` mirrors. Layout state desync (PLAN risk #7) eliminated.
+- [x] `media/sidebar.js` — `getEnabledTabIds()` now applies a layout overlay (`applyLayoutOverlay`) honoring `pinnedTabs`/`hiddenTabs`/`tabOrder`. With no layout prefs the function returns the unmodified base list reference (regression-safe).
+- [x] `media/sidebar.js` — `render()` switches into a 4-col grid (`renderPopoutGrid`) when `window.__cockpitPopoutMode` is set; the existing single-tab body path is unchanged for sidebar view.
+- [x] `media/sidebar.js` — message handler adds `layout.popoutMode | layout.jumpToIndex | layout.cycleTab | layout.saveCurrentAs` for host→webview commands.
+- [x] `media/sidebar.css` — appends a `.cockpit-layout-*` block (drag handles, pin marker, context menu, fullscreen grid)
+- [x] `package.json` — adds 14 commands (`claudeCockpit.layout.save | .load | .popOut`, `claudeCockpit.tab.next | .prev | .1..9`) and 9 keybinding contributions (cmd/ctrl+1..9, scoped via `focusedView == claudeCockpit.sidebar`)
+- [x] `src/extension.ts` — registers all 14 layout / tab-nav commands; cmd+N looks up the index in the user's CURRENT visible order, so `cmd+5` on a 5-tab layout still works.
+- [x] `test/tabLayout.test.js` (new file) — 17 unit tests covering save/load/delete round-trip, name truncation, pin/hide/show, reorder math, applyOverlay determinism, no-op-on-missing-layout, and a static guard that `sidebar.layout.js` wraps `acquireVsCodeApi()` in try/catch (the second-call crash trap).
+- [x] `npm test` 64/64 (47 baseline + 17 new) — passes
+- [x] `npm run compile` clean (TypeScript strict, no `any`)
+- [x] `node --check media/sidebar.js` clean
+- [x] `node --check media/sidebar.layout.js` clean
+- [x] CHANGELOG.md `[Unreleased]` entry appended under a worktree-tagged comment
+- [x] `package.json` viewsContainers UNCHANGED (pop-out uses createWebviewPanel)
+- [x] COMPONENTS literal contents UNCHANGED — only ORDER + visibility manipulated
+- [x] Default rendering byte-identical when no user pref is active (verified via `applyOverlay returns base unchanged when no layout prefs are set` test + manual trace)
+

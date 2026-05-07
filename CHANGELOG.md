@@ -15,6 +15,14 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - **Install from HTTPS URL.** Paste a public URL (GitHub raw, registry mirror); the extension fetches it host-side, computes SHA256, and shows a preview (URL, SHA256, byte count, first 1KB). Confirming pops a modal warning, re-fetches, re-hashes, and rejects with `SHA256 mismatch` if the bytes drift between preview and confirm. Rejects `http://`, malformed URLs, and 4xx/5xx responses. Writes to `~/.claude/skills/<inferred-slug>/SKILL.md` only after the user confirms.
 - **Two new commands.** `claudeCockpit.gallery.openTab` jumps to the Gallery tab; `claudeCockpit.gallery.installFromUrl` prompts for an HTTPS URL and routes through the same preview/confirm flow.
 - **Snapshot extension.** `CockpitSnapshot.gallery?` (optional) — `{skillCount, agentCount, totalCount}`. Phase-1 worktrees can grow this without breaking pre-existing call sites that build snapshots literally.
+<!-- worktree: feat/launch-tab-system-v2 -->
+
+- **Tab system v2 — pin / hide / drag-reorder + named layout presets.** Right-click any tab for `Pin tab` / `Hide tab` / `Save current layout as…` / `Load <preset>` / `Pop out fullscreen`. Drag any tab onto another to reorder; the order persists across reloads via globalState. Layout presets capture the current tab order, pin set, and hidden set under a name (e.g. "Coding", "Research", "Reviewing PRs"). Layout state lives in globalState — the sidebar view and the pop-out fullscreen panel share one source of truth, so a preset loaded in either surface updates both.
+- **Pop-out fullscreen panel (`vscode.window.createWebviewPanel`).** Run `Claude Cockpit: Pop Out Fullscreen Grid` from the command palette to open a dedicated webview panel that renders every visible tab as a card in a 4-column grid. Same html() output as the sidebar view, same message bus, same provider — no parallel state. Closing the panel doesn't disturb the sidebar webview.
+- **Keyboard nav.** `cmd/ctrl+1..9` jump to tab 1..9 in the user's CURRENT visible order; `claudeCockpit.tab.next` / `.tab.prev` cycle. Bindings are scoped via `when: focusedView == claudeCockpit.sidebar` so they don't conflict with VSCode's tab switcher.
+- **`media/sidebar.layout.js`** — sibling script that owns drag handlers, the right-click context menu, and the keyboard-shortcut listener. Loaded as a `<script>` next to `sidebar.js` with the same nonce so the existing CSP (`connect-src 'none'`) is unchanged.
+- **`src/tabLayout.ts`** — pure host-side helpers (`saveLayout`, `loadLayout`, `deleteLayout`, `pinTab`, `hideTab`, `reorderTabs`, `applyOverlay`) extracted so layout-state mutations are unit-testable without booting the extension host.
+- 12 new commands (`claudeCockpit.layout.save`, `.load`, `.popOut`, `.tab.next`, `.tab.prev`, `.tab.1..9`).
 
 ### Notes
 
@@ -62,6 +70,7 @@ All notable changes to Claude Cockpit are tracked here. The format follows [Keep
 - **Snapshot extension** — `CockpitSnapshot.obsidianGraph` is an OPTIONAL `{ nodeCount, edgeCount, vault }` summary. The full `{ nodes, edges }` payload (potentially megabytes) is lazy-loaded via a `graph.refresh` → `graph.payload` round-trip, so the regular cockpit snapshot stays small.
 - **New command** — `claudeCockpit.obsidian.refreshGraph` (Command Palette: "Claude Cockpit: Refresh Obsidian Graph") opens the sidebar, switches to the Obsidian tab, and triggers a fresh build.
 - **Inbound message types** — `graph.refresh`, `graph.openInObsidian`, `graph.pickVault` (the last one is a v1.1 placeholder for a vault picker UI; v1.0 ships using the primary vault from `readObsidianStatus`).
+- Tab system v2 preserves byte-identical default rendering when no layout pref is active: `getEnabledTabIds()` returns the unmodified base list whenever `pinnedTabs`, `hiddenTabs`, and `tabOrder` are all unset.
 
 ## [0.21.0] — 2026-05-06
 

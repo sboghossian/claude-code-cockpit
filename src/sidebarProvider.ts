@@ -137,7 +137,18 @@ interface InboundMessage {
     | 'gallery.openItem'
     | 'gallery.installPreview'
     | 'gallery.installConfirm'
-    | 'gallery.openPublishIssue';
+    | 'gallery.openPublishIssue'
+    // === tab-system-v2 ===
+    | 'layout.save'
+    | 'layout.load'
+    | 'layout.delete'
+    | 'layout.popOut'
+    | 'layout.reorderTabs'
+    | 'layout.pin'
+    | 'layout.unpin'
+    | 'layout.hide'
+    | 'layout.show'
+    | 'layout.activateTab';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -178,6 +189,29 @@ interface InboundMessage {
   galleryId?: string;
   galleryUrl?: string;
   gallerySha256?: string;
+  // === tab-system-v2 ===
+  layoutName?: string;
+  tabId?: string;
+  tabOrder?: string[];
+  pinnedTabs?: string[];
+  hiddenTabs?: string[];
+}
+
+/**
+ * tab-system-v2: a named layout overlays four orthogonal axes on top of the
+ * existing tabComponents/enabledTabs prefs. tabOrder is the ordered list of
+ * tab IDs the user wants to see, left-to-right. pinnedTabs is a stable
+ * front-cluster (always rendered first, in their declared order).
+ * hiddenTabs is the explicit hide-list — tabs NOT in pinnedTabs OR tabOrder
+ * but present in this list are hidden. tabComponents is per-tab widget order
+ * (mirrors the Custom-tab pref), letting a "Reviewing PRs" preset rearrange
+ * the inside of a tab without overwriting the user's "Coding" preset.
+ */
+interface TabLayout {
+  tabOrder: string[];
+  pinnedTabs: string[];
+  hiddenTabs: string[];
+  tabComponents: Record<string, string[]>;
 }
 
 type CockpitTheme = 'auto' | 'dark' | 'light' | 'high-contrast';
@@ -189,6 +223,12 @@ interface UserPrefs {
   theme: CockpitTheme;
   tabFilter: 'all' | 'requires' | 'standalone';
   discoverEnabled: boolean;
+  // === tab-system-v2 ===
+  tabLayouts: Record<string, TabLayout> | undefined;
+  currentLayoutName: string | undefined;
+  pinnedTabs: string[] | undefined;
+  hiddenTabs: string[] | undefined;
+  tabOrder: string[] | undefined;
 }
 
 interface UserPrefsPatch {
@@ -198,6 +238,12 @@ interface UserPrefsPatch {
   theme?: CockpitTheme;
   tabFilter?: 'all' | 'requires' | 'standalone';
   discoverEnabled?: boolean;
+  // === tab-system-v2 ===
+  tabLayouts?: Record<string, TabLayout>;
+  currentLayoutName?: string | null;
+  pinnedTabs?: string[];
+  hiddenTabs?: string[];
+  tabOrder?: string[];
 }
 
 function isCockpitTheme(v: unknown): v is CockpitTheme {
@@ -237,6 +283,26 @@ function isStringArrayMap(v: unknown): v is Record<string, string[]> {
   return true;
 }
 
+// === tab-system-v2 ===
+// Coerce stored layout map → typed TabLayout shape. Anything malformed gets
+// silently dropped so a corrupted globalState entry never crashes the view.
+function isTabLayoutMap(v: unknown): v is Record<string, TabLayout> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  for (const layout of Object.values(v as Record<string, unknown>)) {
+    if (!layout || typeof layout !== 'object') return false;
+    const l = layout as Record<string, unknown>;
+    if (!Array.isArray(l.tabOrder) || !l.tabOrder.every((s) => typeof s === 'string')) return false;
+    if (!Array.isArray(l.pinnedTabs) || !l.pinnedTabs.every((s) => typeof s === 'string')) return false;
+    if (!Array.isArray(l.hiddenTabs) || !l.hiddenTabs.every((s) => typeof s === 'string')) return false;
+    if (!isStringArrayMap(l.tabComponents)) return false;
+  }
+  return true;
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((s) => typeof s === 'string');
+}
+
 function readUserPrefs(state: vscode.Memento): UserPrefs {
   const stored = state.get<Partial<UserPrefs>>(USER_PREFS_KEY, {});
   const cfg = vscode.workspace.getConfiguration('claudeCockpit');
@@ -253,6 +319,14 @@ function readUserPrefs(state: vscode.Memento): UserPrefs {
       ? stored.tabFilter
       : 'all',
     discoverEnabled: typeof stored.discoverEnabled === 'boolean' ? stored.discoverEnabled : settingsDiscover,
+    // === tab-system-v2 ===
+    tabLayouts: isTabLayoutMap(stored.tabLayouts) ? stored.tabLayouts : undefined,
+    currentLayoutName: typeof stored.currentLayoutName === 'string' && stored.currentLayoutName
+      ? stored.currentLayoutName
+      : undefined,
+    pinnedTabs: isStringArray(stored.pinnedTabs) ? stored.pinnedTabs : undefined,
+    hiddenTabs: isStringArray(stored.hiddenTabs) ? stored.hiddenTabs : undefined,
+    tabOrder: isStringArray(stored.tabOrder) ? stored.tabOrder : undefined,
   };
 }
 
@@ -283,6 +357,12 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
   // via setSecretStorage() from extension.ts on activation; never serialised to
   // the webview.
   private secrets: vscode.SecretStorage | undefined;
+  // === tab-system-v2 ===
+  // Pop-out panel created by `layout.popOut`. Same html() output as the
+  // sidebar webview, so both consume the same snapshot payload + post the
+  // same messages back here. We re-broadcast every refresh() to both views
+  // to keep layout state coherent.
+  private popoutPanel: vscode.WebviewPanel | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -607,10 +687,81 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
       },
     };
     this.view.webview.postMessage({ type: 'snapshot', snapshot: payload });
+    // === tab-system-v2 ===
+    // The pop-out panel renders the SAME html() as the sidebar view. Both
+    // post messages back to this same provider, so we broadcast every
+    // snapshot to both surfaces to keep layout state in lockstep — the
+    // primary risk called out in PLAN.md (#7 layout state desync).
+    if (this.popoutPanel) {
+      this.popoutPanel.webview.postMessage({ type: 'snapshot', snapshot: payload });
+      // Tag the pop-out so its render() can branch into the full-screen grid.
+      this.popoutPanel.webview.postMessage({ type: 'layout.popoutMode', enabled: true });
+    }
   }
 
   setActiveTabFromHost(tab: string): void {
     this.view?.webview.postMessage({ type: 'setTab', tab });
+    this.popoutPanel?.webview.postMessage({ type: 'setTab', tab });
+  }
+
+  /**
+   * tab-system-v2: jump to tab by index in the user's CURRENT visible order.
+   * Index is 0-based; out-of-range is a no-op so cmd+9 doesn't crash on a
+   * 5-tab layout. The webview computes the actual order on its side; we just
+   * forward an index and the layout-aware webview-side handler resolves it.
+   */
+  jumpToTabIndex(index: number): void {
+    this.view?.webview.postMessage({ type: 'layout.jumpToIndex', index });
+    this.popoutPanel?.webview.postMessage({ type: 'layout.jumpToIndex', index });
+  }
+
+  /** tab-system-v2: cycle to next/prev tab in the visible order. */
+  cycleTab(direction: 'next' | 'prev'): void {
+    this.view?.webview.postMessage({ type: 'layout.cycleTab', direction });
+    this.popoutPanel?.webview.postMessage({ type: 'layout.cycleTab', direction });
+  }
+
+  /** tab-system-v2: open the pop-out fullscreen panel from a host command. */
+  popOutFullscreen(): void {
+    this.openPopoutPanel();
+  }
+
+  /** tab-system-v2: prompt + save current layout via host command. */
+  async saveLayoutViaPrompt(): Promise<void> {
+    const name = await vscode.window.showInputBox({
+      prompt: 'Save current tab layout as',
+      placeHolder: 'e.g. Coding, Research, Reviewing PRs',
+      validateInput: (v) => (v && v.trim() ? null : 'Name required'),
+    });
+    if (!name) return;
+    this.view?.webview.postMessage({ type: 'layout.saveCurrentAs', layoutName: name.trim().slice(0, 60) });
+    this.popoutPanel?.webview.postMessage({ type: 'layout.saveCurrentAs', layoutName: name.trim().slice(0, 60) });
+  }
+
+  /** tab-system-v2: prompt + load layout via host command. */
+  async loadLayoutViaPrompt(): Promise<void> {
+    const prefs = readUserPrefs(this.globalState);
+    const layouts = prefs.tabLayouts ? Object.keys(prefs.tabLayouts) : [];
+    if (layouts.length === 0) {
+      void vscode.window.showInformationMessage('No saved layouts. Right-click a tab in the Cockpit sidebar → Save current layout as…');
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(layouts, {
+      title: 'Load Tab Layout',
+      placeHolder: 'Choose a saved layout',
+    });
+    if (!picked) return;
+    const layout = prefs.tabLayouts?.[picked];
+    if (!layout) return;
+    await this.globalState.update(USER_PREFS_KEY, {
+      ...prefs,
+      currentLayoutName: picked,
+      tabOrder: layout.tabOrder.slice(),
+      pinnedTabs: layout.pinnedTabs.slice(),
+      hiddenTabs: layout.hiddenTabs.slice(),
+      tabComponents: { ...prefs.tabComponents, ...layout.tabComponents },
+    });
+    this.refresh();
   }
 
   /** Triggered from the command palette — same code path as the in-webview
@@ -1013,6 +1164,17 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
               : current.tabFilter,
           discoverEnabled:
             typeof patch.discoverEnabled === 'boolean' ? patch.discoverEnabled : current.discoverEnabled,
+          // === tab-system-v2 ===
+          tabLayouts: isTabLayoutMap(patch.tabLayouts) ? patch.tabLayouts : current.tabLayouts,
+          currentLayoutName:
+            patch.currentLayoutName === null
+              ? undefined
+              : typeof patch.currentLayoutName === 'string'
+                ? patch.currentLayoutName
+                : current.currentLayoutName,
+          pinnedTabs: isStringArray(patch.pinnedTabs) ? patch.pinnedTabs : current.pinnedTabs,
+          hiddenTabs: isStringArray(patch.hiddenTabs) ? patch.hiddenTabs : current.hiddenTabs,
+          tabOrder: isStringArray(patch.tabOrder) ? patch.tabOrder : current.tabOrder,
         };
         await this.globalState.update(USER_PREFS_KEY, next);
         this.refresh();
@@ -1364,6 +1526,117 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         );
         return;
       }
+      // === tab-system-v2 ===
+      case 'layout.save': {
+        if (!msg.layoutName || typeof msg.layoutName !== 'string') return;
+        const name = msg.layoutName.trim().slice(0, 60);
+        if (!name) return;
+        const current = readUserPrefs(this.globalState);
+        const layouts: Record<string, TabLayout> = current.tabLayouts ? { ...current.tabLayouts } : {};
+        layouts[name] = {
+          tabOrder: isStringArray(msg.tabOrder) ? msg.tabOrder : (current.tabOrder ?? []),
+          pinnedTabs: isStringArray(msg.pinnedTabs) ? msg.pinnedTabs : (current.pinnedTabs ?? []),
+          hiddenTabs: isStringArray(msg.hiddenTabs) ? msg.hiddenTabs : (current.hiddenTabs ?? []),
+          tabComponents: current.tabComponents ?? {},
+        };
+        await this.globalState.update(USER_PREFS_KEY, {
+          ...current,
+          tabLayouts: layouts,
+          currentLayoutName: name,
+        });
+        this.refresh();
+        return;
+      }
+      case 'layout.load': {
+        if (!msg.layoutName || typeof msg.layoutName !== 'string') return;
+        const name = msg.layoutName;
+        const current = readUserPrefs(this.globalState);
+        const layout = current.tabLayouts?.[name];
+        if (!layout) {
+          logger.warn(`layout.load: no layout named "${name}" — no-op`);
+          return;
+        }
+        await this.globalState.update(USER_PREFS_KEY, {
+          ...current,
+          currentLayoutName: name,
+          tabOrder: layout.tabOrder.slice(),
+          pinnedTabs: layout.pinnedTabs.slice(),
+          hiddenTabs: layout.hiddenTabs.slice(),
+          tabComponents: { ...current.tabComponents, ...layout.tabComponents },
+        });
+        this.refresh();
+        return;
+      }
+      case 'layout.delete': {
+        if (!msg.layoutName || typeof msg.layoutName !== 'string') return;
+        const current = readUserPrefs(this.globalState);
+        if (!current.tabLayouts || !current.tabLayouts[msg.layoutName]) return;
+        const layouts = { ...current.tabLayouts };
+        delete layouts[msg.layoutName];
+        const wasActive = current.currentLayoutName === msg.layoutName;
+        await this.globalState.update(USER_PREFS_KEY, {
+          ...current,
+          tabLayouts: layouts,
+          currentLayoutName: wasActive ? undefined : current.currentLayoutName,
+        });
+        this.refresh();
+        return;
+      }
+      case 'layout.reorderTabs': {
+        if (!isStringArray(msg.tabOrder)) return;
+        const current = readUserPrefs(this.globalState);
+        await this.globalState.update(USER_PREFS_KEY, {
+          ...current,
+          tabOrder: msg.tabOrder.slice(),
+        });
+        this.refresh();
+        return;
+      }
+      case 'layout.pin': {
+        if (!msg.tabId || typeof msg.tabId !== 'string') return;
+        const current = readUserPrefs(this.globalState);
+        const pinned = (current.pinnedTabs ?? []).filter((t) => t !== msg.tabId);
+        pinned.push(msg.tabId);
+        const hidden = (current.hiddenTabs ?? []).filter((t) => t !== msg.tabId);
+        await this.globalState.update(USER_PREFS_KEY, { ...current, pinnedTabs: pinned, hiddenTabs: hidden });
+        this.refresh();
+        return;
+      }
+      case 'layout.unpin': {
+        if (!msg.tabId || typeof msg.tabId !== 'string') return;
+        const current = readUserPrefs(this.globalState);
+        const pinned = (current.pinnedTabs ?? []).filter((t) => t !== msg.tabId);
+        await this.globalState.update(USER_PREFS_KEY, { ...current, pinnedTabs: pinned });
+        this.refresh();
+        return;
+      }
+      case 'layout.hide': {
+        if (!msg.tabId || typeof msg.tabId !== 'string') return;
+        const current = readUserPrefs(this.globalState);
+        const hidden = (current.hiddenTabs ?? []).filter((t) => t !== msg.tabId);
+        hidden.push(msg.tabId);
+        const pinned = (current.pinnedTabs ?? []).filter((t) => t !== msg.tabId);
+        await this.globalState.update(USER_PREFS_KEY, { ...current, hiddenTabs: hidden, pinnedTabs: pinned });
+        this.refresh();
+        return;
+      }
+      case 'layout.show': {
+        if (!msg.tabId || typeof msg.tabId !== 'string') return;
+        const current = readUserPrefs(this.globalState);
+        const hidden = (current.hiddenTabs ?? []).filter((t) => t !== msg.tabId);
+        await this.globalState.update(USER_PREFS_KEY, { ...current, hiddenTabs: hidden });
+        this.refresh();
+        return;
+      }
+      case 'layout.activateTab': {
+        if (!msg.tabId || typeof msg.tabId !== 'string') return;
+        this.setActiveTabFromHost(msg.tabId);
+        return;
+      }
+      case 'layout.popOut': {
+        this.openPopoutPanel();
+        return;
+      }
     }
   }
 
@@ -1456,6 +1729,36 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     this.refresh();
   }
 
+  // === tab-system-v2 ===
+  // Pop-out full-screen panel. Reuses html() so the same script bundle runs;
+  // the pop-out tags itself with `layout.popoutMode` so render() can switch
+  // into a 4-col grid layout. We never spawn a second provider — both views
+  // share this instance's globalState-backed prefs.
+  private openPopoutPanel(): void {
+    if (this.popoutPanel) {
+      this.popoutPanel.reveal(vscode.ViewColumn.Active);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      'claudeCockpit.fullscreen',
+      'Claude Cockpit — Fullscreen',
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')],
+      },
+    );
+    panel.webview.html = this.html(panel.webview);
+    panel.webview.onDidReceiveMessage((m: InboundMessage) => this.handle(m));
+    panel.onDidDispose(() => {
+      this.popoutPanel = undefined;
+    });
+    this.popoutPanel = panel;
+    // Kick a fresh snapshot so the panel doesn't sit on "Loading…".
+    this.refresh();
+  }
+
   private openLatestJsonlInDir(dir: string): void {
     if (!fs.existsSync(dir)) {
       return;
@@ -1512,6 +1815,10 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     const jsUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.js'),
     );
+    // === tab-system-v2 ===
+    const layoutJsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'sidebar.layout.js'),
+    );
     const nonce = makeNonce();
     // Plugin API (Phase 0): Phase-1 worktrees register sibling scripts via
     // plugin.registerSidebarScript(); each is rewritten to a webview-safe URI
@@ -1539,6 +1846,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     <p class="empty">Loading…</p>
   </main>
   <script nonce="${nonce}" src="${jsUri}"></script>
+  <script nonce="${nonce}" src="${layoutJsUri}"></script>
 ${externalScriptTags}
 </body>
 </html>`;
