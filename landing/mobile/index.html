@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Cockpit — Mobile Queue</title>
+  <meta name="description" content="Read-only mobile mirror of the Claude Cockpit approval queue." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E%E2%9C%88%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="cockpit-mobile-header">
+    <div class="cockpit-mobile-header-row">
+      <a href="/" class="cockpit-mobile-back" aria-label="Back to landing">←</a>
+      <h1 class="cockpit-mobile-title">Cockpit Queue</h1>
+      <button id="refreshBtn" class="cockpit-mobile-refresh" aria-label="Refresh">↻</button>
+    </div>
+    <p id="statusLine" class="cockpit-mobile-status">Loading…</p>
+  </header>
+
+  <main class="cockpit-mobile-main">
+    <section id="setupSection" class="cockpit-mobile-setup" hidden>
+      <h2>Setup</h2>
+      <p>Paste the public URL of your published <code>queue.public.json</code> (served via your Cloudflare Tunnel + Cloudflare Access).</p>
+      <input
+        id="urlInput"
+        type="url"
+        placeholder="https://queue.cockpit.dashable.dev/queue.public.json"
+        inputmode="url"
+        autocomplete="url"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+      <div class="cockpit-mobile-setup-actions">
+        <button id="saveUrlBtn" class="cockpit-mobile-primary">Save</button>
+        <button id="clearUrlBtn" class="cockpit-mobile-secondary">Clear</button>
+      </div>
+      <p class="cockpit-mobile-hint">
+        The URL is stored in this browser's local storage only. Cockpit never sees it.
+        Make sure the endpoint is behind Cloudflare Access SSO — anyone who reaches it can read your queue.
+      </p>
+    </section>
+
+    <section id="queueSection" class="cockpit-mobile-queue" hidden>
+      <div class="cockpit-mobile-summary">
+        <span id="pendingCount" class="cockpit-mobile-pending">0</span>
+        <span class="cockpit-mobile-pending-label">pending</span>
+      </div>
+      <ul id="queueList" class="cockpit-mobile-list"></ul>
+      <p id="emptyMessage" class="cockpit-mobile-empty" hidden>Queue empty. Nothing pending.</p>
+    </section>
+
+    <section id="errorSection" class="cockpit-mobile-error" hidden>
+      <h2>Couldn't load the queue</h2>
+      <p id="errorMessage"></p>
+      <button id="resetBtn" class="cockpit-mobile-secondary">Change URL</button>
+    </section>
+  </main>
+
+  <footer class="cockpit-mobile-footer">
+    <p>v1.0 · read-only · approvals stay desktop-only · <a href="/">cockpit.dashable.dev</a></p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

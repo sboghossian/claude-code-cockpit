@@ -1,0 +1,415 @@
+/* Claude Cockpit — Mobile companion (Phase 2).
+ * Mobile-first, single column, large tap targets, dark default.
+ * Every selector prefixed `.cockpit-mobile-` per master plan rules.
+ */
+
+:root {
+  --cm-bg: #0b0d10;
+  --cm-panel: #11151a;
+  --cm-panel-2: #161b22;
+  --cm-border: #1d242c;
+  --cm-fg: #e6e8ea;
+  --cm-muted: #8a93a0;
+  --cm-accent: #ff8a3d;
+  --cm-warn: #ffb454;
+  --cm-ok: #6ad48f;
+  --cm-err: #ff6b6b;
+  --cm-link: #82b4ff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --cm-bg: #f7f7f8;
+    --cm-panel: #ffffff;
+    --cm-panel-2: #fafbfc;
+    --cm-border: #e2e5e9;
+    --cm-fg: #0d1117;
+    --cm-muted: #57606a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--cm-bg);
+  color: var(--cm-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--cm-link);
+  text-decoration: none;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--cm-panel-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.cockpit-mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(11, 13, 16, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--cm-border);
+  padding: max(env(safe-area-inset-top), 8px) 16px 12px;
+}
+
+.cockpit-mobile-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cockpit-mobile-back {
+  font-size: 22px;
+  color: var(--cm-muted);
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.cockpit-mobile-back:active {
+  background: var(--cm-panel);
+}
+
+.cockpit-mobile-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+  letter-spacing: -0.01em;
+}
+
+.cockpit-mobile-refresh {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--cm-border);
+  background: var(--cm-panel);
+  color: var(--cm-fg);
+  font-size: 18px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cockpit-mobile-refresh:active {
+  background: var(--cm-panel-2);
+  transform: scale(0.96);
+}
+
+.cockpit-mobile-refresh.is-spinning {
+  animation: cockpit-mobile-spin 0.8s linear infinite;
+}
+
+@keyframes cockpit-mobile-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cockpit-mobile-status {
+  font-size: 12px;
+  color: var(--cm-muted);
+  margin: 6px 0 0 52px;
+}
+
+.cockpit-mobile-status.is-stale {
+  color: var(--cm-warn);
+}
+
+.cockpit-mobile-status.is-error {
+  color: var(--cm-err);
+}
+
+.cockpit-mobile-main {
+  padding: 16px;
+  padding-bottom: max(env(safe-area-inset-bottom), 32px);
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Setup screen ------------------------------------------------------------ */
+
+.cockpit-mobile-setup {
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.cockpit-mobile-setup h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.cockpit-mobile-setup p {
+  color: var(--cm-muted);
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+
+.cockpit-mobile-setup input[type="url"] {
+  width: 100%;
+  padding: 14px 14px;
+  background: var(--cm-panel-2);
+  border: 1px solid var(--cm-border);
+  border-radius: 8px;
+  font-size: 16px; /* avoid iOS zoom on focus */
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--cm-fg);
+}
+
+.cockpit-mobile-setup input[type="url"]:focus {
+  outline: 2px solid var(--cm-accent);
+  outline-offset: -1px;
+}
+
+.cockpit-mobile-setup-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.cockpit-mobile-primary,
+.cockpit-mobile-secondary {
+  flex: 1;
+  min-height: 48px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.05s;
+}
+
+.cockpit-mobile-primary {
+  background: var(--cm-accent);
+  color: #1a0f00;
+  border: 0;
+}
+
+.cockpit-mobile-secondary {
+  background: var(--cm-panel-2);
+  color: var(--cm-fg);
+  border: 1px solid var(--cm-border);
+}
+
+.cockpit-mobile-primary:active,
+.cockpit-mobile-secondary:active {
+  transform: scale(0.97);
+}
+
+.cockpit-mobile-hint {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--cm-muted);
+  line-height: 1.45;
+}
+
+/* Queue list -------------------------------------------------------------- */
+
+.cockpit-mobile-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 4px 16px;
+}
+
+.cockpit-mobile-pending {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--cm-fg);
+}
+
+.cockpit-mobile-pending.is-zero {
+  color: var(--cm-muted);
+}
+
+.cockpit-mobile-pending-label {
+  font-size: 14px;
+  color: var(--cm-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cockpit-mobile-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cockpit-mobile-item {
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cockpit-mobile-item.is-pending {
+  border-left: 3px solid var(--cm-accent);
+}
+
+.cockpit-mobile-item.is-approved {
+  border-left: 3px solid var(--cm-ok);
+  opacity: 0.75;
+}
+
+.cockpit-mobile-item.is-rejected,
+.cockpit-mobile-item.is-rolled-back {
+  border-left: 3px solid var(--cm-muted);
+  opacity: 0.55;
+}
+
+.cockpit-mobile-item.is-snapshot-failed {
+  border-left: 3px solid var(--cm-err);
+}
+
+.cockpit-mobile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cockpit-mobile-tool {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.cockpit-mobile-age {
+  font-size: 13px;
+  color: var(--cm-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cockpit-mobile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  color: var(--cm-muted);
+}
+
+.cockpit-mobile-meta span:before {
+  content: "·";
+  margin-right: 12px;
+  opacity: 0.5;
+}
+
+.cockpit-mobile-meta span:first-child:before {
+  content: "";
+  margin-right: 0;
+}
+
+.cockpit-mobile-status-badge {
+  display: inline-block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  background: var(--cm-panel-2);
+  color: var(--cm-muted);
+}
+
+.cockpit-mobile-status-badge.is-pending {
+  background: rgba(255, 138, 61, 0.16);
+  color: var(--cm-accent);
+}
+
+.cockpit-mobile-status-badge.is-approved {
+  background: rgba(106, 212, 143, 0.16);
+  color: var(--cm-ok);
+}
+
+.cockpit-mobile-status-badge.is-snapshot-failed {
+  background: rgba(255, 107, 107, 0.16);
+  color: var(--cm-err);
+}
+
+.cockpit-mobile-empty {
+  text-align: center;
+  color: var(--cm-muted);
+  padding: 48px 16px;
+  font-size: 15px;
+}
+
+/* Error state ------------------------------------------------------------- */
+
+.cockpit-mobile-error {
+  background: var(--cm-panel);
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.cockpit-mobile-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: var(--cm-err);
+}
+
+.cockpit-mobile-error p {
+  color: var(--cm-muted);
+  font-size: 14px;
+  margin: 0 0 16px;
+  word-break: break-word;
+}
+
+/* Footer ------------------------------------------------------------------ */
+
+.cockpit-mobile-footer {
+  border-top: 1px solid var(--cm-border);
+  padding: 16px;
+  text-align: center;
+  color: var(--cm-muted);
+  font-size: 12px;
+  margin-top: 32px;
+}
+
+.cockpit-mobile-footer p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cockpit-mobile-refresh,
+  .cockpit-mobile-primary,
+  .cockpit-mobile-secondary {
+    transition: none;
+  }
+  .cockpit-mobile-refresh.is-spinning {
+    animation: none;
+  }
+}
