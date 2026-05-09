@@ -35,6 +35,8 @@ import { forksDir } from './replay';
 import { notify } from './notifications';
 import { ApprovalQueueStore, queuePath as approvalQueuePath } from './approvalQueue';
 import { MobilePublisher, publicQueuePath, watchQueueAndPublish } from './mobileExport';
+import { AgentReloadWatcher } from './agentReload';
+import { setAgentReloadWatcher } from './sidebarProvider';
 
 function registerOnboardingSandboxSurface(): void {
   // Phase-2 feat/launch-onboarding-sandbox. Registers the Tutorial tab + the
@@ -142,6 +144,60 @@ function registerReplaySurface(): void {
 }
 
 // =============================================================================
+// jcode-inspired features (Phase 3): memory-vector viz, swarm topology,
+// agent hot-reload. All read-only, all gated behind the existing Approve
+// pattern when they touch shared state.
+// =============================================================================
+
+function registerJcodeFeaturesSurface(): void {
+  try {
+    registerSidebarScript('media/sidebar.memvec.js');
+    registerSidebarScript('media/sidebar.swarm.js');
+    registerSidebarScript('media/sidebar.agentReload.js');
+    registerWidget({
+      id: 'memvecStats',
+      label: 'Memory · vector store',
+      category: 'Memory',
+      requiresCwd: false,
+    });
+    registerWidget({
+      id: 'memvecSearch',
+      label: 'Memory · semantic search',
+      category: 'Memory',
+      requiresCwd: false,
+    });
+    registerWidget({
+      id: 'swarmTopology',
+      label: 'Swarm · topology',
+      category: 'Cross',
+      requiresCwd: false,
+    });
+    registerWidget({
+      id: 'agentReloadFeed',
+      label: 'Agents · hot-reload feed',
+      category: 'Approval',
+      requiresCwd: false,
+    });
+    registerTab({
+      id: 'memvec',
+      label: 'Memvec',
+      requiresCwd: false,
+      hint: 'Semantic search across every chunk indexed by /memory-vector. Read-only.',
+      defaultWidgets: ['memvecStats', 'memvecSearch'],
+    });
+    registerTab({
+      id: 'swarm',
+      label: 'Swarm',
+      requiresCwd: false,
+      hint: 'Which Claude sessions are active right now and which files they overlap on. Conflict early-warning.',
+      defaultWidgets: ['swarmTopology'],
+    });
+  } catch (err) {
+    logger.warn(`jcode-features: registration failed: ${String(err)}`);
+  }
+}
+
+// =============================================================================
 // telemetry-posthog: read settings + configure the (default-off) client.
 // Returns the resolved enabled flag so callers can branch on it for the
 // session.start ping.
@@ -233,6 +289,10 @@ function activateInner(context: vscode.ExtensionContext): void {
   activateGallery();
   registerReplaySurface();
   registerOnboardingSandboxSurface();
+  registerJcodeFeaturesSurface();
+  const agentReloadWatcher = new AgentReloadWatcher();
+  context.subscriptions.push(agentReloadWatcher.start());
+  setAgentReloadWatcher(agentReloadWatcher);
   const status = createStatusBar();
 
   function readBudgetConfig(): BudgetConfig {

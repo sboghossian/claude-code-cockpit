@@ -2,6 +2,25 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-05-09
+
+### Added — jcode-inspired features (Phase 3)
+
+- **Memory Vector visualization (Memvec tab)** — surfaces the persistent semantic store maintained by the `/memory-vector` skill (`~/.gstack/memory/vectors.db`). Two widgets: `memvecStats` (chunk count, source-type breakdown, recency) and `memvecSearch` (semantic search box with similarity-bar hits, click-through to source). Cockpit shells out to the skill's CLI rather than taking on the native `sqlite-vec` dep — zero new runtime dependencies.
+- **Swarm topology (Swarm tab)** — derives a session-overlap topology from `~/.claude/projects/<cwd>/` JSONL tails. Lists every Claude session touched in the last hour, shows file-overlap edges between pairs, and flags conflict severity (high = both sessions active right now, medium = one active, low = both idle). Answers "are two of my sessions about to step on each other?"
+- **Agent hot-reload feed (Approval category)** — `vscode.workspace.createFileSystemWatcher` on global + workspace `agents/` dirs. SHA256-tracked diffs surface as pending events for human acknowledgement before any agent change is treated as authoritative for the running session. Honors the LeCun world-model stance: no autonomous multi-step LLM action without lookahead + scoring + rollback + human gate.
+
+### Changed
+
+- `InboundMessage` union extended with five new types (`memvec.fetchStats`, `memvec.query`, `swarm.fetch`, `agentReload.fetch`, `agentReload.markReviewed`).
+- `extension.ts` registers the new tabs/widgets via the existing plugin API; activation order matters (`registerJcodeFeaturesSurface()` runs alongside `registerReplaySurface()` and `registerOnboardingSandboxSurface()`).
+- `AgentReloadWatcher` is owned by the extension context and injected into `sidebarProvider` via `setAgentReloadWatcher()`.
+
+### Notes
+
+- All 139 v1.0.0 tests still pass byte-identically. No breaking changes to existing widgets, tabs, or message types.
+- All three new surfaces are read-only by default; they don't write to the vector DB, don't reshape session JSONLs, and don't reload agents — they only observe and surface.
+
 ## [1.0.0] — 2026-05-07
 
 The v1.0 launch wave. 11 feature PRs landed across three phases (foundation → parallel features → polish). Every new feature is opt-in or default-off where safety matters; v0.21.0 users see byte-identical behavior until they enable a feature.

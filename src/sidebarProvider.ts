@@ -34,6 +34,9 @@ import {
   loadReplayPayload,
 } from './replay';
 import { obsidianUriFor, readObsidianStatus } from './obsidian';
+import { fetchStats as memvecFetchStats, runQuery as memvecRunQuery } from './memoryVector';
+import { computeTopology as swarmComputeTopology } from './swarm';
+import type { AgentReloadWatcher } from './agentReload';
 import { getOrBuildGraph, VaultGraph } from './graph';
 import {
   createRoutineSkill,
@@ -95,6 +98,15 @@ import {
   getStatusForSnapshot as getPosthogStatus,
 } from './posthog';
 import { captureMessageFailure } from './crash';
+
+// === jcode-features (Phase 3) ===
+// Module-private singleton injected by extension.ts during activation. The
+// watcher is constructed in extension.ts so it lives for the full extension
+// lifetime; sidebarProvider only reads from it when handling message events.
+let sharedAgentReloadWatcher: AgentReloadWatcher | undefined;
+export function setAgentReloadWatcher(w: AgentReloadWatcher): void {
+  sharedAgentReloadWatcher = w;
+}
 
 interface InboundMessage {
   type:
@@ -204,7 +216,13 @@ interface InboundMessage {
     | 'telemetry.optIn'
     | 'telemetry.optOut'
     | 'telemetry.status'
-    | 'telemetry.tabView';
+    | 'telemetry.tabView'
+    // === jcode-features (Phase 3) ===
+    | 'memvec.fetchStats'
+    | 'memvec.query'
+    | 'swarm.fetch'
+    | 'agentReload.fetch'
+    | 'agentReload.markReviewed';
   filename?: string;
   filePath?: string;
   decodedPath?: string;
@@ -277,6 +295,13 @@ interface InboundMessage {
   // === telemetry-posthog (Phase 2) ===
   /** Tab id for telemetry.tabView. Capped to a known short string in the handler. */
   telemetryTab?: string;
+  // === jcode-features (Phase 3) ===
+  /** AgentChangeEvent id for `agentReload.markReviewed`. */
+  agentChangeId?: string;
+  /** Top-K override for `memvec.query`; clamped to [1, 25] in the handler. */
+  memvecK?: number;
+  /** Optional source-type filter for `memvec.query`. */
+  memvecType?: string;
 }
 
 /**
@@ -2402,6 +2427,43 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
         const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
         if (!sanitized) return;
         void posthogCapture('cockpit.tab.view', { tab: sanitized });
+        return;
+      }
+      // === jcode-features (Phase 3) ===
+      case 'memvec.fetchStats': {
+        const payload = await memvecFetchStats();
+        this.view?.webview.postMessage({ type: 'memvec.stats', payload });
+        return;
+      }
+      case 'memvec.query': {
+        const q = typeof msg.query === 'string' ? msg.query : '';
+        const k = typeof msg.memvecK === 'number' ? msg.memvecK : 8;
+        const t = typeof msg.memvecType === 'string' ? msg.memvecType : undefined;
+        const payload = await memvecRunQuery(q, k, t);
+        this.view?.webview.postMessage({ type: 'memvec.queryResult', payload });
+        return;
+      }
+      case 'swarm.fetch': {
+        const payload = swarmComputeTopology();
+        this.view?.webview.postMessage({ type: 'swarm.topology', payload });
+        return;
+      }
+      case 'agentReload.fetch': {
+        const w = sharedAgentReloadWatcher;
+        const payload = w
+          ? { events: w.recentEvents(), pendingCount: w.pendingCount() }
+          : { events: [], pendingCount: 0 };
+        this.view?.webview.postMessage({ type: 'agentReload.events', payload });
+        return;
+      }
+      case 'agentReload.markReviewed': {
+        const w = sharedAgentReloadWatcher;
+        const id = typeof msg.agentChangeId === 'string' ? msg.agentChangeId : '';
+        if (w && id) {
+          w.markReviewed(id);
+          const payload = { events: w.recentEvents(), pendingCount: w.pendingCount() };
+          this.view?.webview.postMessage({ type: 'agentReload.events', payload });
+        }
         return;
       }
     }
