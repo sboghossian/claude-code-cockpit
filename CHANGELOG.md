@@ -2,6 +2,36 @@
 
 All notable changes to Claude Cockpit are tracked here. The format follows [Keep a Changelog](https://keepachangelog.com/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-05-10
+
+### Added — UX uplift
+
+- **Vertical tab rail** — tabs moved from a horizontal sticky strip into a collapsible left rail. Click `«` (or hit `⌘B` / `Ctrl+B`) to collapse to icon-only mode (44px), click `»` to expand back to icon+label (156px). State persists in webview state.
+- **`⌘K` global search shortcut** — opens the global search overlay from anywhere in the panel, focuses the search input, and selects any current query. Search input placeholder + aria-label advertise the shortcut.
+- **Search v2:**
+  - Recent searches: last 10 queries persisted in webview state, shown as chips when the search input is empty. "Clear" link to wipe history.
+  - Grouped results: when no type filter is active and there are >5 hits, results are grouped by type (Tabs / Memory / Skills / etc.) with section headers and counts.
+  - Keyboard navigation inside the overlay: `↑` / `↓` walk hits, `Enter` opens focused hit, `Esc` closes.
+  - Visible kbd hints in the empty-state copy.
+- **Utility CSS primitives** (`media/sidebar.css`): `.empty-hint`, `.empty-mini`, `.empty-error`, `.list-reset`, `.stack-xs|sm|md|lg`. Drop-in replacements for the most common inline `style=` patterns. See `tasks/ux-audit.md` for migration plan.
+- **UX audit** at `tasks/ux-audit.md` — 147 inline `style=` instances catalogued, top-3 mechanical migrations specified, per-tab triage recommended.
+
+### Fixed
+
+- **Refresh actually refreshes.** The title-bar Refresh command and the in-tab `refresh` action used to only redraw from the cached snapshot — slow async probes (RTK savings, Mac health, subdomain health, jarvis queue, roadmap) only updated on their own timers, so users perceived Refresh as a no-op. New `refreshAll()` method now re-triggers every async source on click and surfaces a brief "Refreshing…" pill in the header so the click visibly registers.
+- **Theme-respectful Bluetooth battery colors.** Hardcoded `#6ad48f` / `#ffa05a` / `#e36161` for Mac Health Bluetooth ring swapped to `--vscode-charts-{green,orange,red}` with the original hex as fallback. Light-theme users now get on-palette colors.
+
+### Changed
+
+- Tab markup wraps labels in `<span class="tab-label">` so collapsed-rail mode can hide labels via CSS without affecting screen-reader output (aria-label still carries the full label).
+- Webview shell is now a flex row (`<div class="cockpit-shell">`) wrapping the rail + tab panel, replacing the prior horizontal-tabs-above-content layout.
+- Search overlay markup: hits now carry `data-search-index="N"` so the keyboard nav can apply `.focused` to walk them.
+
+### Notes
+
+- All 139 v1.1.0 tests still pass — no test updates required because the rail conversion is markup/CSS-only, the refresh fix is additive, and search v2 reuses the existing `searchSnapshot()` engine.
+- Per-tab visual restyling (the M1–M4 migrations in `tasks/ux-audit.md`) is the next slice. v1.2.0 lands the foundation: navigation model, search experience, refresh semantics, and the utility classes future per-tab work will lean on.
+
 ## [1.1.0] — 2026-05-09
 
 ### Added — jcode-inspired features (Phase 3)

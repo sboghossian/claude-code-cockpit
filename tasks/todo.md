@@ -2,6 +2,41 @@
 
 VSCode extension that surfaces Claude Code's hidden state directly in the editor. Sibling to `claude-overlay` (macOS menubar, cross-surface) — this one is VSCode-native, focused on the Code surface.
 
+## v1.3 — UX uplift continuation (NEXT)
+
+Foundation shipped in v1.2.0 (vertical rail, ⌘K shortcut, refresh fix). The user explicitly asked for a "full redesign" — what remains is the per-tab visual pass and the next layer of search/refresh polish. None of this is blocking; ship one slice at a time.
+
+### Per-tab consistency pass
+
+- [ ] Define a tiny component primitive set: `<Card>`, `<Stat>`, `<KV>`, `<List>`, `<EmptyState>`, `<SectionHeader>` — render functions in `media/sidebar.js`, classes in `media/sidebar.css`. Replace ad-hoc `<h2>` / `<p class="empty">` / `.kv` blocks across all 24 tabs.
+- [ ] Typography scale: lock to 4 sizes (10/11/12/14px) and 3 weights (400/500/600). Audit every tab and remove inline overrides.
+- [ ] Spacing scale: 2/4/8/12/16/24px only. No `margin: 6px` / `7px` / `9px` outliers.
+- [ ] Color scale: enforce VSCode theme tokens only. Strip every hardcoded `#xxx` outside `media/sidebar.themes.css`.
+- [ ] Empty states: consistent voice + a "what to do next" CTA on every tab.
+- [ ] Walk every tab top-to-bottom in the rail and screenshot before/after for the changelog.
+
+### Search v2
+
+- [ ] Recents: persist last 10 search queries in globalState; show under the input when it's empty.
+- [ ] Result grouping: collapsible sections per type (Tabs / Memory / Skills / Sessions / Projects / Routines).
+- [ ] Keyboard nav inside the overlay: ↑/↓ to walk hits, Enter to open, Esc to close. Already-open input handles Esc; need to add ↑/↓ + Enter when overlay is mounted.
+- [ ] Inline previews on focus: show 3-line excerpt for memory/session hits without leaving the overlay.
+
+### Refresh v2
+
+- [ ] Replace the auto-fade pill with an inline spinner badge per data source (e.g. on the Mac-health card itself when its probe is in flight). Currently the pill says "Refreshing…" but doesn't show *what* is still loading.
+- [ ] Throttle: if user clicks Refresh twice within 3s, no-op the second click rather than re-firing every probe.
+
+### Tab rail polish
+
+- [ ] Drag-to-reorder works in horizontal mode (sidebar.layout.js); validate it still works in the rail.
+- [ ] Mini-rail tooltip on collapsed mode currently uses native `title=` — switch to a styled tooltip popout to match VS Code's own activity-bar UX.
+- [ ] Saved layout presets need a quick switcher in the rail header (currently only reachable via popout view).
+
+### Telemetry
+
+- [ ] Add a `posthog.capture('refresh_all_clicked')` event in `refreshAll()` to measure whether users discover the fixed refresh.
+
 ## v0.21.0 — Bug-fix + system stats wave (DONE)
 
 ### Fixed

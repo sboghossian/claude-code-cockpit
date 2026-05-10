@@ -200,10 +200,10 @@
         const ringColor = pct === undefined
           ? 'var(--vscode-editorWidget-border)'
           : pct > 50
-            ? '#6ad48f'
+            ? 'var(--vscode-charts-green, #6ad48f)'
             : pct > 20
-              ? '#ffa05a'
-              : '#e36161';
+              ? 'var(--vscode-charts-orange, #ffa05a)'
+              : 'var(--vscode-charts-red, #e36161)';
         return `
           <div class="bt-device">
             <div class="bt-ring" style="--pct: ${pct ?? 0}; --ring: ${ringColor};"></div>
@@ -4350,6 +4350,25 @@
     vscode.setState({ ...cur, ...patch });
   }
 
+  function getSearchRecents() {
+    const s = vscode.getState() || {};
+    return Array.isArray(s.searchRecents) ? s.searchRecents.slice(0, 10) : [];
+  }
+
+  function pushSearchRecent(q) {
+    const trimmed = (q || '').trim();
+    if (!trimmed) return;
+    const cur = vscode.getState() || {};
+    const recents = Array.isArray(cur.searchRecents) ? cur.searchRecents : [];
+    const next = [trimmed, ...recents.filter((r) => r !== trimmed)].slice(0, 10);
+    vscode.setState({ ...cur, searchRecents: next });
+  }
+
+  function clearSearchRecents() {
+    const cur = vscode.getState() || {};
+    vscode.setState({ ...cur, searchRecents: [] });
+  }
+
   function searchOverlay(snap) {
     const { query, typeFilter } = getSearchState();
     const results = searchSnapshot(snap, query, typeFilter);
@@ -4363,11 +4382,14 @@
       }</button>`;
     }).join('');
 
+    let hitIndex = 0;
     const renderHit = (r) => {
       const typeBadge = `<span class="tag">${escapeHtml(r.type)}</span>`;
       const cwdBadge = r.requiresCwd ? '<span class="tag tag-needs-cwd" title="Most useful with active session">●</span>' : '';
+      const idx = hitIndex++;
       return `<li>
         <button class="search-hit"
+          data-search-index="${idx}"
           data-search-action="${escapeHtml(r.action)}"
           data-search-payload="${escapeHtml(r.payload || '')}"
           data-search-tab="${escapeHtml(r.tab || '')}"
@@ -4380,24 +4402,58 @@
             <span class="right">${cwdBadge}${typeBadge}</span>
           </div>
           ${r.subtitle ? `<div class="note-excerpt">${highlight(r.subtitle, query)}</div>` : ''}
-          ${r.tab ? `<div style="font-size: 10px; color: var(--vscode-descriptionForeground); margin-top: 2px;">→ ${escapeHtml(stripCount((tabCatalogue(snap).find((t) => t.id === r.tab) || {}).label || r.tab))}</div>` : ''}
+          ${r.tab ? `<div class="search-hit-target">→ ${escapeHtml(stripCount((tabCatalogue(snap).find((t) => t.id === r.tab) || {}).label || r.tab))}</div>` : ''}
         </button>
       </li>`;
     };
 
-    const body = !query.trim()
-      ? `<p class="empty">Type to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings.</p>`
-      : !results.length
-      ? `<p class="empty">No matches for <strong>${escapeHtml(query)}</strong>.</p>`
-      : `<ul class="list search-results">${results.map(renderHit).join('')}</ul>`;
+    let body;
+    if (!query.trim()) {
+      // Empty state: show recents (if any) + a help line.
+      const recents = getSearchRecents();
+      const recentsBlock = recents.length
+        ? `<div class="search-recents">
+            <div class="row">
+              <h3 class="left search-section-head">Recent searches</h3>
+              <button class="link-btn right" data-action="clear-search-recents">Clear</button>
+            </div>
+            <ul class="list search-recents-list">${recents
+              .map((r) => `<li><button class="search-recent" data-search-recent="${escapeHtml(r)}">${escapeHtml(r)}</button></li>`)
+              .join('')}</ul>
+          </div>`
+        : '';
+      body = `${recentsBlock}<p class="empty search-hint">Type to search across tabs, widgets, memory, skills, prompts, agents, routines, projects, plans, tunnels, and settings. Use <kbd>↑</kbd>/<kbd>↓</kbd> to navigate, <kbd>Enter</kbd> to open, <kbd>Esc</kbd> to close.</p>`;
+    } else if (!results.length) {
+      body = `<p class="empty">No matches for <strong>${escapeHtml(query)}</strong>.</p>`;
+    } else if (typeFilter === 'all' && results.length > 5) {
+      // Group by type when no filter and result set is meaningful.
+      const grouped = {};
+      for (const r of results) {
+        if (!grouped[r.type]) grouped[r.type] = [];
+        grouped[r.type].push(r);
+      }
+      const typeLabel = (id) => (SEARCH_TYPES.find((t) => t.id === id) || { label: id }).label;
+      const orderedTypes = SEARCH_TYPES.map((t) => t.id).filter((id) => id !== 'all' && grouped[id]);
+      body = orderedTypes
+        .map(
+          (id) =>
+            `<div class="search-group">
+              <h3 class="search-section-head">${escapeHtml(typeLabel(id))} <span class="chip-count">${grouped[id].length}</span></h3>
+              <ul class="list search-results">${grouped[id].map(renderHit).join('')}</ul>
+            </div>`,
+        )
+        .join('');
+    } else {
+      body = `<ul class="list search-results">${results.map(renderHit).join('')}</ul>`;
+    }
 
     return `
-      <div class="search-overlay">
+      <div class="search-overlay" data-hit-count="${hitIndex}">
         <div class="row">
           <h2 class="left">Search</h2>
-          <button class="office-btn right" data-action="close-search">Close</button>
+          <button class="office-btn right" data-action="close-search">Close (Esc)</button>
         </div>
-        <p class="empty" style="font-size: 11px;">${results.length ? results.length + ' result' + (results.length === 1 ? '' : 's') : ''}${query.trim() ? ' for "' + escapeHtml(query) + '"' : ''}</p>
+        <p class="empty search-summary">${results.length ? results.length + ' result' + (results.length === 1 ? '' : 's') : ''}${query.trim() ? ' for "' + escapeHtml(query) + '"' : ''}</p>
         <div class="filter-chips">${chips}</div>
         ${body}
       </div>
@@ -4423,7 +4479,7 @@
           </div>
         </div>
         <div class="header-search" role="search">
-          <input type="search" class="global-search-input" placeholder="Search anything…" aria-label="Search Cockpit" value="${escapeHtml(query)}" data-global-search />
+          <input type="search" class="global-search-input" placeholder="Search anything (⌘K)…" aria-label="Search Cockpit (⌘K)" value="${escapeHtml(query)}" data-global-search />
           ${query ? '<button class="header-btn header-btn-x" data-action="clear-search" aria-label="Clear search" title="Clear search">✕</button>' : ''}
         </div>
         <div class="header-actions">
@@ -4435,9 +4491,13 @@
     `;
   }
 
-  function renderTabBar(tabs, activeTab) {
+  function renderTabBar(tabs, activeTab, railCollapsed) {
+    const collapseIcon = railCollapsed ? '»' : '«';
+    const collapseTitle = railCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    const toggleBtn = `<button class="rail-toggle" data-action="toggle-rail" aria-label="${collapseTitle}" aria-expanded="${railCollapsed ? 'false' : 'true'}" title="${collapseTitle} (⌘B)">${collapseIcon}</button>`;
     return `
-      <nav class="tabs" role="tablist" aria-label="Cockpit tabs">
+      <nav class="tabs tabs-rail" role="tablist" aria-label="Cockpit tabs" data-rail-collapsed="${railCollapsed ? '1' : '0'}">
+        ${toggleBtn}
         ${tabs
           .map((t) => {
             const cls = ['tab'];
@@ -4449,10 +4509,7 @@
               : '';
             const title = t.hint
               ? `title="${escapeHtml(t.hint + (t.requiresCwd ? ' — needs an active session' : ''))}"`
-              : '';
-            // Wrap the inline SVG so it's announced as decorative — the
-            // visible label already describes the tab. The optional cwd dot
-            // is also decorative; its meaning is conveyed via aria-label.
+              : `title="${escapeHtml(t.label)}"`;
             const rawIcon = TAB_ICONS[t.id] || '';
             const icon = rawIcon
               ? rawIcon.replace('<svg ', '<svg aria-hidden="true" focusable="false" ')
@@ -4460,12 +4517,7 @@
             const ariaLabel = t.requiresCwd
               ? `${t.label} (requires active session)`
               : t.label;
-            // Don't set roving `tabindex` here: full WAI-ARIA tabs-pattern
-            // arrow-key navigation is deferred to v1.1 per the launch cut-line.
-            // Without the arrow-key handler, a roving tabindex would skip 19
-            // of 20 tabs in the keyboard tab-order. Default tabindex keeps
-            // every tab Tab-reachable (matches v0.21.0 reachability).
-            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" aria-label="${escapeHtml(ariaLabel)}" ${title}>${cwdMark}${icon}${escapeHtml(t.label)}</button>`;
+            return `<button class="${cls.join(' ')}" data-tab="${t.id}" role="tab" aria-selected="${t.id === activeTab}" aria-label="${escapeHtml(ariaLabel)}" ${title}>${cwdMark}${icon}<span class="tab-label">${escapeHtml(t.label)}</span></button>`;
           })
           .join('')}
       </nav>
@@ -4504,7 +4556,8 @@
     }
     const tabs = visibleTabBar(snap);
     const activeTab = ensureValidActiveTab(getActiveTab(snap), tabs);
-    const tabBar = renderTabBar(tabs, activeTab);
+    const railCollapsed = !!state.railCollapsed;
+    const tabBar = renderTabBar(tabs, activeTab, railCollapsed);
     // Map any legacy tab id (e.g. 'memory' → 'library') to the modern one
     // before composing, so prefs and defaults line up.
     const composeTabId = TAB_MIGRATIONS[activeTab] || activeTab;
@@ -4516,11 +4569,12 @@
     // "Layout" toolbar with quick load/save controls. Layout state is read
     // from snap.userPrefs so the sidebar view + pop-out panel share state.
     const popout = typeof window !== 'undefined' && !!window.__cockpitPopoutMode;
+    const shellAttrs = `data-rail-collapsed="${railCollapsed ? '1' : '0'}"`;
     if (popout) {
       const gridBody = renderPopoutGrid(snap);
-      root.innerHTML = `${header}${tabBar}<div class="tab-panel cockpit-layout-popout">${gridBody}</div>`;
+      root.innerHTML = `${header}<div class="cockpit-shell" ${shellAttrs}>${tabBar}<div class="tab-panel cockpit-layout-popout">${gridBody}</div></div>`;
     } else {
-      root.innerHTML = `${header}${tabBar}<div class="tab-panel">${body}</div>`;
+      root.innerHTML = `${header}<div class="cockpit-shell" ${shellAttrs}>${tabBar}<div class="tab-panel">${body}</div></div>`;
     }
     bindEvents();
     // Talk lifecycle now follows the rendered composition, not the active
@@ -4633,6 +4687,12 @@
     root.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-action');
+        if (action === 'toggle-rail') {
+          const cur = vscode.getState() || {};
+          vscode.setState({ ...cur, railCollapsed: !cur.railCollapsed });
+          if (lastSnapshot) render(lastSnapshot);
+          return;
+        }
         if (action === 'refresh') vscode.postMessage({ type: 'refresh' });
         if (action === 'memory') vscode.postMessage({ type: 'openMemory' });
         if (action === 'session') vscode.postMessage({ type: 'openSessionFile' });
@@ -4805,7 +4865,7 @@
       });
     });
 
-    // Global search input — type-to-search with debounce
+    // Global search input — type-to-search with debounce + keyboard nav
     const globalSearchInput = root.querySelector('input[data-global-search]');
     if (globalSearchInput) {
       let globalSearchTimer;
@@ -4821,9 +4881,54 @@
         if (e.key === 'Escape') {
           setSearchState({ searchQuery: '', searchOpen: false });
           if (lastSnapshot) render(lastSnapshot);
+          return;
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const hits = Array.from(root.querySelectorAll('button.search-hit[data-search-index]'));
+          if (!hits.length) return;
+          e.preventDefault();
+          const cur = root.querySelector('button.search-hit.focused');
+          let idx = cur ? Number(cur.getAttribute('data-search-index')) : -1;
+          idx += e.key === 'ArrowDown' ? 1 : -1;
+          if (idx < 0) idx = hits.length - 1;
+          if (idx >= hits.length) idx = 0;
+          hits.forEach((h) => h.classList.remove('focused'));
+          hits[idx].classList.add('focused');
+          hits[idx].scrollIntoView({ block: 'nearest' });
+          return;
+        }
+        if (e.key === 'Enter') {
+          // Persist the query as a recent and either fire the focused hit
+          // or just keep the overlay open with results visible.
+          const q = globalSearchInput.value.trim();
+          if (q) pushSearchRecent(q);
+          const focused = root.querySelector('button.search-hit.focused');
+          if (focused) {
+            e.preventDefault();
+            focused.click();
+          }
         }
       });
     }
+
+    // Search-overlay: recent-search chip → fill input + persist
+    root.querySelectorAll('button[data-search-recent]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const q = btn.getAttribute('data-search-recent') || '';
+        setSearchState({ searchQuery: q, searchOpen: true });
+        if (lastSnapshot) render(lastSnapshot);
+        const inp = root.querySelector('input[data-global-search]');
+        if (inp) inp.focus();
+      });
+    });
+
+    // Search-overlay: "Clear" recents
+    root.querySelectorAll('button[data-action="clear-search-recents"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        clearSearchRecents();
+        if (lastSnapshot) render(lastSnapshot);
+      });
+    });
 
     // Search-overlay type-filter chips
     root.querySelectorAll('button[data-search-type]').forEach((btn) => {
@@ -5541,6 +5646,47 @@
     } else if (msg && msg.type === 'setHistorySubview') {
       const cur = vscode.getState() || {};
       vscode.setState({ ...cur, historyView: msg.subview });
+    } else if (msg && msg.type === 'refreshAllStarted') {
+      // Show a brief "Refreshing…" pill so the user knows the click landed.
+      // Async probes will each call render again as their data lands.
+      const header = root.querySelector('.cockpit-header');
+      if (header) {
+        let pill = header.querySelector('.refreshing-pill');
+        if (!pill) {
+          pill = document.createElement('span');
+          pill.className = 'refreshing-pill';
+          pill.textContent = 'Refreshing…';
+          header.appendChild(pill);
+        }
+        pill.classList.add('on');
+        clearTimeout(window.__cockpitRefreshPillTimer);
+        window.__cockpitRefreshPillTimer = setTimeout(() => {
+          pill.classList.remove('on');
+        }, 2200);
+      }
+    }
+  });
+
+  // Global keyboard shortcuts. ⌘K / Ctrl+K opens the global search; ⌘B
+  // / Ctrl+B toggles the rail. We bind on document so the shortcut works
+  // regardless of which element has focus inside the webview.
+  document.addEventListener('keydown', (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod || e.altKey) return;
+    if (e.key === 'k' || e.key === 'K') {
+      e.preventDefault();
+      setSearchState({ searchOpen: true });
+      if (lastSnapshot) render(lastSnapshot);
+      const inp = root.querySelector('input[data-global-search]');
+      if (inp) {
+        inp.focus();
+        inp.select();
+      }
+    } else if (e.key === 'b' || e.key === 'B') {
+      e.preventDefault();
+      const cur = vscode.getState() || {};
+      vscode.setState({ ...cur, railCollapsed: !cur.railCollapsed });
+      if (lastSnapshot) render(lastSnapshot);
     }
   });
 
