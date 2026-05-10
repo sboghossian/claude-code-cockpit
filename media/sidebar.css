@@ -57,6 +57,25 @@ h2:first-child {
   font-style: italic;
 }
 
+/* === UX-uplift utility primitives (v1.2.0) ================================
+ * Use these on new code instead of inline `style="..."`. The 100+ existing
+ * inline overrides will migrate over time — see tasks/ux-audit.md.
+ * =========================================================================== */
+.empty-hint { font-size: 11px; }
+.empty-mini { font-size: 10px; }
+.empty-error { color: var(--vscode-errorForeground); }
+
+.list-reset {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.stack-xs > * + * { margin-top: 2px; }
+.stack-sm > * + * { margin-top: 4px; }
+.stack-md > * + * { margin-top: 8px; }
+.stack-lg > * + * { margin-top: 12px; }
+
 .kv {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -466,56 +485,129 @@ input.search:focus {
 }
 
 /* === Tabs === */
-.tabs {
+/* === Cockpit shell: vertical rail + tab panel side-by-side =================
+ * The shell is a flex row. Rail expanded ≈ 156px wide; collapsed ≈ 44px.
+ * The user toggles via the « / » button at the top of the rail or ⌘B.
+ * State persisted in vscode.getState().railCollapsed.
+ * =========================================================================== */
+.cockpit-shell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin: -12px -12px 12px;
-  padding: 6px 8px 0;
+  align-items: stretch;
+  gap: 8px;
+  margin: 0 -12px;
+  min-height: 0;
+}
+
+.cockpit-shell .tab-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px 0 0;
+  margin-top: 0;
+}
+
+.tabs.tabs-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 0 0 156px;
+  width: 156px;
+  padding: 8px 6px;
   background: var(--vscode-editorWidget-background);
-  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  border-right: 1px solid var(--vscode-editorWidget-border);
   position: sticky;
   top: 0;
-  padding-top: 12px;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
   z-index: 5;
+  transition: flex-basis 140ms ease, width 140ms ease;
+}
+
+.tabs.tabs-rail[data-rail-collapsed="1"] {
+  flex: 0 0 44px;
+  width: 44px;
+  padding: 8px 4px;
+}
+
+.rail-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 6px;
+  margin: 0 0 6px;
+  align-self: flex-end;
+  border-radius: 4px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.rail-toggle:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.tabs.tabs-rail[data-rail-collapsed="1"] .rail-toggle {
+  align-self: center;
 }
 
 .tab {
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--vscode-descriptionForeground);
   cursor: pointer;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  padding: 6px 10px 7px;
-  border-radius: 0;
-  transition: color 120ms ease, border-color 120ms ease;
-  display: inline-flex;
+  letter-spacing: 0.01em;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: background 120ms ease, color 120ms ease;
+  display: flex;
   align-items: center;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-label {
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
 }
 
 .tab-icon {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  margin-right: 6px;
   stroke: currentColor;
 }
 
 .tab:hover {
   color: var(--vscode-foreground);
+  background: var(--vscode-list-hoverBackground);
 }
 
 .tab-active {
   color: var(--vscode-foreground);
-  border-bottom-color: var(--vscode-textLink-foreground);
+  background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+}
+
+.tabs.tabs-rail[data-rail-collapsed="1"] .tab {
+  justify-content: center;
+  padding: 8px 4px;
+}
+
+.tabs.tabs-rail[data-rail-collapsed="1"] .tab-label {
+  display: none;
 }
 
 .tab-panel {
-  /* room to breathe under the sticky tab bar */
   margin-top: 0;
 }
 
@@ -1451,6 +1543,32 @@ h3.sub-h {
   padding: 6px 4px 10px;
   border-bottom: 1px solid var(--vscode-editorWidget-border);
   margin-bottom: 8px;
+  position: relative;
+}
+
+/* Brief "Refreshing…" pill that lights up when the user clicks Refresh.
+ * Auto-fades after 2.2s — async probes call render() again as their data
+ * lands, so this is purely visual feedback that the click registered. */
+.refreshing-pill {
+  position: absolute;
+  bottom: -10px;
+  right: 12px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--vscode-statusBarItem-prominentBackground, var(--vscode-textLink-foreground));
+  color: var(--vscode-statusBarItem-prominentForeground, #fff);
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease;
+  z-index: 6;
+}
+
+.refreshing-pill.on {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .cockpit-header .brand {
@@ -1792,9 +1910,15 @@ body[data-theme="dark"] .customize-hint {
   color: var(--vscode-foreground);
 }
 
-.search-hit:hover {
+.search-hit:hover,
+.search-hit.focused {
   border-color: var(--vscode-textLink-foreground);
   background: var(--vscode-list-hoverBackground);
+}
+
+.search-hit.focused {
+  outline: 1px solid var(--vscode-focusBorder, var(--vscode-textLink-foreground));
+  outline-offset: -1px;
 }
 
 .search-hit mark {
@@ -1802,6 +1926,89 @@ body[data-theme="dark"] .customize-hint {
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
+}
+
+.search-hit-target {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 2px;
+}
+
+.search-section-head {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-descriptionForeground);
+  margin: 14px 0 4px;
+}
+
+.search-group + .search-group {
+  margin-top: 4px;
+}
+
+.search-summary {
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.search-recents {
+  margin-bottom: 12px;
+}
+
+.search-recents-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.search-recents-list li {
+  border: none;
+  padding: 0;
+}
+
+.search-recent {
+  font: inherit;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 999px;
+  color: var(--vscode-foreground);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.search-recent:hover {
+  border-color: var(--vscode-textLink-foreground);
+  color: var(--vscode-textLink-foreground);
+}
+
+.link-btn {
+  font: inherit;
+  font-size: 10px;
+  background: transparent;
+  border: none;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  padding: 0;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.search-hint kbd {
+  display: inline-block;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 10px;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 1px;
+  background: var(--vscode-editorWidget-background);
 }
 
 /* ===========================================================================

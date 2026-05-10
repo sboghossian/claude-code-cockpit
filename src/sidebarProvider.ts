@@ -768,6 +768,55 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     };
   }
 
+  /**
+   * Force-repoll every async data source, then re-render. Wired to the
+   * title-bar Refresh command and the 'refresh' inbound webview message.
+   *
+   * The bare refresh() below only redraws from cached snapshot data; it does
+   * not re-trigger the slow async probes (RTK, Mac health, subdomain health,
+   * jarvis queue, roadmap fetch) that are otherwise only updated on their
+   * own timers. So clicking Refresh used to look like a no-op for users.
+   */
+  refreshAll(): void {
+    if (!this.view) {
+      return;
+    }
+    // Optimistic redraw so the user sees movement immediately.
+    this.refresh();
+    void readRTKSavings()
+      .then(() => this.refresh())
+      .catch(() => undefined);
+    const surfaces = vscode.workspace.getConfiguration('claudeCockpit.surfaces');
+    if (surfaces.get<boolean>('macHealth', true)) {
+      void readMacHealth()
+        .then(() => this.refresh())
+        .catch(() => undefined);
+    }
+    if (surfaces.get<boolean>('subdomainHealth', true)) {
+      const domains = this.lastAlwaysLive;
+      if (domains.length > 0) {
+        void refreshSubdomainHealth(domains)
+          .then(() => this.refresh())
+          .catch(() => undefined);
+      }
+    }
+    void this.refreshJarvis();
+    const roadmapEnabled = vscode.workspace
+      .getConfiguration('claudeCockpit')
+      .get<boolean>('roadmap.enabled', true);
+    if (roadmapEnabled && !this.roadmapInflight) {
+      this.roadmapInflight = (async () => {
+        try {
+          this.roadmap = await fetchRoadmap();
+        } finally {
+          this.roadmapInflight = undefined;
+          this.refresh();
+        }
+      })();
+    }
+    this.view.webview.postMessage({ type: 'refreshAllStarted', at: Date.now() });
+  }
+
   refresh(): void {
     if (!this.view) {
       return;
@@ -1236,7 +1285,7 @@ export class CockpitSidebarProvider implements vscode.WebviewViewProvider {
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     switch (msg.type) {
       case 'refresh':
-        this.refresh();
+        this.refreshAll();
         return;
       case 'openMemory':
         void vscode.commands.executeCommand('claudeCockpit.openMemory');

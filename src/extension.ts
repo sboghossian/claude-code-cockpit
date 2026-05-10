@@ -329,7 +329,7 @@ function activateInner(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeCockpit.refresh', () => {
       pingCommand('claudeCockpit.refresh');
-      provider.refresh();
+      provider.refreshAll();
     }),
   );
 
